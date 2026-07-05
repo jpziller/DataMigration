@@ -56,17 +56,29 @@ Past practice at other tools was to document this by hand.
 Not yet wired into `bulkops` run order automatically — still a
 recommend-and-review step, not an auto-pilot one.
 
-## 3. Field-mapping spreadsheet tool (not built)
+## 3. Field-mapping spreadsheet tool — BUILT (`mapping_doc.py`)
 
-Idea: generate/maintain an Excel workbook — one tab per object — with
-source field, target field, type, transformation notes, etc. Then a
-"balance check" that diffs the spreadsheet against the actual `sql/
-transformations/*.sql` load-table-building code in **both directions**:
-- Mapping says a field should be populated, but the SQL doesn't populate it.
-- SQL populates a column the mapping doc never mentions.
+`python cli.py generate-mapping-doc <Object> <path.xlsx> [--source-table Table]`:
+- One row per target field from describe() — type, required, real picklist
+  values — with blank Source Field/Source Type/Transformation Notes columns.
+  Does **not** guess the mapping (that's auto-mapping, a separate item
+  below) — this only builds the structure a human fills in.
+- `--source-table` adds a companion reference sheet listing that SQL
+  table's columns, for convenience while filling in Source Field.
 
-This keeps the human-readable mapping doc and the executable transform code
-from drifting apart over a long project.
+`python cli.py check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`:
+- Diffs a filled-in mapping doc against the transform's actual `INSERT INTO`
+  column list, in both directions — documented-but-not-implemented, and
+  implemented-but-not-documented.
+- Live-tested against the existing example transform
+  (`010_account_load.sql`) and genuinely caught a real, pre-existing issue:
+  it references `Legacy_Id__c`, a field that doesn't actually exist on this
+  org (only `MigrationID__c` was ever deployed) — surfaced automatically as
+  "implemented, not documented" since a nonexistent field can't have a row
+  in the generated doc at all.
+
+Not yet built: auto-mapping into this doc (source→target suggestions) —
+still a separate roadmap item, see below.
 
 ## 4. Solution document generator (not built, depends on #2 and #3)
 

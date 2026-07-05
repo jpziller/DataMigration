@@ -53,6 +53,10 @@ venv may not be active in a fresh shell:
 - Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
                 (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
                 get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)
+- Mapping doc:  `.venv/Scripts/python.exe cli.py generate-mapping-doc Account mapping/Account_Mapping.xlsx [--source-table Table]`
+                `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Account_Mapping.xlsx sql/transformations/010_account_load.sql`
+                (generates the workbook structure only — doesn't guess the mapping;
+                balance-check diffs a filled-in doc against the transform's real INSERT INTO list, both directions.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
@@ -60,7 +64,8 @@ venv may not be active in a fresh shell:
   for ad-hoc queries.
 
 Matching slash-command skills exist for the read-only ones — `/query`,
-`/profile`, `/analyze-load-order`, `/generate-mock-data`, `/replicate`,
+`/profile`, `/analyze-load-order`, `/generate-mock-data`,
+`/generate-mapping-doc`, `/check-mapping-balance`, `/replicate`,
 `/build-load`, `/validate-load`, `/status` (`.claude/commands/*.md`). These
 are the
 project's "skills": pre-scoped, no-prompt capabilities for anyone who opens
