@@ -53,6 +53,28 @@ venv may not be active in a fresh shell:
    instead of scattered across batches that process concurrently and
    lock-contend on the shared parent record. Always include this step; don't
    skip it because an object "seems small enough."
+7. Every `*_Load` table must have its migration-key column checked for
+   duplicates/NULLs before `bulkops`, via
+   `EXEC dbo.CheckLoadTableDuplicateKeys '<LoadTable>', '<MigrationKeyColumn>'`
+   (`sql/functions/utilities/CheckLoadTableDuplicateKeys.sql`). A duplicate or
+   NULL migration key breaks the fingerprint-based result mapping in rule 4 —
+   resolve every duplicate it reports before loading, don't let it surface
+   later as an unexplained `ambiguous` count after a real Salesforce API call.
+
+## Standard workflow: building a new load-table script
+When asked to build a script/transform for a new object, follow this order —
+don't jump straight to writing T-SQL:
+1. **Review the mapping** (source field → target field, transformation
+   notes) for the object in question. Ask for it if it hasn't been provided.
+2. **Confirm target field API names** with `describe`/`dump-describe`
+   (rule 5) — never guess a field name from the mapping doc alone.
+3. **Build the transform** under `sql/transformations/`, producing the
+   `*_Load` table.
+4. **Sort it** — `AddBulkLoadSortColumn` against the object's parent key
+   (rule 6), if it has one.
+5. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
+   key (rule 7). Resolve anything it flags.
+6. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2).
 
 ## Where things live
 - `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — framework.
