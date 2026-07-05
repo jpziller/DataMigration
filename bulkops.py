@@ -50,7 +50,19 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     if operation not in ("insert", "update", "upsert", "delete"):
         raise ValueError(f"Unsupported operation: {operation}")
 
-    df = pd.read_sql(f"SELECT * FROM [{schema}].[{source_table}]", engine)
+    # If the load table carries a [Sort] column (see
+    # sql/functions/utilities/AddBulkLoadSortColumn.sql), submit rows in that
+    # order so parent/child rows land in the same Bulk API batch rather than
+    # being scattered across batches that process concurrently and
+    # lock-contend on a shared parent record.
+    with engine.connect() as cx:
+        has_sort_column = cx.execute(
+            text("SELECT COL_LENGTH(:t, 'Sort')"),
+            {"t": f"{schema}.{source_table}"},
+        ).scalar() is not None
+    order_by = " ORDER BY [Sort]" if has_sort_column else ""
+
+    df = pd.read_sql(f"SELECT * FROM [{schema}].[{source_table}]{order_by}", engine)
 
     # Which columns get sent to Salesforce.
     if operation == "delete":

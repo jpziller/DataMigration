@@ -43,6 +43,16 @@ venv may not be active in a fresh shell:
    (e.g. `Legacy_Id__c`). Do not "simplify" this to positional mapping.
 5. Don't invent Salesforce object or field API names — confirm with `describe`
    or `dump-describe` first.
+6. Every `*_Load` table for an object with a parent lookup/master-detail field
+   must get a `[Sort]` column before `bulkops`, via
+   `EXEC dbo.AddBulkLoadSortColumn '<LoadTable>', '<ParentKeyColumn>'`
+   (`sql/functions/utilities/AddBulkLoadSortColumn.sql`). This numbers rows by
+   `ROW_NUMBER() OVER (ORDER BY <parent key>)` so all children of the same
+   parent land in a contiguous range — `bulkops.py` submits in `[Sort]` order
+   when the column is present, keeping same-parent rows in the same batch
+   instead of scattered across batches that process concurrently and
+   lock-contend on the shared parent record. Always include this step; don't
+   skip it because an object "seems small enough."
 
 ## Where things live
 - `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — framework.
