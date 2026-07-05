@@ -25,28 +25,69 @@ org  --replicate-->  SQL Server (typed mirror tables)
 
 ## One-time environment setup
 
-Run in this order. Windows host assumed (SQL Server's natural home);
-notes for Mac/Linux where they differ.
+Windows host assumed (SQL Server's natural home); notes for Mac/Linux where
+they differ. **Follow this order** — later steps depend on earlier ones
+(noted inline), so installing out of order means backtracking:
 
-**1. Python 3.11+**
-Install from python.org (check "Add to PATH"). Then:
+```
+Git for Windows ──> clone this repo ──┬─> Python venv + pip install -r requirements.txt
+                                       └─> SQL Server Developer Edition ──┬─> SSMS
+                                                                          └─> ODBC Driver 18 ──> create SF_Migration DB
+Salesforce CLI (sf) ──> auth target org ──> VS Code + Salesforce Extension Pack (auto-detects the auth)
+Mockaroo account (optional — only for mock-data generation) ──> API key
+Claude Code (optional, needs Git for Windows) ──> authenticate
+                                       all of the above ──> configure .env
+```
+
+**1. Git for Windows**
+Needed to clone this repo and — separately — to give Claude Code a Bash
+shell later. Install from git-scm.com (default options are fine).
+
+**2. Clone this repo**
+```bash
+git clone https://github.com/jpziller/DataMigration.git
+cd DataMigration
+```
+(If you're starting a brand-new project from this framework as a template
+rather than joining this one, `git init` + `git remote add origin <url>` +
+push instead — but joining an existing project means cloning, not
+re-initializing.)
+
+**3. Python 3.11+**
+Install from python.org (check "Add to PATH"). Requires the repo already
+cloned (step 2), since `requirements.txt` lives in it:
 ```bash
 py -m venv .venv && .venv\Scripts\activate      # Windows
 # python3 -m venv .venv && source .venv/bin/activate   # Mac/Linux
 pip install -r requirements.txt
 ```
 
-**2. SQL Server + ODBC Driver 18**
-Any current SQL Server edition (Developer edition is free and full-featured).
-Then install **Microsoft ODBC Driver 18 for SQL Server** separately — pyodbc
-needs it and it does not ship with the engine. Create the database:
+**4. SQL Server 2022 Developer Edition**
+Free, full-featured, from Microsoft's SQL Server downloads page. A "Basic"
+installation is enough to start.
+
+**5. SQL Server Management Studio (SSMS)**
+**A separate download from the SQL Server engine itself** — the Developer
+Edition installer doesn't bundle it. Its own installer offers an
+"Install SSMS" shortcut, or get it standalone from Microsoft's SSMS download
+page. This is how you'll browse the mirror DB visually, run ad hoc T-SQL, and
+review `*_Load` tables by eye. (Mac/Linux: SSMS is Windows-only — Azure Data
+Studio or DBeaver are the cross-platform equivalents; `sqlcmd` works
+everywhere.)
+
+**6. ODBC Driver 18 for SQL Server**
+Install separately from Microsoft — `pyodbc` (step 3) needs this at runtime;
+it doesn't ship with the SQL Server engine or with the Python package itself.
+Driver 18 encrypts by default, so for a local instance with a self-signed
+cert keep `SQL_TRUST_SERVER_CERT=yes` in `.env` (step 12) or connections fail.
+
+**7. Create the mirror database**
+In SSMS (step 5) or via `sqlcmd`:
 ```sql
 CREATE DATABASE SF_Migration;
 ```
-Driver 18 encrypts by default, so for a local instance with a self-signed cert
-keep `SQL_TRUST_SERVER_CERT=yes` in `.env` or connections will fail.
 
-**3. Salesforce CLI (`sf`, v2)**
+**8. Salesforce CLI (`sf`, v2)**
 ```bash
 npm install --global @salesforce/cli
 sf --version          # expect 2.x, API 67.0 (Summer '26) or later
@@ -57,26 +98,29 @@ sf org login web --alias MIGRATION_TARGET
 # sandbox: sf org login web --alias MIGRATION_TARGET --instance-url https://test.salesforce.com
 ```
 
-**4. VS Code**
+**9. VS Code**
 Install VS Code, then the **Salesforce Extension Pack** and the **Python**
 extension from the marketplace. Open this folder as the workspace. The SF
-extensions pick up the `sf`-authed orgs automatically.
+extensions pick up the `sf`-authed orgs from step 8 automatically — auth
+first, or they'll have nothing to detect.
 
-**5. GitHub**
-```bash
-git init
-git remote add origin <your-repo-url>
-git add . && git commit -m "migration framework scaffold"
-git push -u origin main
-```
-`.gitignore` already excludes `.env`, `_stage/`, and `server.key`. The point of
-git here is the `sql/` tree — every transform reviewed and versioned.
+**10. Mockaroo (optional — only needed for `generate-mock-data`)**
+Sign up free at mockaroo.com, then get an API key from mockaroo.com/account.
+Free tier: 200 requests/day, up to 5,000 records/request. Add it to `.env` in
+step 12 — never commit it or paste it into a chat/AI session (see step 12).
 
-**6. Configure**
+**11. Claude Code (optional, but this repo's operating model assumes it)**
+Needs Git for Windows (step 1) for its Bash shell. See "Claude Code operating
+layer" below for install + setup details.
+
+**12. Configure**
 ```bash
 copy .env.example .env       # cp on Mac/Linux
 ```
-Set `SF_ORG_ALIAS=MIGRATION_TARGET` and your SQL Server values.
+Set `SF_ORG_ALIAS=MIGRATION_TARGET`, your SQL Server values, and (if using
+mock data) `MOCKAROO_API_KEY`. `.gitignore` already excludes `.env`,
+`_stage/`, and `server.key` — never commit real credentials, and never paste
+`.env` contents into a chat session (including with an AI assistant).
 
 ---
 
@@ -103,10 +147,25 @@ python cli.py list-objects
 python cli.py describe Account
 python cli.py dump-describe Account          # -> metadata/Account.json (commit it)
 
+# Ad hoc query (console, or --csv/--excel to export)
+python cli.py query "SELECT Id, Name, Account.Name FROM Contact LIMIT 10"
+
 # Replicate org -> SQL (typed columns)
 python cli.py replicate Account
 python cli.py replicate Contact --where "CreatedDate = LAST_N_DAYS:30"
 python cli.py replicate Opportunity --raw    # all NVARCHAR(MAX); CAST in T-SQL
+
+# Profile a field's population/min/max/distinct/value distribution --
+# either directly from Salesforce or from an already-replicated SQL table
+python cli.py profile-salesforce Account
+python cli.py profile-sql-table Account
+python cli.py export-profile-excel profile.xlsx
+
+# Recommended load order for a set of objects (parents before children)
+python cli.py analyze-load-order Account Contact Opportunity
+
+# Generate mock/demo data via Mockaroo -> dbo.<Object>_Mock (needs MOCKAROO_API_KEY)
+python cli.py generate-mock-data Account --count 50
 
 # Transform in T-SQL (sql/transformations/*.sql) to build *_Load tables
 
@@ -115,6 +174,11 @@ python cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c
 python cli.py bulkops Contact insert Contact_Load --key-column LoadId
 python cli.py bulkops Case delete Case_Purge --key-column LoadId
 ```
+
+Matching slash-command skills exist for the read-only ones (`/query`,
+`/profile`, `/analyze-load-order`, `/generate-mock-data`, `/replicate`,
+`/build-load`, `/validate-load`, `/status`) — see "Claude Code operating
+layer" below.
 
 ---
 
@@ -175,8 +239,10 @@ SQL Server, **reviewed hands** for mutations.
   without prompts; `bulkops` (writes to Salesforce), `git commit`/`push`, and
   `sf project deploy` are gated behind an approval prompt; secrets and dangerous
   commands are denied outright.
-- `.claude/commands/` — slash commands: `/replicate <Object>`,
-  `/build-load <path.sql>`, `/validate-load <LoadTable>`, `/status`.
+- `.claude/commands/` — slash commands: `/query <SOQL>`, `/profile <Object>`,
+  `/analyze-load-order <Objects...>`, `/generate-mock-data <Object>`,
+  `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
+  `/status`.
 
 **Install Claude Code (Windows, native — no WSL needed):**
 ```powershell
