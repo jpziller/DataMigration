@@ -93,3 +93,67 @@ directly into the SQL Server mirror tables (same shape as a real
 `replicate`), then run it through the normal `bulkops` load path into a
 sandbox/demo org. Useful for showing off functionality or testing the
 framework end-to-end without real client data.
+
+## 7. Data profiling toolset — BUILT (`profiling.py`)
+
+Problem: before deciding what to migrate, you need field-level stats —
+population counts, min/max, distinct counts, null/blank breakdowns, and
+picklist value distributions — the standard best-practice profiling pass.
+Past practice was a DBA-built SQL tool (`sys.tables`/`sys.columns`-driven)
+for source-system tables, plus a separate tool used directly against
+Salesforce (FieldTrip-style), with results reviewed in Excel.
+
+`python cli.py profile-salesforce <Object>` / `profile-sql-table <Table>`:
+- **Salesforce path**: describe()-driven, batched aggregate SOQL queries
+  (population count, distinct count, min/max, picklist/boolean value
+  distributions). Divide-and-conquer retry isolates a single field that
+  breaks a batch (SOQL's aggregate restrictions are field/org-specific and
+  not fully predictable up front — e.g. `IsDeleted` on this org rejects
+  `COUNT()` outright, and boolean fields return 0 for a `!= null` check
+  even though they're never actually null). Long-text/binary field types
+  are skipped entirely — SOQL has no aggregate path for them at all.
+- **SQL table path**: one dynamic aggregate query over `INFORMATION_SCHEMA.
+  COLUMNS`, works on any table regardless of origin (replicated Salesforce
+  mirror table or a legacy source table loaded some other way) — this is
+  the "common thread" that makes one profiling engine cover both cases.
+  Adds blank-vs-null distinction and min/max text length, which aren't
+  available from the SOQL side.
+- Both write to shared `dbo.FieldProfile` / `dbo.FieldProfileValues`
+  tables (re-profiling an object replaces only that object's prior rows).
+- `python cli.py export-profile-excel <path.xlsx>` — one sheet per object
+  plus a companion `_Values` sheet for picklist/low-cardinality
+  distributions, for reviewing what's worth migrating.
+
+---
+
+## End-to-end project workflow (vision, not built)
+
+The long-term shape this framework is heading toward — a full project
+lifecycle, not just a set of standalone tools. Roughly, in order:
+
+1. **Kick off a project**: generate the mapping document (see #3), with
+   places in it for profiling results (#7) to land.
+2. **Decide scope**: flag which source objects (SQL or Salesforce) are
+   actually being migrated — a documented decision, not an implicit one.
+   Generate RAIDD (Risks/Assumptions/Issues/Decisions/Dependencies) entries
+   for anything that needs one, for a RAIDD log.
+3. **Auto-map**: attempt source → target field mapping based on the
+   mapping document (name/type similarity, describe() metadata, prior
+   mappings) as a first draft, not a final answer.
+4. **Generate scripts**: build the T-SQL transform for each source →
+   target object pairing (following the standard workflow already in
+   `CLAUDE.md`: mapping → confirm field names → build → sort → dupe-check).
+5. **AI review of transformed data**: review subsets of transformed
+   records and check them against the org's build/automation metadata —
+   a **Risk Analyzer** distinct from #5 (which looks at org metadata
+   ahead of time; this looks at actual transformed *data* against that
+   metadata to catch problems #5 wouldn't surface from schema alone).
+6. **Human in the loop**: a person reviews everything generated so far and
+   polishes each object for real migration — AI proposes and drafts
+   proactively, but doesn't load anything without that review.
+
+This ties together #2 (load order), #3 (mapping doc), #4 (solution doc),
+#5 (org metadata risk), and #7 (profiling) into one pipeline, plus two new
+pieces: RAIDD log generation and auto-mapping. Scoping any single piece of
+this into a concrete build is the next step — this section is the shape
+of where it's all going, not a spec for any one of them yet.
