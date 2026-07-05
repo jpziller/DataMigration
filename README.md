@@ -1,4 +1,4 @@
-# SQL-centric Salesforce migration framework (DBAmp replacement)
+# SQL-centric Salesforce migration framework
 
 *AI Assisted Data Migration*
 
@@ -6,8 +6,8 @@ Copyright (c) 2026 JP Ziller LLC. Released under the [MIT License](LICENSE) —
 free to use, modify, and redistribute (including commercially), provided the
 copyright notice is retained.
 
-SQL Server is the integration hub. Python plays the role DBAmp's stored procs
-play: `SF_Replicate` (org → SQL) and `SF_BulkOps` (SQL → org, with Id/Error
+SQL Server is the integration hub. Python handles the two directions of
+movement: `replicate` (org → SQL) and `bulkops` (SQL → org, with Id/Error
 written back). All transformation logic stays in T-SQL, version-controlled in
 `sql/`.
 
@@ -25,7 +25,7 @@ org  --replicate-->  SQL Server (typed mirror tables)
 
 ## One-time environment setup
 
-Run in this order. Windows host assumed (SQL Server + DBAmp's natural home);
+Run in this order. Windows host assumed (SQL Server's natural home);
 notes for Mac/Linux where they differ.
 
 **1. Python 3.11+**
@@ -103,7 +103,7 @@ python cli.py list-objects
 python cli.py describe Account
 python cli.py dump-describe Account          # -> metadata/Account.json (commit it)
 
-# Replicate org -> SQL (typed columns, DBAmp-style)
+# Replicate org -> SQL (typed columns)
 python cli.py replicate Account
 python cli.py replicate Contact --where "CreatedDate = LAST_N_DAYS:30"
 python cli.py replicate Opportunity --raw    # all NVARCHAR(MAX); CAST in T-SQL
@@ -139,13 +139,13 @@ written instead.
 
 ---
 
-## Fidelity vs. DBAmp — where this differs, honestly
+## Known limitations, honestly
 
-- **`SF_Refresh` (incremental) is not built.** Add it as a `replicate` variant
+- **Incremental refresh is not built.** Add it as a `replicate` variant
   filtering `SystemModstamp >` the last watermark and `MERGE`-ing into the
   mirror. The hook is obvious in `replicate.py`; it's just not written.
 - **Compound fields** (`address`, `location`) are skipped; their components
-  (`BillingStreet`, etc.) are replicated instead. Same net result as DBAmp,
+  (`BillingStreet`, etc.) are replicated instead — same net result,
   different column set than a naive `SELECT *`.
 - **Type coercion at load.** Typed replicate maps booleans `true/false → 1/0`.
   Datetimes are loaded as ISO strings and rely on SQL Server's implicit

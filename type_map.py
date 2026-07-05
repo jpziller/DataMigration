@@ -1,6 +1,6 @@
 """Map a Salesforce describe field to a SQL Server column type.
 
-Mirrors how DBAmp builds replicate tables. Compound fields (address, location)
+Builds typed replicate tables from a Salesforce describe. Compound fields (address, location)
 are skipped on both the DDL and the SELECT side because Bulk API 2.0 can't
 query them directly -- their component fields (BillingStreet, BillingCity, ...)
 are queried instead and already appear as their own describe fields.

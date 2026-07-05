@@ -1,7 +1,7 @@
-# CLAUDE.md — SQL-centric Salesforce migration (DBAmp replacement)
+# CLAUDE.md — SQL-centric Salesforce migration framework
 
 ## What this repo is
-A Python framework that replaces DBAmp. SQL Server (local, database `SF_Migration`)
+A Python framework for SQL-centric Salesforce data migration. SQL Server (local, database `SF_Migration`)
 is the integration hub. `replicate` pulls org → SQL; `bulkops` pushes SQL → org
 and writes the Salesforce `Id` / `Error` back into the load table. All
 transformation logic is T-SQL under `sql/transformations/`, versioned in git.

@@ -1,4 +1,4 @@
-"""Command-line entry point. DBAmp-style verbs.
+"""Command-line entry point. Migration verbs: replicate, bulkops, describe.
 
 Examples:
     python cli.py list-objects

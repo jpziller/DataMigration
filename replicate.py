@@ -1,4 +1,4 @@
-"""DBAmp SF_Replicate equivalent.
+"""Object replication: org -> SQL Server mirror table.
 
 replicate() drops+recreates a typed SQL Server table matching the object's
 describe, extracts every record via Bulk API 2.0 (low-memory CSV download),

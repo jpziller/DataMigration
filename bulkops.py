@@ -1,8 +1,8 @@
-"""DBAmp SF_BulkOps equivalent.
+"""Bulk load operations: SQL Server load table -> Salesforce.
 
 Reads a SQL "load table", pushes insert / update / upsert / delete to
 Salesforce via Bulk API 2.0, then writes the resulting Salesforce Id and Error
-back into that table -- the round-trip that makes DBAmp DBAmp.
+back into that table -- the full round trip a migration load needs.
 
 RESULT MAPPING (the part everyone gets wrong):
   Bulk API 2.0 returns separate "successful" and "failed" record sets, each
