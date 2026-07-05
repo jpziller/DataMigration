@@ -65,6 +65,11 @@ recommend-and-review step, not an auto-pilot one.
   below) — this only builds the structure a human fills in.
 - `--source-table` adds a companion reference sheet listing that SQL
   table's columns, for convenience while filling in Source Field.
+- One shared workbook for the whole project (one tab per object) — reuse
+  the same output path across objects. (Caught and fixed a real bug here:
+  the first version overwrote the entire file per call via `pd.ExcelWriter`'s
+  default mode, silently erasing every other object's sheet. Now appends/
+  replaces just that object's sheet via `mode="a", if_sheet_exists="replace"`.)
 
 `python cli.py check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`:
 - Diffs a filled-in mapping doc against the transform's actual `INSERT INTO`

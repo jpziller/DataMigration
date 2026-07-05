@@ -6,7 +6,10 @@ Generate a mapping doc for `$ARGUMENTS` (an object name, optionally with an
 output path and `--source-table <Table>`).
 
 1. Run: `.venv/Scripts/python.exe cli.py generate-mapping-doc $ARGUMENTS`
-   (default output path convention: `mapping/<Object>_Mapping.xlsx`)
+   (convention: one shared workbook for the whole project, e.g.
+   `mapping/Migration_Mapping.xlsx` — reuse the same output path across
+   objects. Each run adds/replaces that object's own sheet; it does not
+   overwrite the rest of the workbook.)
 2. This produces one row per target field (type, required, real picklist
    values) with blank Source Field/Source Type/Transformation Notes columns
    — it does **not** guess the mapping, that's a human (or a future

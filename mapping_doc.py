@@ -20,6 +20,7 @@ apart:
     field that doesn't even exist in the object's current describe() --
     that field won't appear as a row at all, so it always surfaces here.
 """
+import os
 import re
 
 import pandas as pd
@@ -74,7 +75,15 @@ def generate_mapping_workbook(sf, object_name, output_path, engine=None, source_
             ).mappings().all()
         source_df = pd.DataFrame([{"Source Column": c["COLUMN_NAME"], "SQL Type": c["DATA_TYPE"]} for c in cols])
 
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+    # Append as a new sheet in an existing workbook (one workbook, one tab
+    # per object) rather than overwriting it -- generating a second object's
+    # mapping into the same path must not silently erase the first one's.
+    if os.path.exists(output_path):
+        writer_kwargs = {"mode": "a", "if_sheet_exists": "replace"}
+    else:
+        writer_kwargs = {"mode": "w"}
+
+    with pd.ExcelWriter(output_path, engine="openpyxl", **writer_kwargs) as writer:
         df.to_excel(writer, sheet_name=_safe_sheet_name(object_name), index=False)
         if source_df is not None and not source_df.empty:
             source_df.to_excel(writer, sheet_name=_safe_sheet_name(f"{source_table}_Source"), index=False)

@@ -15,8 +15,9 @@ Examples:
     python cli.py query "SELECT Id, Name FROM Account LIMIT 10"
     python cli.py query "SELECT Id, Name, Account.Name FROM Contact" --csv out.csv
     python cli.py generate-mock-data Account --count 50
-    python cli.py generate-mapping-doc Account mapping/Account_Mapping.xlsx --source-table SourceAccounts
-    python cli.py check-mapping-balance Account mapping/Account_Mapping.xlsx sql/transformations/010_account_load.sql
+    python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx --source-table SourceAccounts
+    python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx   # same file -> adds a tab, doesn't overwrite
+    python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
 """
 import click
 import pandas as pd
