@@ -42,12 +42,29 @@ venv may not be active in a fresh shell:
 
 - Inspect org:  `.venv/Scripts/python.exe cli.py list-objects`
 -               `.venv/Scripts/python.exe cli.py describe Account`
+-               `.venv/Scripts/python.exe cli.py dump-describe Account`
+- Query:        `.venv/Scripts/python.exe cli.py query "SELECT Id, Name FROM Account LIMIT 10"`
+                `[--all]` to paginate everything, `[--csv path]`/`[--excel path]` to export.
 - Replicate:    `.venv/Scripts/python.exe cli.py replicate Account [--where "..."] [--raw]`
+- Profile:      `.venv/Scripts/python.exe cli.py profile-salesforce Account` (live org, aggregate SOQL)
+                `.venv/Scripts/python.exe cli.py profile-sql-table Account` (any SQL Server table)
+                `.venv/Scripts/python.exe cli.py export-profile-excel profile.xlsx`
+- Load order:   `.venv/Scripts/python.exe cli.py analyze-load-order Account Contact Opportunity ...`
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
+
+Matching slash-command skills exist for the read-only ones — `/query`,
+`/profile`, `/analyze-load-order`, `/replicate`, `/build-load`,
+`/validate-load`, `/status` (`.claude/commands/*.md`). These are the
+project's "skills": pre-scoped, no-prompt capabilities for anyone who opens
+this repo in Claude Code, so asking for one of these doesn't require
+re-deriving how to do it from scratch each time. They're an efficiency
+layer, not a boundary — general reasoning/coding (Apex, LWC, architecture
+work, anything else) is still available even when there's no dedicated skill
+for it.
 
 ## Hard rules
 1. `replicate` and any `DROP`/`CREATE` run ONLY against the mirror DB
