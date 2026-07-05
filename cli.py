@@ -8,6 +8,7 @@ Examples:
     python cli.py replicate Contact --where "CreatedDate = LAST_N_DAYS:30" --raw
     python cli.py bulkops Account insert Account_Load --key-column LoadId
     python cli.py bulkops Contact upsert Contact_Load --external-id Legacy_Id__c
+    python cli.py analyze-load-order Account Contact Opportunity OpportunityLineItem
 """
 import click
 
@@ -17,6 +18,7 @@ from sql_client import make_engine
 import metadata as md
 import replicate as rep
 import bulkops as bo
+import load_order as lo
 
 
 def _ctx():
@@ -81,6 +83,34 @@ def bulkops_cmd(object_name, operation, source_table, external_id, key_column, s
                          schema=schema, stage_dir=s.stage_dir)
     for k, v in summary.items():
         click.echo(f"{k:12}: {v}")
+
+
+@cli.command("analyze-load-order")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--schema", default="dbo")
+def analyze_load_order_cmd(object_names, schema):
+    s, sf, engine = _ctx()
+    result = lo.analyze_load_order(sf, engine, list(object_names), schema=schema)
+
+    click.echo("Recommended load order (parents before children):")
+    current_level = None
+    for row in result["order"]:
+        if row["level"] != current_level:
+            current_level = row["level"]
+            click.echo(f"  -- level {current_level} --")
+        click.echo(f"  {row['sequence']:3}. {row['object']}")
+
+    if result["self_references"]:
+        click.echo("\nSelf-referencing fields (need a two-pass load: insert without it, then update it in):")
+        for object_name, fields in result["self_references"].items():
+            click.echo(f"  {object_name}: {', '.join(fields)}")
+
+    if result["unresolved_cycles"]:
+        click.echo("\nUnresolved circular dependencies (couldn't be auto-ordered -- resolve manually):")
+        for group in result["unresolved_cycles"]:
+            click.echo(f"  {', '.join(group)}")
+
+    click.echo(f"\nWritten to {schema}.ObjectDependency and {schema}.ObjectLoadOrder")
 
 
 if __name__ == "__main__":

@@ -33,20 +33,28 @@ generic, reusable set for this framework's `sql/` tree.
   submitting) is good, but should be a Python pre-flight step in
   `bulkops.py` using `metadata.list_fields()`, which already has this data.
 
-## 2. Load-order dependency analyzer (Python tool, not built)
+## 2. Load-order dependency analyzer — BUILT (`load_order.py`)
 
 Problem: migrations with many objects need inserts/updates run in an order
 that respects lookup and master-detail relationships (parent before child).
 Past practice at other tools was to document this by hand.
 
-Idea: a Python tool that:
-- Reads describe() for every object in scope.
-- Builds a dependency graph from lookup/master-detail reference fields.
-- Topologically sorts it to recommend a load order.
-- Flags circular references (e.g. Account.ParentId → Account) that need a
-  two-pass load (insert without the self-lookup, then update it in).
-- Outputs the recommended order as documentation (and maybe drives the
-  actual `bulkops` run order later).
+`python cli.py analyze-load-order Account Contact Opportunity ...`:
+- Reads describe() for every object passed in.
+- Builds a dependency graph from lookup/master-detail reference fields whose
+  target is also in the requested set.
+- Topologically sorts it (Kahn's algorithm) into load levels + a flattened
+  sequence.
+- Separates out self-referencing fields (e.g. `Account.ParentId`) as
+  two-pass-load flags rather than letting them block ordering.
+- Flags genuine multi-object cycles (e.g. A ↔ B) as unresolved rather than
+  guessing which edge to break.
+- Writes results to `dbo.ObjectDependency` (raw edges) and
+  `dbo.ObjectLoadOrder` (computed order) in the mirror DB, so later scripts
+  can query the graph instead of re-deriving it from describe() each time.
+
+Not yet wired into `bulkops` run order automatically — still a
+recommend-and-review step, not an auto-pilot one.
 
 ## 3. Field-mapping spreadsheet tool (not built)
 

@@ -77,7 +77,8 @@ don't jump straight to writing T-SQL:
 6. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2).
 
 ## Where things live
-- `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — framework.
+- `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py`,
+  `load_order.py` — framework.
 - `sql/transformations/*.sql` — the migration logic (numbered; run in order).
 - `metadata/*.json` — committed describe snapshots.
 - `.env` — connection config. Never commit, never print.
