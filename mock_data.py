@@ -51,14 +51,29 @@ def _mockaroo_field(field):
     if sf_type == "int":
         return {"name": name, "type": "Number", "min": 0, "max": 1000, "decimals": 0}
     if sf_type in ("double", "currency", "percent"):
-        return {"name": name, "type": "Number", "min": 0, "max": 100000, "decimals": 2}
+        # Respect the field's real precision/scale -- e.g. a Latitude field
+        # is often DECIMAL(18,15), leaving only 3 integer digits of headroom;
+        # a flat max=100000 would overflow that column.
+        precision = field.get("precision") or 0
+        scale = field.get("scale") or 2
+        integer_digits = max(precision - scale, 1) if precision else 5
+        safe_max = min(10 ** integer_digits - 1, 100000)
+        return {"name": name, "type": "Number", "min": 0, "max": safe_max, "decimals": min(scale, 2) if scale else 2}
     if sf_type == "date":
-        return {"name": name, "type": "Date", "min": "1/1/2020", "max": "12/31/2026", "format": "%Y-%m-%d"}
+        # Mockaroo has no separate "Date" type -- Datetime with a date-only
+        # format string is the documented way to get a date-shaped value.
+        return {"name": name, "type": "Datetime", "min": "01/01/2020", "max": "12/31/2026", "format": "%Y-%m-%d"}
     if sf_type == "datetime":
-        return {"name": name, "type": "Datetime", "min": "1/1/2020 12:00 AM", "max": "12/31/2026 12:00 AM",
+        return {"name": name, "type": "Datetime", "min": "01/01/2020", "max": "12/31/2026",
                 "format": "%Y-%m-%dT%H:%M:%S.000+0000"}
     if sf_type == "time":
         return {"name": name, "type": "Time", "format": "%H:%M:%S.000Z"}
+    if sf_type == "phone":
+        return {"name": name, "type": "Phone"}
+    if sf_type == "email":
+        return {"name": name, "type": "Email Address"}
+    if sf_type == "url":
+        return {"name": name, "type": "URL"}
     if sf_type in ("picklist",):
         values = [v["value"] for v in field.get("picklistValues", []) if v.get("active", True)]
         if values:
@@ -141,6 +156,18 @@ def generate_mock_object_data(sf, engine, object_name, count, api_key, schema="d
         cx.execute(text(f"CREATE TABLE [{schema}].[{table_name}] (\n    {cols_sql}\n);"))
 
     df = pd.DataFrame(records)
+    # Mockaroo's generators don't know the target field's max length (e.g.
+    # its URL generator produces long querystring-heavy URLs that overflow
+    # a Website field's real 255-char cap) -- truncate to match, since these
+    # values need to fit a real Salesforce field eventually anyway, not just
+    # this SQL insert.
+    for f in included_fields:
+        max_len = f.get("length")
+        if max_len and f["name"] in df.columns:
+            df[f["name"]] = df[f["name"]].apply(
+                lambda v, n=max_len: v[:n] if isinstance(v, str) and len(v) > n else v
+            )
+
     df.to_sql(table_name, engine, schema=schema, if_exists="append", index=False)
 
     return len(df), skipped
