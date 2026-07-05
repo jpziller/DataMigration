@@ -18,6 +18,7 @@
       "Bash(.venv/Scripts/python.exe cli.py profile-sql-table *)",
       "Bash(.venv/Scripts/python.exe cli.py export-profile-excel *)",
       "Bash(.venv/Scripts/python.exe cli.py analyze-load-order *)",
+      "Bash(.venv/Scripts/python.exe cli.py generate-mock-data *)",
       "Bash(sf org list*)",
       "Bash(sf org display*)",
       "Bash(sf sobject *)",

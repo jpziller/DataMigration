@@ -50,6 +50,9 @@ venv may not be active in a fresh shell:
                 `.venv/Scripts/python.exe cli.py profile-sql-table Account` (any SQL Server table)
                 `.venv/Scripts/python.exe cli.py export-profile-excel profile.xlsx`
 - Load order:   `.venv/Scripts/python.exe cli.py analyze-load-order Account Contact Opportunity ...`
+- Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
+                (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
+                get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
@@ -57,8 +60,9 @@ venv may not be active in a fresh shell:
   for ad-hoc queries.
 
 Matching slash-command skills exist for the read-only ones — `/query`,
-`/profile`, `/analyze-load-order`, `/replicate`, `/build-load`,
-`/validate-load`, `/status` (`.claude/commands/*.md`). These are the
+`/profile`, `/analyze-load-order`, `/generate-mock-data`, `/replicate`,
+`/build-load`, `/validate-load`, `/status` (`.claude/commands/*.md`). These
+are the
 project's "skills": pre-scoped, no-prompt capabilities for anyone who opens
 this repo in Claude Code, so asking for one of these doesn't require
 re-deriving how to do it from scratch each time. They're an efficiency

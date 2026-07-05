@@ -36,6 +36,9 @@ class Settings:
 
     stage_dir: str = _get("STAGE_DIR", "./_stage")
 
+    # Mockaroo (mock/demo data generation)
+    mockaroo_api_key: str = _get("MOCKAROO_API_KEY", "")
+
 
 def get_settings() -> Settings:
     s = Settings()

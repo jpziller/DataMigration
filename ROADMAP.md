@@ -86,13 +86,23 @@ against the org's automation metadata (Flows, validation rules, maybe Apex
 triggers) and produces a report of "here's what might interfere with this
 load and why" before you run bulkops for real.
 
-## 6. Mock/demo data generation (not built)
+## 6. Mock/demo data generation — Mockaroo half BUILT (`mock_data.py`), Snowfakery not started
 
-Idea: use Mockaroo and/or Snowfakery to generate realistic fake data
-directly into the SQL Server mirror tables (same shape as a real
-`replicate`), then run it through the normal `bulkops` load path into a
-sandbox/demo org. Useful for showing off functionality or testing the
-framework end-to-end without real client data.
+`python cli.py generate-mock-data <Object> --count N`:
+- Derives a mock schema from the object's describe() — only createable
+  fields (reference/multipicklist/base64/encryptedstring have no reasonable
+  mock mapping and are skipped + reported, not silently dropped), picklists
+  use their real valid values rather than random text.
+- Calls Mockaroo's API (needs `MOCKAROO_API_KEY` in `.env` — free tier is
+  200 requests/day, up to 5,000 records/request) and loads the result into
+  `<Object>_Mock` in the mirror DB.
+- Not yet wired into `bulkops` — loading `<Object>_Mock` into a sandbox org
+  is a manual next step (build a `*_Load` table from it like any other
+  transform), not automatic.
+
+Snowfakery integration (for relationship-aware multi-object fake data, e.g.
+matching Accounts/Contacts/Opportunities together rather than independently
+random rows per object) is still just an idea, not started.
 
 ## 7. Data profiling toolset — BUILT (`profiling.py`)
 

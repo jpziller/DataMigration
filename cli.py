@@ -14,6 +14,7 @@ Examples:
     python cli.py export-profile-excel profile.xlsx
     python cli.py query "SELECT Id, Name FROM Account LIMIT 10"
     python cli.py query "SELECT Id, Name, Account.Name FROM Contact" --csv out.csv
+    python cli.py generate-mock-data Account --count 50
 """
 import click
 import pandas as pd
@@ -27,6 +28,7 @@ import bulkops as bo
 import load_order as lo
 import profiling as pf
 import query_tool as qt
+import mock_data as mkd
 
 
 def _ctx():
@@ -190,6 +192,20 @@ def query_cmd(soql, fetch_all, csv_path, excel_path, max_print_rows):
     if truncated:
         click.echo("Not all matching records were fetched -- pass --all to retrieve everything, "
                    "or add/tighten a LIMIT.")
+
+
+@cli.command("generate-mock-data")
+@click.argument("object_name")
+@click.option("--count", default=50, help="Number of mock rows to generate (free tier caps at 5000/request).")
+@click.option("--schema", default="dbo")
+def generate_mock_data_cmd(object_name, count, schema):
+    s, sf, engine = _ctx()
+    rows, skipped = mkd.generate_mock_object_data(sf, engine, object_name, count, s.mockaroo_api_key, schema=schema)
+    click.echo(f"Wrote {rows} mock row(s) to {schema}.{object_name}_Mock")
+    if skipped:
+        click.echo(f"Skipped {len(skipped)} field(s) with no mock mapping (reference/multipicklist/etc.):")
+        for name, typ in skipped:
+            click.echo(f"  {name} ({typ})")
 
 
 if __name__ == "__main__":
