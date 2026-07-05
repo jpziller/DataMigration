@@ -2,6 +2,10 @@
 
 *AI Assisted Data Migration*
 
+Copyright (c) 2026 JP Ziller LLC. Released under the [MIT License](LICENSE) —
+free to use, modify, and redistribute (including commercially), provided the
+copyright notice is retained.
+
 SQL Server is the integration hub. Python plays the role DBAmp's stored procs
 play: `SF_Replicate` (org → SQL) and `SF_BulkOps` (SQL → org, with Id/Error
 written back). All transformation logic stays in T-SQL, version-controlled in
