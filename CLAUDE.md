@@ -7,6 +7,27 @@ and writes the Salesforce `Id` / `Error` back into the load table. All
 transformation logic is T-SQL under `sql/transformations/`, versioned in git.
 Full design is in `README.md` — read it before making architectural changes.
 
+## Claude Code behavior defaults (edit this section for your own preferences)
+These are default interaction behaviors for any Claude Code session working
+in this repo — not fixed rules. This file travels with the repo, so anyone
+who opens it here gets the same defaults automatically instead of having to
+re-establish them; edit this section directly to change how Claude behaves
+for you, and it'll stick for future sessions too.
+
+- **Show actual output, don't narrate it.** When asked to run a query, test,
+  or command so the user can see the result, paste the real output into the
+  reply (a code block for tabular/console output, verbatim for logs/errors)
+  — not a summary of what it showed. The user only sees text replies, not
+  raw tool call results, so "it worked" or "here's what came back" is not a
+  substitute for actually showing it.
+- **Working past Claude's training cutoff**: this org runs API version 67.0
+  (Summer '26), after Claude's training cutoff (January 2026). Don't assume
+  training-era knowledge of SOQL functions, API behavior, or Data Cloud/D360
+  specifics is current — when something looks new, version-specific, or is
+  behaving unexpectedly, check developer.salesforce.com/docs or
+  help.salesforce.com (WebFetch/WebSearch) rather than guessing from
+  possibly-stale training data.
+
 ## How to operate here: read-only eyes, reviewed hands
 - To **look** at SQL Server (schemas, row counts, samples, validating a load),
   use `sqlcmd` (or the read-only DBHub MCP if configured). Read-only.
@@ -60,6 +81,13 @@ venv may not be active in a fresh shell:
    NULL migration key breaks the fingerprint-based result mapping in rule 4 —
    resolve every duplicate it reports before loading, don't let it surface
    later as an unexplained `ambiguous` count after a real Salesforce API call.
+8. When deploying a new custom field via `sf project deploy start`, bundle a
+   `Profile`/`PermissionSet` metadata component granting Read+Edit to System
+   Administrator in the **same deploy**. API-deployed fields get zero
+   field-level security by default (unlike Setup-UI-created fields, which
+   auto-grant the admin profile) — don't wait for a manual Setup fix or a
+   failed query to surface the gap. Re-evaluate which profile/permission set
+   to grant once a dedicated API-only migration user exists.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
@@ -76,14 +104,11 @@ don't jump straight to writing T-SQL:
    key (rule 7). Resolve anything it flags.
 6. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2).
 
-## Working past Claude's training cutoff
-This org runs API version 67.0 (Summer '26), which is after Claude's training
-cutoff (January 2026). Don't assume training-era knowledge of SOQL functions,
-API behavior, or Data Cloud/D360 specifics is current — when something looks
-new, version-specific, or is behaving unexpectedly, check
-developer.salesforce.com/docs or help.salesforce.com (WebFetch/WebSearch)
-rather than guessing from possibly-stale training data. Same spirit as the
-README's "Untested paths to verify on first run" section.
+## Licensing
+MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,
+and redistribute (including commercially), provided the copyright notice is
+kept. Don't reference competitor products (DBAmp, etc.) by name in code
+comments or docs — describe behavior generically instead.
 
 ## Where things live
 - `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py`,
