@@ -12,8 +12,11 @@ Examples:
     python cli.py profile-salesforce Account
     python cli.py profile-sql-table Account
     python cli.py export-profile-excel profile.xlsx
+    python cli.py query "SELECT Id, Name FROM Account LIMIT 10"
+    python cli.py query "SELECT Id, Name, Account.Name FROM Contact" --csv out.csv
 """
 import click
+import pandas as pd
 
 from config import get_settings
 from sf_client import connect_salesforce
@@ -23,6 +26,7 @@ import replicate as rep
 import bulkops as bo
 import load_order as lo
 import profiling as pf
+import query_tool as qt
 
 
 def _ctx():
@@ -158,6 +162,34 @@ def export_profile_excel_cmd(output_path, schema, object_or_table, source_type):
         engine, output_path, schema=schema, object_or_table=object_or_table, source_type=source_type
     )
     click.echo(f"Wrote {path}")
+
+
+@cli.command("query")
+@click.argument("soql")
+@click.option("--all", "fetch_all", is_flag=True, help="Fetch every matching record, not just the first page.")
+@click.option("--csv", "csv_path", default=None, help="Write results to a CSV file instead of printing.")
+@click.option("--excel", "excel_path", default=None, help="Write results to an Excel file instead of printing.")
+@click.option("--max-print-rows", default=50, help="Console preview row cap (ignored for --csv/--excel).")
+def query_cmd(soql, fetch_all, csv_path, excel_path, max_print_rows):
+    _, sf, _e = _ctx()
+    records, total_size, truncated = qt.run_query(sf, soql, fetch_all=fetch_all)
+
+    if csv_path:
+        qt.to_csv(records, csv_path)
+        click.echo(f"Wrote {len(records)} row(s) to {csv_path}")
+    elif excel_path:
+        qt.to_excel(records, excel_path)
+        click.echo(f"Wrote {len(records)} row(s) to {excel_path}")
+    elif records:
+        df = pd.DataFrame(records)
+        with pd.option_context("display.max_rows", max_print_rows,
+                                "display.max_columns", None, "display.width", None):
+            click.echo(df.to_string(index=False))
+
+    click.echo(f"\n{len(records)} of {total_size} total record(s) shown.")
+    if truncated:
+        click.echo("Not all matching records were fetched -- pass --all to retrieve everything, "
+                   "or add/tighten a LIMIT.")
 
 
 if __name__ == "__main__":
