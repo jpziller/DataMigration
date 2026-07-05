@@ -155,6 +155,13 @@ written instead.
   the low millions. For very large objects, swap the load step for `BULK INSERT`
   against the staged CSVs (the SQL Server service account must be able to read
   the file) or `bcp` — both are markedly faster at scale.
+- **Open bug: `Contact.MigrationID__c` FLS.** Deployed with a bundled `Admin`
+  profile FLS grant (see hard rule 8), and both a SOQL query and a
+  `FieldPermissions` query confirmed System Administrator had access right
+  after deploy — but Setup UI's field-level-security page shows it as hidden
+  for that profile. Not yet root-caused (stale UI cache vs. a second
+  permission layer the API check didn't surface). `Account.MigrationID__c`
+  and `Opportunity.MigrationID__c` don't show this symptom.
 
 ---
 
