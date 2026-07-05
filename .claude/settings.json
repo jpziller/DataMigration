@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Edit(sql/**)",
+      "Edit(cli.py)",
+      "Edit(replicate.py)",
+      "Edit(bulkops.py)",
+      "Edit(metadata.py)",
+      "Edit(type_map.py)",
+      "Bash(sqlcmd *)",
+      "Bash(.venv/Scripts/python.exe cli.py list-objects*)",
+      "Bash(.venv/Scripts/python.exe cli.py describe *)",
+      "Bash(.venv/Scripts/python.exe cli.py dump-describe *)",
+      "Bash(.venv/Scripts/python.exe cli.py replicate *)",
+      "Bash(sf org list*)",
+      "Bash(sf org display*)",
+      "Bash(sf sobject *)",
+      "Bash(sf project retrieve *)",
+      "Bash(git status*)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "mcp__dbhub__*"
+    ],
+    "ask": [
+      "Bash(.venv/Scripts/python.exe cli.py bulkops *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(sf project deploy *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(./.env)",
+      "Read(**/*.key)",
+      "Read(**/server.key)",
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(curl *)",
+      "Bash(sf org delete *)"
+    ],
+    "defaultMode": "default"
+  }
+}

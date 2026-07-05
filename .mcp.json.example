@@ -1,0 +1,14 @@
+{
+  "//": "Copy to .mcp.json and set a READ-ONLY SQL login, OR register locally with `claude mcp add` (see README). .mcp.json is gitignored so real credentials never land in the repo. Confirm the exact SQL Server DSN scheme in the DBHub README before relying on it.",
+  "mcpServers": {
+    "dbhub": {
+      "command": "npx",
+      "args": [
+        "-y", "@bytebase/dbhub",
+        "--transport", "stdio",
+        "--readonly",
+        "--dsn", "sqlserver://READONLY_USER:PASSWORD@localhost:1433/SF_Migration"
+      ]
+    }
+  }
+}
