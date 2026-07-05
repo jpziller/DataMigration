@@ -76,6 +76,15 @@ don't jump straight to writing T-SQL:
    key (rule 7). Resolve anything it flags.
 6. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2).
 
+## Working past Claude's training cutoff
+This org runs API version 67.0 (Summer '26), which is after Claude's training
+cutoff (January 2026). Don't assume training-era knowledge of SOQL functions,
+API behavior, or Data Cloud/D360 specifics is current — when something looks
+new, version-specific, or is behaving unexpectedly, check
+developer.salesforce.com/docs or help.salesforce.com (WebFetch/WebSearch)
+rather than guessing from possibly-stale training data. Same spirit as the
+README's "Untested paths to verify on first run" section.
+
 ## Where things live
 - `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py`,
   `load_order.py` — framework.
