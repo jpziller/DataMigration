@@ -9,6 +9,9 @@ Examples:
     python cli.py bulkops Account insert Account_Load --key-column LoadId
     python cli.py bulkops Contact upsert Contact_Load --external-id Legacy_Id__c
     python cli.py analyze-load-order Account Contact Opportunity OpportunityLineItem
+    python cli.py profile-salesforce Account
+    python cli.py profile-sql-table Account
+    python cli.py export-profile-excel profile.xlsx
 """
 import click
 
@@ -19,6 +22,7 @@ import metadata as md
 import replicate as rep
 import bulkops as bo
 import load_order as lo
+import profiling as pf
 
 
 def _ctx():
@@ -111,6 +115,49 @@ def analyze_load_order_cmd(object_names, schema):
             click.echo(f"  {', '.join(group)}")
 
     click.echo(f"\nWritten to {schema}.ObjectDependency and {schema}.ObjectLoadOrder")
+
+
+@cli.command("profile-salesforce")
+@click.argument("object_name")
+@click.option("--where", default=None, help="SOQL WHERE clause (no 'WHERE').")
+@click.option("--schema", default="dbo")
+@click.option("--top-n-values", default=50, help="Max distinct values to keep per low-cardinality field.")
+def profile_salesforce_cmd(object_name, where, schema, top_n_values):
+    s, sf, engine = _ctx()
+    profiles, distributions = pf.profile_salesforce_object(
+        sf, engine, object_name, where=where, schema=schema, top_n_values=top_n_values
+    )
+    click.echo(f"Profiled {len(profiles)} fields on {object_name} "
+               f"({len(distributions)} with value distributions captured)")
+    click.echo(f"Results in {schema}.FieldProfile / {schema}.FieldProfileValues")
+
+
+@cli.command("profile-sql-table")
+@click.argument("table_name")
+@click.option("--schema", default="dbo")
+@click.option("--top-n-values", default=50, help="Max distinct values to keep per low-cardinality column.")
+@click.option("--distinct-threshold", default=50, help="Columns with more distinct values than this skip value-distribution capture.")
+def profile_sql_table_cmd(table_name, schema, top_n_values, distinct_threshold):
+    _, _, engine = _ctx()
+    profiles, distributions = pf.profile_sql_table(
+        engine, table_name, schema=schema, top_n_values=top_n_values, distinct_threshold=distinct_threshold
+    )
+    click.echo(f"Profiled {len(profiles)} columns on {schema}.{table_name} "
+               f"({len(distributions)} with value distributions captured)")
+    click.echo(f"Results in {schema}.FieldProfile / {schema}.FieldProfileValues")
+
+
+@cli.command("export-profile-excel")
+@click.argument("output_path")
+@click.option("--schema", default="dbo")
+@click.option("--object", "object_or_table", default=None, help="Limit export to one object/table.")
+@click.option("--source-type", type=click.Choice(["salesforce", "sql_table"]), default=None)
+def export_profile_excel_cmd(output_path, schema, object_or_table, source_type):
+    _, _, engine = _ctx()
+    path = pf.export_profile_to_excel(
+        engine, output_path, schema=schema, object_or_table=object_or_table, source_type=source_type
+    )
+    click.echo(f"Wrote {path}")
 
 
 if __name__ == "__main__":
