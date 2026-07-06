@@ -35,6 +35,10 @@ summarizes.
 | 20 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — |
 | 21 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #15 | — |
 | 22 | Parquet file import | **Built** | `import-parquet` |
+| 23 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 |
+| 24 | Load activity logging + analytics | Not built | — |
+| 25 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — |
+| 26 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#24 | — |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -756,6 +760,119 @@ New dependency: `pyarrow` (Parquet read support).
 profiling → mapping → transform pipeline as any other source table before
 it's ready for `bulkops` — this only solves getting the file's data into
 SQL Server, not any downstream step.
+
+## 23. Email Deliverability attestation gate — BUILT (`bulkops.py`, CLAUDE.md hard rule 9)
+
+Requested directly: a permanent check before any load that could trigger
+outbound email externally, stopping if deliverability allows it, warning
+and continuing if it's internal-only.
+
+**Research finding that reshaped this before any code was written**:
+Salesforce has no supported API to *read* the org's Email Deliverability
+setting. Confirmed two ways, not assumed: retrieved
+`EmailAdministrationSettings` live via `sf project retrieve` against this
+framework's own connected org (19 real settings came back, none of them
+deliverability-related), and cross-checked Salesforce's own Metadata API
+field reference for that type (no such field documented either). The
+strongest corroborating signal: the only tool found that can even *set*
+this value programmatically (`sfdx-deliverability-access`, a community
+plugin) does it by driving a **headless browser against the Setup UI** —
+exactly the kind of fragile screen-scraping this framework's whole
+approach avoids, and a strong sign no real API exists to automate around.
+
+Given that, an automated "validate and stop" check as originally
+described isn't honestly buildable. Built instead, with the user's
+explicit sign-off on this specific shape: a **required human attestation**
+built into `bulk_op()` for `insert`/`upsert` (the operations that can
+create new records and trigger real outbound email) —
+`--email-deliverability no-access|system-email-only|all-email` must be
+passed, based on someone actually having checked Setup first; omitting it
+raises before the API is ever touched. `all-email` requires an additional
+`--confirm-external-email-risk`, since that's the one state that can
+genuinely send real mail to real people — a deliberate override, not a
+default. The confirmed value is echoed back in the load's own result
+output either way, so "internal-only confirmed, continuing" or "external
+email risk explicitly accepted" is always visible in what the load
+actually reported, not just implied.
+
+No interactive terminal prompt was used deliberately — `bulkops` runs as a
+Bash tool call from Claude Code, which isn't a real interactive terminal,
+so a blocking `input()`/`click.prompt()` call risked hanging rather than
+actually gating anything. A required, explicit CLI flag achieves the same
+"can't proceed without a human having looked" guarantee without that risk.
+
+Tested: all six logic paths verified directly (missing value raises,
+`all-email` without confirm raises, `all-email` with confirm passes,
+`system-email-only` passes without confirm, update/delete are correctly
+exempt, an invalid value raises) — and confirmed live in the full
+`bulk_op()` pipeline that the check fires and raises before the function
+even attempts to read the SQL Server load table, let alone call the API.
+
+## 24. Load activity logging + analytics (not built)
+
+Problem: right now a `bulkops` run's outcome lives only in the console
+transcript and the load table's own `Id`/`Error` columns — there's no
+durable, queryable record of *what ran, when, and how it performed*
+across a whole project's worth of loads.
+
+Idea: a SQL Server log table capturing, per `bulkops` call: action
+(insert/update/upsert/delete), object, source table, record count,
+number of batches, average batch time, total job time, succeeded/failed/
+ambiguous counts, the Email Deliverability attestation (#23) if
+applicable, and start/end timestamps — everything `bulk_op()` already
+computes or could cheaply time, just not persisted anywhere today. Once
+this exists, build actual analytics on top of it (trends across
+sandbox/UAT/prod runs, which objects are slowest/most error-prone, batch-
+time regressions) rather than eyeballing scrollback each time — the
+"make sure we add some analytics for this data" part of the ask,
+deliberately scoped as a second step once the raw log exists, not
+speculatively built before there's real data to analyze.
+
+## 25. Run book (manual + programmatic step tracking) — blocked on a template
+
+Problem raised directly: today, nothing tracks the *human* side of a
+migration — every manual and programmatic step taken during a full load
+(sandbox, UAT, prod), who did it, start/end/elapsed time, errors hit,
+retries done — the actual "recipe" of a migration, not just what a script
+did. This is explicitly framed as high-stakes ("this is what can make or
+break a migration") and as something to track per main full load, not per
+script.
+
+**Blocked on the user sharing a real run-book template** — same pattern
+already established for `mapping_doc.py`/`docs/MIGRATION_PLAYBOOK.md`:
+drop a real example into `_stage/`, reviewed for structure/format only
+(column names, section layout), never content, before designing anything.
+Don't scope this further until that template exists to react to.
+
+Once scoped, the ambition stated directly is worth preserving here rather
+than softening: not just a template to fill in by hand, but a spreadsheet
+this framework keeps automatically up to date and in line with the actual
+load order and steps taken — closer to a generated artifact fed by #24's
+log data (and this framework's own load-order analysis, #2) than a
+document a human maintains manually. "Practices on scripts" (i.e. dev/test
+runs) are explicitly **not** in scope for tracking — only real full loads
+against sandbox/UAT/prod count.
+
+## 26. Dynamic batch sizing from org metadata review (not built, likely builds on #5)
+
+Problem raised directly: heavily-automated objects (per
+`docs/MIGRATION_PLAYBOOK.md`'s row-lock/batching guidance — CPQ/Billing-
+style objects often need batch sizes as small as 50 to let triggers/Flows
+keep up) currently need a human to know that ahead of time and pass the
+right batch size manually. Idea: use what `analyze-org-risk` (#5) already
+knows about an object's automation (validation rule count, Apex triggers,
+active record-triggered Flows) to automatically dial down `bulkops`'
+batch size for objects likely to hit lock contention or Bulk API limits,
+instead of always using the same default.
+
+Not yet scoped: `bulk_op()` doesn't currently expose a batch-size
+parameter to the Bulk API call at all (`simple_salesforce`'s `bulk2`
+handler picks its own default chunking) — first needs confirming whether
+`simple_salesforce` exposes batch size control at all, and if not, what
+the actual Bulk API 2.0 parameter for it is, before any "dial it down
+automatically" logic can be built on top. Depends on #5 already existing
+for the automation signal (built) and #24 for the timing data that would
+let this be tuned from real observed performance rather than a guess.
 
 ---
 

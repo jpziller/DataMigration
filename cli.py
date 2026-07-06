@@ -128,11 +128,19 @@ def import_parquet_cmd(parquet_path, table_name, schema, append):
 @click.option("--external-id", default=None, help="External id field (upsert; also delete -- resolved to real Ids via a query first, since Bulk API 2.0's delete only ever accepts Id).")
 @click.option("--key-column", default="LoadId", help="Local unique key for in-place writeback.")
 @click.option("--schema", default="dbo")
-def bulkops_cmd(object_name, operation, source_table, external_id, key_column, schema):
+@click.option("--email-deliverability", default=None,
+              type=click.Choice(["no-access", "system-email-only", "all-email"]),
+              help="Required for insert/upsert -- what Setup > Email Administration > Deliverability is currently set to (no API can read this; check manually first).")
+@click.option("--confirm-external-email-risk", is_flag=True,
+              help="Required in addition to --email-deliverability all-email, since that setting can send real outbound email to external contacts.")
+def bulkops_cmd(object_name, operation, source_table, external_id, key_column, schema,
+                email_deliverability, confirm_external_email_risk):
     s, sf, engine = _ctx()
     summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
                          external_id=external_id, key_column=key_column,
-                         schema=schema, stage_dir=s.stage_dir)
+                         schema=schema, stage_dir=s.stage_dir,
+                         email_deliverability=email_deliverability,
+                         confirm_external_email_risk=confirm_external_email_risk)
     warnings = summary.pop("preflight_warnings", [])
     for k, v in summary.items():
         click.echo(f"{k:12}: {v}")

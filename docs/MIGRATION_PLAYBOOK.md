@@ -169,6 +169,12 @@ kind of mistake that ends up in the news. If a stakeholder insists it's
 unnecessary, document that decision explicitly rather than silently
 skipping the step.
 
+`bulkops insert`/`upsert` enforces this as a required human attestation
+(`--email-deliverability`, CLAUDE.md hard rule 9) rather than an automated
+check — Salesforce has no supported API to read this setting, confirmed
+directly rather than assumed (see `bulkops.py`'s own docstring). Check
+Setup yourself before passing the flag; the tool can't check it for you.
+
 ### Batch considerations
 Salesforce allows 15,000 Bulk API batches per rolling 24-hour period across
 the whole org — exceeding it halts *all* Bulk API batches until the window

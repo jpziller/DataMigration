@@ -90,7 +90,12 @@ venv may not be active in a fresh shell:
                 branded Word template with the same context as `docxtpl` Jinja tags, falling back
                 to the default when omitted.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
-                `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
+                `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c --email-deliverability system-email-only`
+                (insert/upsert require `--email-deliverability` — check Setup > Email Administration
+                > Deliverability yourself first and pass what it actually shows; there's no API to
+                read it, so `bulk_op()` requires this as an explicit human attestation and raises
+                before touching the API if it's missing — rule 9. `all-email` also needs
+                `--confirm-external-email-risk`.)
                 (every sent column is checked against the target object's live describe() before
                 the API is ever called — a typo'd, removed, or non-writable field aborts the whole
                 call up front rather than burning a real Bulk API batch to find out the same thing;
@@ -169,6 +174,18 @@ available even when there's no dedicated skill for it.
    auto-grant the admin profile) — don't wait for a manual Setup fix or a
    failed query to surface the gap. Re-evaluate which profile/permission set
    to grant once a dedicated API-only migration user exists.
+9. Before any `bulkops insert`/`upsert`, check Setup > Email Administration >
+   Deliverability yourself and pass `--email-deliverability
+   no-access|system-email-only|all-email` — `bulk_op()` requires it and
+   raises before touching the API if it's missing. There is no supported
+   API to read this setting (verified: retrieved `EmailAdministrationSettings`
+   live and cross-checked Salesforce's own field reference — neither has
+   any such field), so this is a required human attestation, not something
+   Claude Code can check on its own; state what Setup actually shows before
+   passing the flag, don't guess or default to a value. `all-email` also
+   needs `--confirm-external-email-risk`, since that's the one state that
+   can send real mail to real external contacts — don't pass it
+   speculatively "to get past the check."
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
@@ -192,7 +209,8 @@ don't jump straight to writing T-SQL:
    (rule 6), if it has one.
 6. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
    key (rule 7). Resolve anything it flags.
-7. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2).
+7. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2)
+   and, for insert/upsert, Email Deliverability checked and passed (rule 9).
 
 ## Licensing
 MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,

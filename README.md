@@ -283,8 +283,9 @@ python cli.py generate-solution-doc Solution.docx Account Contact Opportunity \
 # Every sent column is checked against the target object's live describe()
 # before the API is ever called -- a typo'd/removed/non-writable field
 # aborts up front instead of burning a real Bulk API batch to find out.
-python cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c
-python cli.py bulkops Contact insert Contact_Load --key-column LoadId
+# insert/upsert also require --email-deliverability (see below).
+python cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c --email-deliverability system-email-only
+python cli.py bulkops Contact insert Contact_Load --key-column LoadId --email-deliverability no-access
 python cli.py bulkops Case delete Case_Purge --key-column LoadId
 
 # Delete by external id -- Bulk API 2.0's delete only ever accepts a real
@@ -341,6 +342,20 @@ it ever reaches the Bulk API -- Salesforce would reject it for the same
 reason anyway, just after spending a real batch to find out. A
 required-but-unsent field on insert is reported as a warning, not a hard
 stop, since automation could still default it.
+
+**Email Deliverability attestation (insert/upsert only).** insert/upsert
+can create brand-new records that trigger outbound email to real external
+contacts. Salesforce has no supported API to *read* the org's Email
+Deliverability setting (confirmed: retrieved `EmailAdministrationSettings`
+live and cross-checked Salesforce's own field reference -- neither has any
+such field), so this can't be an automated check -- `--email-deliverability
+no-access|system-email-only|all-email` is a required, explicit human
+attestation instead, based on actually checking Setup > Email
+Administration > Deliverability first. Missing it raises before the API is
+ever touched; `all-email` additionally requires
+`--confirm-external-email-risk`, since that's the one state that can
+genuinely send real mail externally. The confirmed value is echoed back in
+the load's own result output either way.
 
 **Retrying a partial failure.** `bulkops-retry <table>` copies only the
 failed rows (`Error` populated) from a load table or its `_Result` table

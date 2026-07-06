@@ -58,6 +58,28 @@ DELETE BY EXTERNAL ID:
   submitted to the API at all (there's no Id to delete); it's reported
   back as a local "no matching record found" error on that row, the same
   writeback shape as any other failure, not silently dropped.
+
+EMAIL DELIVERABILITY ATTESTATION (insert/upsert only):
+  insert/upsert can create brand-new records that trigger outbound email to
+  real external contacts (welcome emails, notifications, workflow-driven
+  sends) -- see docs/MIGRATION_PLAYBOOK.md's "Email deliverability" note.
+  Salesforce has no supported API to *read* the org's Email Deliverability
+  setting (confirmed by retrieving EmailAdministrationSettings live against
+  a real org and cross-checking Salesforce's own field reference -- neither
+  has any such field; the only tool found that can even *set* it
+  programmatically drives a headless browser against the Setup UI, which
+  is exactly the kind of fragile screen-scraping this framework avoids).
+  So this can't be a real automated check -- it's a required, explicit
+  human attestation instead: `email_deliverability` must be passed for
+  insert/upsert (`"no-access"`, `"system-email-only"`, or `"all-email"`,
+  matching Setup's own three states), based on someone actually having
+  looked at Setup > Email Administration > Deliverability first. Missing
+  it raises and aborts before touching the API. `"all-email"` additionally
+  requires `confirm_external_email_risk=True`, or it raises too --
+  deliverability set to allow all email is the one state that can
+  genuinely send real mail to real people, so it needs a deliberate
+  override, not a default. The confirmed value is echoed back in the
+  result dict either way, so it's visible in the load's own report.
 """
 import io
 import os
@@ -123,13 +145,53 @@ def _preflight_check(sf, object_name, operation, sent_columns, id_column="Id"):
     }
 
 
+_DELIVERABILITY_LEVELS = ("no-access", "system-email-only", "all-email")
+
+
+def _check_email_deliverability(operation, email_deliverability, confirm_external_email_risk):
+    """See this module's "EMAIL DELIVERABILITY ATTESTATION" docstring
+    section -- there is no supported API to read this setting, so this is
+    a required human attestation, not an automated check. Returns a note
+    string for the result dict, or None if not applicable to this op."""
+    if operation not in ("insert", "upsert"):
+        return None
+
+    if email_deliverability is None:
+        raise ValueError(
+            "insert/upsert can create new records that trigger outbound email to real "
+            "external contacts. Check Setup > Email Administration > Deliverability first, "
+            "then pass --email-deliverability no-access|system-email-only|all-email. "
+            "(There is no API to read this setting automatically -- see this module's "
+            "docstring for why.)"
+        )
+    if email_deliverability not in _DELIVERABILITY_LEVELS:
+        raise ValueError(f"Invalid email_deliverability value: {email_deliverability!r} "
+                         f"(expected one of {_DELIVERABILITY_LEVELS})")
+    if email_deliverability == "all-email" and not confirm_external_email_risk:
+        raise ValueError(
+            "Email Deliverability is set to 'All Email' -- this load could send real "
+            "outbound email to external contacts. If that's genuinely intended, re-run "
+            "with --confirm-external-email-risk. Otherwise, set Deliverability to "
+            "'System Email Only' or 'No Access' in Setup first."
+        )
+
+    if email_deliverability == "all-email":
+        return "All Email -- confirmed, external email risk explicitly accepted"
+    return f"{email_deliverability} -- internal-only confirmed, continuing"
+
+
 def bulk_op(sf, engine, object_name, operation, source_table,
             send_columns=None, external_id=None,
             key_column="LoadId", id_column="Id", error_column="Error",
-            schema="dbo", stage_dir="_stage"):
+            schema="dbo", stage_dir="_stage",
+            email_deliverability=None, confirm_external_email_risk=False):
     operation = operation.lower()
     if operation not in ("insert", "update", "upsert", "delete"):
         raise ValueError(f"Unsupported operation: {operation}")
+
+    deliverability_note = _check_email_deliverability(
+        operation, email_deliverability, confirm_external_email_risk
+    )
 
     # If the load table carries a [Sort] column (see
     # sql/functions/utilities/AddBulkLoadSortColumn.sql), submit rows in that
@@ -283,6 +345,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         "external_id_not_found": not_found_count,
         "written_to": target,
         "preflight_warnings": preflight["required_not_sent"],
+        "email_deliverability": deliverability_note,
     }
 
 
