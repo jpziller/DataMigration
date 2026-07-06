@@ -11,6 +11,10 @@ movement: `replicate` (org → SQL) and `bulkops` (SQL → org, with Id/Error
 written back). All transformation logic stays in T-SQL, version-controlled in
 `sql/`.
 
+See [`docs/MIGRATION_PLAYBOOK.md`](docs/MIGRATION_PLAYBOOK.md) for the
+methodology behind this framework — script pattern, row-lock/batching
+considerations, object-by-object migration notes, and more.
+
 ```
 org  --replicate-->  SQL Server (typed mirror tables)
                          |
