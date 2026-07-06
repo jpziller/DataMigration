@@ -21,24 +21,24 @@ summarizes.
 | 6 | Mock/demo data generation | **Built** | `generate-mock-data` |
 | 7 | Data profiling toolset | **Built** | `profile-salesforce`, `profile-sql-table`, `export-profile-excel` |
 | 8 | Ad hoc query tool | **Built** | `query` |
-| 9 | Fuzzy matching / dedup | Deprioritized, not built | — |
-| 10 | Console output polish | **Built** | (applies to `query`/`profile-*`) |
-| 11 | Auto-mapping | **Built** | `auto-map` |
-| 12 | Web UI for less-technical users | Not built (future) | — |
-| 13 | SSO / multi-user access control | Not built, depends on #12 | — |
-| 14 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` |
-| 15 | Data Cloud (D360) query support | Not built — API surface researched, live verification blocked (no Data Cloud org available) | — |
-| 16 | Data Cloud semantic model reference | Not built, depends on #15 | — |
-| 17 | DSO refresh/error monitoring | Not built — needs API research | — |
-| 18 | DSO→DLO mapping read + auto-map | Not built — needs API research | — |
-| 19 | Data Kit / Bundle documentation | Not built, depends on #15/#16 | — |
-| 20 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — |
-| 21 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #15 | — |
-| 22 | Parquet file import | **Built** | `import-parquet` |
-| 23 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 |
-| 24 | Load activity logging + analytics | Not built | — |
-| 25 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — |
-| 26 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#24 | — |
+| 9 | Console output polish | **Built** | (applies to `query`/`profile-*`) |
+| 10 | Auto-mapping | **Built** | `auto-map` |
+| 11 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` |
+| 12 | Parquet file import | **Built** | `import-parquet` |
+| 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 |
+| 14 | Load activity logging + analytics | Not built | — |
+| 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — |
+| 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — |
+| 17 | Fuzzy matching / dedup | Deprioritized, not built | — |
+| 18 | Data Cloud (D360) query support | Not built — API surface researched, live verification blocked (no Data Cloud org available) | — |
+| 19 | Data Cloud semantic model reference | Not built, depends on #18 | — |
+| 20 | DSO refresh/error monitoring | Not built — needs API research | — |
+| 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — |
+| 22 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — |
+| 23 | Data Kit / Bundle documentation | Not built, depends on #18/#19 | — |
+| 24 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #18 | — |
+| 25 | Web UI for less-technical users | Not built (future) | — |
+| 26 | SSO / multi-user access control | Not built, depends on #25 | — |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -74,7 +74,7 @@ generic, reusable set for this framework's `sql/` tree.
   permission pre-flight stored procedure's concept (validate a load table's
   columns against the target object's createable/updatable fields before
   submitting) is now a live `describe()` check built directly into
-  `bulkops.py`'s `bulk_op()` — see #14 for the full writeup.
+  `bulkops.py`'s `bulk_op()` — see #11 for the full writeup.
 
 ## 2. Load-order dependency analyzer — BUILT (`load_order.py`)
 
@@ -137,7 +137,7 @@ in once a mapping is decided.
   actually exist on this org (only `MigrationID__c` was ever deployed).
 
 Auto-mapping into this doc (source→target suggestions) is now built — see
-#11 below.
+#10 below.
 
 ## 4. Solution document generator — BUILT (`solution_doc.py`)
 
@@ -331,21 +331,7 @@ this framework.
   different query surface (Data Model Objects via the Data Cloud Query
   API, not standard SOQL) and aren't supported yet; a possible phase 2.
 
-## 9. Fuzzy matching / dedup (deprioritized, not built)
-
-Explicitly lower priority than everything else here — there's real value
-in "free, runs as a SQL Server + Python job" versus paying for a
-commercial dedup tool, but matching rules, merge survivorship, and a
-review UI are a deep enough rabbit hole that it competes for time against
-things with clearer immediate payoff. `sql/functions/matching/` already
-has Jaro-Winkler/Soundex/N-gram T-SQL functions from the SQL function
-library port. If this ever gets picked up in earnest, `recordlinkage` or
-`dedupe` (Python) are worth evaluating against hand-rolled T-SQL matching
-before building more of the latter — `rapidfuzz` specifically for a fast
-Levenshtein-family option if T-SQL's `JaroWinklerDistance` turns out too
-slow at scale.
-
-## 10. Console output polish — BUILT (`rich` in `cli.py`)
+## 9. Console output polish — BUILT (`rich` in `cli.py`)
 
 `query` and `profile-salesforce`/`profile-sql-table` render results as
 `rich` tables instead of raw pandas `to_string()` output (which silently
@@ -357,7 +343,7 @@ worth migrating" call — full detail stays in `dbo.FieldProfile`/
 `FieldProfileValues` and `export-profile-excel`, not crammed into a
 console table.
 
-## 11. Auto-mapping — BUILT (`auto_mapper.py`)
+## 10. Auto-mapping — BUILT (`auto_mapper.py`)
 
 Suggests source→target field mappings and writes them into an existing
 mapping doc's Target block/Notes/Migrate Data columns (`python cli.py
@@ -421,80 +407,10 @@ testing, all confirmed via live re-test against SQL Server:
    reported "no match," missing the more useful "no match, and also not
    worth migrating" signal the user's original design ask called for.
 
-## 12. Web UI for less-technical users (not built)
+## 11. Bulk load pre-flight check + retry helper — BUILT (`bulkops.py`)
 
-Problem: everything so far assumes an operator comfortable with a terminal
-and Claude Code. A data architect isn't always the only person who needs
-to see this framework's output, and not everyone is going to run a CLI.
-
-Idea: a lightweight local web console -- not a rebuild of Salesforce's own
-UI (deliberately out of scope; Setup UI stays Setup UI), but a friendlier
-front end for *this* framework's own surface:
-- An environment/connection picker (which SQL Server, which Salesforce org
-  alias) instead of editing `.env` by hand.
-- A SQL Server browser + query window with a real results grid (not flat
-  console text).
-- A "skills menu" -- reflect `.claude/commands/*.md`'s own descriptions into
-  buttons, each shelling out to the same CLI verb this framework already
-  has. No new logic, just a friendlier way to trigger it.
-- A flat-file loader: upload a CSV/Excel file in the browser, land it in a
-  SQL Server table -- the same `pandas`/`SQLAlchemy` path `replicate.py`
-  already uses, just fed from an upload instead of the org.
-- A chat pane. Explicitly **not** a from-scratch reimplementation of an
-  agent tool-use loop -- that's Claude Code's own job. If this gets built,
-  it should wire in the Claude Agent SDK for a scoped assistant, or embed/
-  launch Claude Code itself, rather than duplicate it.
-
-Candidate stack: Streamlit (Python-native, matches this repo's stack
-already; built-in file-uploader widget covers the CSV loader almost for
-free) plus `streamlit-aggrid` for a real spreadsheet-style results grid.
-Evaluated and set aside for now: Retool/Appsmith-style low-code app
-builders (real capability, but add a self-hosted server and more moving
-parts than a single Streamlit script justifies at this stage); Gradio (more
-ML-demo-shaped than data-grid-shaped).
-
-**This is a bigger step than it looks.** Today this framework is a CLI one
-already-credentialed operator runs at a terminal -- no listening network
-port, no session/auth boundary of its own. A web UI is a new, listening,
-possibly-multi-user surface, which is a genuinely different trust model,
-not just a new feature. See `docs/SECURITY_OVERVIEW.md` §8 -- building this
-requires a fresh security review pass, not an incremental patch to the
-existing one. Single sign-on and any real multi-user access control belong
-here too once this is picked up (tracked as #13, not folded into this item,
-since SSO is its own scoping exercise even once a UI exists to put it in
-front of).
-
-## 13. SSO / multi-user access control (not built, depends on #12)
-
-Problem: once #12 exists, "who can open this web console, and as whom"
-becomes a real question for the first time -- today the CLI has no
-independent auth boundary at all (whoever can run it, can use it, same as
-`sqlcmd` or Data Loader). A browser-accessible tool changes that.
-
-Idea, roughly in order of how this is typically layered rather than a
-committed design: start with an identity-provider-backed reverse proxy
-(e.g. an OAuth2 proxy in front of Streamlit) rather than hand-rolling
-session/auth code -- consistent with this framework's general preference
-for well-established components over custom security-sensitive code (see
-`docs/SECURITY_OVERVIEW.md` §9's supply-chain stance). Scope should include
-at minimum: who can authenticate, whether different users get different
-Salesforce/SQL Server credentials or share the tool's own service
-credentials (the latter needs its own audit-trail story), and whether
-this needs to plug into an org's existing SSO (Okta, Azure AD, etc.) rather
-than manage its own user directory.
-
-Also worth tracking here once scoped: whether tighter Salesforce-side
-security (permission sets, sharing rules, a dedicated API-only migration
-user per hard rule 8's note) needs its own roadmap treatment as adoption
-broadens beyond a single trusted operator -- likely an expansion of #5
-(org metadata risk analyzer) rather than a new item, since it's the same
-"what could this touch that it shouldn't" question applied to access
-control instead of automation conflicts.
-
-## 14. Bulk load pre-flight check + retry helper — BUILT (`bulkops.py`)
-
-Two additions to `bulk_op()`/`bulkops`, picked over the bigger, riskier #12/
-#13 UI work as the next concrete step -- both slot directly into the load
+Two additions to `bulk_op()`/`bulkops`, picked over the bigger, riskier #25/
+#26 UI work as the next concrete step -- both slot directly into the load
 workflow every migration already goes through, no new subsystem needed.
 
 **Pre-flight check** (the rebuild-instead-of-port item from #1):
@@ -561,7 +477,172 @@ code paths were each verified independently instead (resolution mapping,
 and the all-skip writeback path), and combine via ordinary boolean
 row filtering.
 
-## 15. Data Cloud (D360) query support (not built — API surface researched, live verification blocked)
+## 12. Parquet file import — BUILT (`parquet_import.py`)
+
+`python cli.py import-parquet <path.parquet> <table> [--append]`: imports
+a Parquet file into a typed SQL Server table in the mirror DB — a second
+entry point alongside `replicate.py`'s org-sourced path for getting source
+data into SQL Server, for the case where the source is a columnar file
+rather than a live org (`docs/MIGRATION_PLAYBOOK.md`'s "Data Extraction
+from Source Systems" already covers flat files/JSON generally; this adds
+Parquet specifically as its own typed path).
+
+Unlike `replicate.py`'s Salesforce path — Bulk API 2.0 always returns text
+CSV, so every value needs coercing back to a native type (see
+`type_map.py`'s `typed_value_coercers`) — Parquet is already a typed
+columnar format. `pyarrow` hands back real int/float/datetime values
+directly, so there's no coercion step here, just a schema-inference-to-
+SQL-Server-DDL step (`_arrow_type_to_sql`), mirroring `type_map.py`'s
+`sf_type_to_sql` for the Salesforce side. Reads via
+`pyarrow.parquet.ParquetFile.iter_batches()` rather than
+`pd.read_parquet()` in one call, so a large file doesn't need to fit in
+memory at once — the same chunked-append pattern `replicate.py` already
+uses. Drops/recreates the target table by default; `--append` adds rows
+to an existing, schema-compatible table instead (e.g. loading a second
+file into the same table).
+
+Tested end to end against a synthetic Parquet file covering string,
+float, int, boolean, date, and datetime columns with NULLs mixed in:
+confirmed every column landed as the correct SQL Server type (`BIGINT`
+for a 64-bit int column, `FLOAT`, `BIT`, `DATE`, `DATETIME2`, `NVARCHAR
+(MAX)`) with NULLs preserved correctly, and confirmed `--append` adds
+rows to the existing table instead of dropping it.
+
+New dependency: `pyarrow` (Parquet read support).
+
+**Not built**: the imported table still needs the same
+profiling → mapping → transform pipeline as any other source table before
+it's ready for `bulkops` — this only solves getting the file's data into
+SQL Server, not any downstream step.
+
+## 13. Email Deliverability attestation gate — BUILT (`bulkops.py`, CLAUDE.md hard rule 9)
+
+Requested directly: a permanent check before any load that could trigger
+outbound email externally, stopping if deliverability allows it, warning
+and continuing if it's internal-only.
+
+**Research finding that reshaped this before any code was written**:
+Salesforce has no supported API to *read* the org's Email Deliverability
+setting. Confirmed two ways, not assumed: retrieved
+`EmailAdministrationSettings` live via `sf project retrieve` against this
+framework's own connected org (19 real settings came back, none of them
+deliverability-related), and cross-checked Salesforce's own Metadata API
+field reference for that type (no such field documented either). The
+strongest corroborating signal: the only tool found that can even *set*
+this value programmatically (`sfdx-deliverability-access`, a community
+plugin) does it by driving a **headless browser against the Setup UI** —
+exactly the kind of fragile screen-scraping this framework's whole
+approach avoids, and a strong sign no real API exists to automate around.
+
+Given that, an automated "validate and stop" check as originally
+described isn't honestly buildable. Built instead, with the user's
+explicit sign-off on this specific shape: a **required human attestation**
+built into `bulk_op()` for `insert`/`upsert` (the operations that can
+create new records and trigger real outbound email) —
+`--email-deliverability no-access|system-email-only|all-email` must be
+passed, based on someone actually having checked Setup first; omitting it
+raises before the API is ever touched. `all-email` requires an additional
+`--confirm-external-email-risk`, since that's the one state that can
+genuinely send real mail to real people — a deliberate override, not a
+default. The confirmed value is echoed back in the load's own result
+output either way, so "internal-only confirmed, continuing" or "external
+email risk explicitly accepted" is always visible in what the load
+actually reported, not just implied.
+
+No interactive terminal prompt was used deliberately — `bulkops` runs as a
+Bash tool call from Claude Code, which isn't a real interactive terminal,
+so a blocking `input()`/`click.prompt()` call risked hanging rather than
+actually gating anything. A required, explicit CLI flag achieves the same
+"can't proceed without a human having looked" guarantee without that risk.
+
+Tested: all six logic paths verified directly (missing value raises,
+`all-email` without confirm raises, `all-email` with confirm passes,
+`system-email-only` passes without confirm, update/delete are correctly
+exempt, an invalid value raises) — and confirmed live in the full
+`bulk_op()` pipeline that the check fires and raises before the function
+even attempts to read the SQL Server load table, let alone call the API.
+
+## 14. Load activity logging + analytics (not built)
+
+Problem: right now a `bulkops` run's outcome lives only in the console
+transcript and the load table's own `Id`/`Error` columns — there's no
+durable, queryable record of *what ran, when, and how it performed*
+across a whole project's worth of loads.
+
+Idea: a SQL Server log table capturing, per `bulkops` call: action
+(insert/update/upsert/delete), object, source table, record count,
+number of batches, average batch time, total job time, succeeded/failed/
+ambiguous counts, the Email Deliverability attestation (#13) if
+applicable, and start/end timestamps — everything `bulk_op()` already
+computes or could cheaply time, just not persisted anywhere today. Once
+this exists, build actual analytics on top of it (trends across
+sandbox/UAT/prod runs, which objects are slowest/most error-prone, batch-
+time regressions) rather than eyeballing scrollback each time — the
+"make sure we add some analytics for this data" part of the ask,
+deliberately scoped as a second step once the raw log exists, not
+speculatively built before there's real data to analyze.
+
+## 15. Dynamic batch sizing from org metadata review (not built, likely builds on #5/#14)
+
+Problem raised directly: heavily-automated objects (per
+`docs/MIGRATION_PLAYBOOK.md`'s row-lock/batching guidance — CPQ/Billing-
+style objects often need batch sizes as small as 50 to let triggers/Flows
+keep up) currently need a human to know that ahead of time and pass the
+right batch size manually. Idea: use what `analyze-org-risk` (#5) already
+knows about an object's automation (validation rule count, Apex triggers,
+active record-triggered Flows) to automatically dial down `bulkops`'
+batch size for objects likely to hit lock contention or Bulk API limits,
+instead of always using the same default.
+
+Not yet scoped: `bulk_op()` doesn't currently expose a batch-size
+parameter to the Bulk API call at all (`simple_salesforce`'s `bulk2`
+handler picks its own default chunking) — first needs confirming whether
+`simple_salesforce` exposes batch size control at all, and if not, what
+the actual Bulk API 2.0 parameter for it is, before any "dial it down
+automatically" logic can be built on top. Depends on #5 already existing
+for the automation signal (built) and #14 for the timing data that would
+let this be tuned from real observed performance rather than a guess.
+
+## 16. Run book (manual + programmatic step tracking) — blocked on a template
+
+Problem raised directly: today, nothing tracks the *human* side of a
+migration — every manual and programmatic step taken during a full load
+(sandbox, UAT, prod), who did it, start/end/elapsed time, errors hit,
+retries done — the actual "recipe" of a migration, not just what a script
+did. This is explicitly framed as high-stakes ("this is what can make or
+break a migration") and as something to track per main full load, not per
+script.
+
+**Blocked on the user sharing a real run-book template** — same pattern
+already established for `mapping_doc.py`/`docs/MIGRATION_PLAYBOOK.md`:
+drop a real example into `_stage/`, reviewed for structure/format only
+(column names, section layout), never content, before designing anything.
+Don't scope this further until that template exists to react to.
+
+Once scoped, the ambition stated directly is worth preserving here rather
+than softening: not just a template to fill in by hand, but a spreadsheet
+this framework keeps automatically up to date and in line with the actual
+load order and steps taken — closer to a generated artifact fed by #14's
+log data (and this framework's own load-order analysis, #2) than a
+document a human maintains manually. "Practices on scripts" (i.e. dev/test
+runs) are explicitly **not** in scope for tracking — only real full loads
+against sandbox/UAT/prod count.
+
+## 17. Fuzzy matching / dedup (deprioritized, not built)
+
+Explicitly lower priority than everything else in this "not yet started"
+tier — there's real value in "free, runs as a SQL Server + Python job"
+versus paying for a commercial dedup tool, but matching rules, merge
+survivorship, and a review UI are a deep enough rabbit hole that it
+competes for time against things with clearer immediate payoff.
+`sql/functions/matching/` already has Jaro-Winkler/Soundex/N-gram T-SQL
+functions from the SQL function library port. If this ever gets picked up
+in earnest, `recordlinkage` or `dedupe` (Python) are worth evaluating
+against hand-rolled T-SQL matching before building more of the latter —
+`rapidfuzz` specifically for a fast Levenshtein-family option if T-SQL's
+`JaroWinklerDistance` turns out too slow at scale.
+
+## 18. Data Cloud (D360) query support (not built — API surface researched, live verification blocked)
 
 `query_tool.py` is explicitly scoped to CRM objects via the standard REST
 Query API today (see its own docstring) — Data Cloud objects (DLOs, DMOs,
@@ -644,20 +725,20 @@ finding #1 live first (lowest cost, highest confidence) before touching
 the token-exchange path at all — same incremental, verify-before-build
 approach every other tool in this framework has followed.
 
-## 16. Data Cloud semantic model reference (not built)
+## 19. Data Cloud semantic model reference (not built, depends on #18)
 
 Idea: understand and expose the semantic model (the layer that gives DMOs
 and their relationships business meaning beyond raw schema) as a reference
 data architects can query against — both the data and the metadata *about*
 it — the same spirit as `metadata.py`/`dump_describe()` does for CRM
 objects today, but for Data Cloud's own metadata layer. Needs real API
-research first (see #15's caution); likely depends on #15 existing first
+research first (see #18's caution); likely depends on #18 existing first
 since both need the same Data Cloud API access.
 
-## 17. DSO refresh/error monitoring (not built)
+## 20. DSO refresh/error monitoring (not built)
 
 Problem: before trusting data pulled from a DSO (Data Source Object — the
-raw ingested layer, see #18), a data architect needs to know when it last
+raw ingested layer, see #21), a data architect needs to know when it last
 refreshed and whether its last ingestion run had errors — silently working
 off stale or partially-failed ingested data is a real risk specific to the
 Data Cloud pipeline (source → DSO → DLO → DMO), distinct from anything
@@ -669,7 +750,7 @@ research into which Data Cloud metadata object actually exposes this — not
 yet confirmed which one, if any, is queryable the way `FlowDefinitionView`
 turned out to be for record-triggered Flows.
 
-## 18. DSO→DLO mapping: read, then auto-map (not built)
+## 21. DSO→DLO mapping: read, then auto-map (not built)
 
 Problem raised directly: "can you read the data mapping from DSO to DLO,
 and is it possible to update it?" Conceptually well understood — a DSO's
@@ -687,16 +768,7 @@ DSO→DLO mappings is a natural, well-precedented next step — the matching
 *logic* built for CRM field mapping should mostly transfer; what's unknown
 is only the metadata read/write surface on the Data Cloud side.
 
-## 19. Data Kit / Bundle documentation (not built)
-
-Idea: surface what's in a Data Cloud Data Kit/Bundle that's actually
-relevant to a data architect scoping a migration, and document it the same
-way `generate-mapping-doc` documents CRM field mappings — one spreadsheet,
-reviewable structure, not a wall of raw metadata. Depends on #15/#16
-existing first (need real Data Cloud metadata access before there's
-anything to document).
-
-## 20. SQL-Server-backed local DSO ingestion (not built)
+## 22. SQL-Server-backed local DSO ingestion (not built)
 
 Idea, raised directly: build something equivalent to Data Cloud's local
 CSV upload path for a DSO, but sourced from SQL Server instead of a local
@@ -710,169 +782,97 @@ system. Needs research into Data Cloud's actual ingestion API for local/
 manual uploads (as opposed to a configured Data Stream from a real
 connector) before scoping further.
 
-## 21. Calculated Insight scripting + testing + CI/CD (not built)
+## 23. Data Kit / Bundle documentation (not built, depends on #18/#19)
+
+Idea: surface what's in a Data Cloud Data Kit/Bundle that's actually
+relevant to a data architect scoping a migration, and document it the same
+way `generate-mapping-doc` documents CRM field mappings — one spreadsheet,
+reviewable structure, not a wall of raw metadata. Depends on #18/#19
+existing first (need real Data Cloud metadata access before there's
+anything to document).
+
+## 24. Calculated Insight scripting + testing + CI/CD (not built, depends on #18)
 
 Idea, raised directly: script Calculated Insight definitions (DMQL) here
 in the repo — versioned, reviewable, the same principle
 `sql/transformations/*.sql` already applies to CRM transform logic — write
 query-based tests against them, then deploy the resulting definition via a
 CI/CD pipeline rather than hand-building Calculated Insights in Data Cloud
-Setup each time. Depends on #15 (Data Cloud querying) existing first, to
+Setup each time. Depends on #18 (Data Cloud querying) existing first, to
 actually run the "query tests" part; the CI/CD deployment side would need
 its own research into how Calculated Insight metadata is deployed
 programmatically (Metadata API component type, if one exists, vs. Setup UI
 only today).
 
-## 22. Parquet file import — BUILT (`parquet_import.py`)
+## 25. Web UI for less-technical users (not built)
 
-`python cli.py import-parquet <path.parquet> <table> [--append]`: imports
-a Parquet file into a typed SQL Server table in the mirror DB — a second
-entry point alongside `replicate.py`'s org-sourced path for getting source
-data into SQL Server, for the case where the source is a columnar file
-rather than a live org (`docs/MIGRATION_PLAYBOOK.md`'s "Data Extraction
-from Source Systems" already covers flat files/JSON generally; this adds
-Parquet specifically as its own typed path).
+Problem: everything so far assumes an operator comfortable with a terminal
+and Claude Code. A data architect isn't always the only person who needs
+to see this framework's output, and not everyone is going to run a CLI.
 
-Unlike `replicate.py`'s Salesforce path — Bulk API 2.0 always returns text
-CSV, so every value needs coercing back to a native type (see
-`type_map.py`'s `typed_value_coercers`) — Parquet is already a typed
-columnar format. `pyarrow` hands back real int/float/datetime values
-directly, so there's no coercion step here, just a schema-inference-to-
-SQL-Server-DDL step (`_arrow_type_to_sql`), mirroring `type_map.py`'s
-`sf_type_to_sql` for the Salesforce side. Reads via
-`pyarrow.parquet.ParquetFile.iter_batches()` rather than
-`pd.read_parquet()` in one call, so a large file doesn't need to fit in
-memory at once — the same chunked-append pattern `replicate.py` already
-uses. Drops/recreates the target table by default; `--append` adds rows
-to an existing, schema-compatible table instead (e.g. loading a second
-file into the same table).
+Idea: a lightweight local web console -- not a rebuild of Salesforce's own
+UI (deliberately out of scope; Setup UI stays Setup UI), but a friendlier
+front end for *this* framework's own surface:
+- An environment/connection picker (which SQL Server, which Salesforce org
+  alias) instead of editing `.env` by hand.
+- A SQL Server browser + query window with a real results grid (not flat
+  console text).
+- A "skills menu" -- reflect `.claude/commands/*.md`'s own descriptions into
+  buttons, each shelling out to the same CLI verb this framework already
+  has. No new logic, just a friendlier way to trigger it.
+- A flat-file loader: upload a CSV/Excel file in the browser, land it in a
+  SQL Server table -- the same `pandas`/`SQLAlchemy` path `replicate.py`
+  already uses, just fed from an upload instead of the org.
+- A chat pane. Explicitly **not** a from-scratch reimplementation of an
+  agent tool-use loop -- that's Claude Code's own job. If this gets built,
+  it should wire in the Claude Agent SDK for a scoped assistant, or embed/
+  launch Claude Code itself, rather than duplicate it.
 
-Tested end to end against a synthetic Parquet file covering string,
-float, int, boolean, date, and datetime columns with NULLs mixed in:
-confirmed every column landed as the correct SQL Server type (`BIGINT`
-for a 64-bit int column, `FLOAT`, `BIT`, `DATE`, `DATETIME2`, `NVARCHAR
-(MAX)`) with NULLs preserved correctly, and confirmed `--append` adds
-rows to the existing table instead of dropping it.
+Candidate stack: Streamlit (Python-native, matches this repo's stack
+already; built-in file-uploader widget covers the CSV loader almost for
+free) plus `streamlit-aggrid` for a real spreadsheet-style results grid.
+Evaluated and set aside for now: Retool/Appsmith-style low-code app
+builders (real capability, but add a self-hosted server and more moving
+parts than a single Streamlit script justifies at this stage); Gradio (more
+ML-demo-shaped than data-grid-shaped).
 
-New dependency: `pyarrow` (Parquet read support).
+**This is a bigger step than it looks.** Today this framework is a CLI one
+already-credentialed operator runs at a terminal -- no listening network
+port, no session/auth boundary of its own. A web UI is a new, listening,
+possibly-multi-user surface, which is a genuinely different trust model,
+not just a new feature. See `docs/SECURITY_OVERVIEW.md` §8 -- building this
+requires a fresh security review pass, not an incremental patch to the
+existing one. Single sign-on and any real multi-user access control belong
+here too once this is picked up (tracked as #26, not folded into this item,
+since SSO is its own scoping exercise even once a UI exists to put it in
+front of).
 
-**Not built**: the imported table still needs the same
-profiling → mapping → transform pipeline as any other source table before
-it's ready for `bulkops` — this only solves getting the file's data into
-SQL Server, not any downstream step.
+## 26. SSO / multi-user access control (not built, depends on #25)
 
-## 23. Email Deliverability attestation gate — BUILT (`bulkops.py`, CLAUDE.md hard rule 9)
+Problem: once #25 exists, "who can open this web console, and as whom"
+becomes a real question for the first time -- today the CLI has no
+independent auth boundary at all (whoever can run it, can use it, same as
+`sqlcmd` or Data Loader). A browser-accessible tool changes that.
 
-Requested directly: a permanent check before any load that could trigger
-outbound email externally, stopping if deliverability allows it, warning
-and continuing if it's internal-only.
+Idea, roughly in order of how this is typically layered rather than a
+committed design: start with an identity-provider-backed reverse proxy
+(e.g. an OAuth2 proxy in front of Streamlit) rather than hand-rolling
+session/auth code -- consistent with this framework's general preference
+for well-established components over custom security-sensitive code (see
+`docs/SECURITY_OVERVIEW.md` §9's supply-chain stance). Scope should include
+at minimum: who can authenticate, whether different users get different
+Salesforce/SQL Server credentials or share the tool's own service
+credentials (the latter needs its own audit-trail story), and whether
+this needs to plug into an org's existing SSO (Okta, Azure AD, etc.) rather
+than manage its own user directory.
 
-**Research finding that reshaped this before any code was written**:
-Salesforce has no supported API to *read* the org's Email Deliverability
-setting. Confirmed two ways, not assumed: retrieved
-`EmailAdministrationSettings` live via `sf project retrieve` against this
-framework's own connected org (19 real settings came back, none of them
-deliverability-related), and cross-checked Salesforce's own Metadata API
-field reference for that type (no such field documented either). The
-strongest corroborating signal: the only tool found that can even *set*
-this value programmatically (`sfdx-deliverability-access`, a community
-plugin) does it by driving a **headless browser against the Setup UI** —
-exactly the kind of fragile screen-scraping this framework's whole
-approach avoids, and a strong sign no real API exists to automate around.
-
-Given that, an automated "validate and stop" check as originally
-described isn't honestly buildable. Built instead, with the user's
-explicit sign-off on this specific shape: a **required human attestation**
-built into `bulk_op()` for `insert`/`upsert` (the operations that can
-create new records and trigger real outbound email) —
-`--email-deliverability no-access|system-email-only|all-email` must be
-passed, based on someone actually having checked Setup first; omitting it
-raises before the API is ever touched. `all-email` requires an additional
-`--confirm-external-email-risk`, since that's the one state that can
-genuinely send real mail to real people — a deliberate override, not a
-default. The confirmed value is echoed back in the load's own result
-output either way, so "internal-only confirmed, continuing" or "external
-email risk explicitly accepted" is always visible in what the load
-actually reported, not just implied.
-
-No interactive terminal prompt was used deliberately — `bulkops` runs as a
-Bash tool call from Claude Code, which isn't a real interactive terminal,
-so a blocking `input()`/`click.prompt()` call risked hanging rather than
-actually gating anything. A required, explicit CLI flag achieves the same
-"can't proceed without a human having looked" guarantee without that risk.
-
-Tested: all six logic paths verified directly (missing value raises,
-`all-email` without confirm raises, `all-email` with confirm passes,
-`system-email-only` passes without confirm, update/delete are correctly
-exempt, an invalid value raises) — and confirmed live in the full
-`bulk_op()` pipeline that the check fires and raises before the function
-even attempts to read the SQL Server load table, let alone call the API.
-
-## 24. Load activity logging + analytics (not built)
-
-Problem: right now a `bulkops` run's outcome lives only in the console
-transcript and the load table's own `Id`/`Error` columns — there's no
-durable, queryable record of *what ran, when, and how it performed*
-across a whole project's worth of loads.
-
-Idea: a SQL Server log table capturing, per `bulkops` call: action
-(insert/update/upsert/delete), object, source table, record count,
-number of batches, average batch time, total job time, succeeded/failed/
-ambiguous counts, the Email Deliverability attestation (#23) if
-applicable, and start/end timestamps — everything `bulk_op()` already
-computes or could cheaply time, just not persisted anywhere today. Once
-this exists, build actual analytics on top of it (trends across
-sandbox/UAT/prod runs, which objects are slowest/most error-prone, batch-
-time regressions) rather than eyeballing scrollback each time — the
-"make sure we add some analytics for this data" part of the ask,
-deliberately scoped as a second step once the raw log exists, not
-speculatively built before there's real data to analyze.
-
-## 25. Run book (manual + programmatic step tracking) — blocked on a template
-
-Problem raised directly: today, nothing tracks the *human* side of a
-migration — every manual and programmatic step taken during a full load
-(sandbox, UAT, prod), who did it, start/end/elapsed time, errors hit,
-retries done — the actual "recipe" of a migration, not just what a script
-did. This is explicitly framed as high-stakes ("this is what can make or
-break a migration") and as something to track per main full load, not per
-script.
-
-**Blocked on the user sharing a real run-book template** — same pattern
-already established for `mapping_doc.py`/`docs/MIGRATION_PLAYBOOK.md`:
-drop a real example into `_stage/`, reviewed for structure/format only
-(column names, section layout), never content, before designing anything.
-Don't scope this further until that template exists to react to.
-
-Once scoped, the ambition stated directly is worth preserving here rather
-than softening: not just a template to fill in by hand, but a spreadsheet
-this framework keeps automatically up to date and in line with the actual
-load order and steps taken — closer to a generated artifact fed by #24's
-log data (and this framework's own load-order analysis, #2) than a
-document a human maintains manually. "Practices on scripts" (i.e. dev/test
-runs) are explicitly **not** in scope for tracking — only real full loads
-against sandbox/UAT/prod count.
-
-## 26. Dynamic batch sizing from org metadata review (not built, likely builds on #5)
-
-Problem raised directly: heavily-automated objects (per
-`docs/MIGRATION_PLAYBOOK.md`'s row-lock/batching guidance — CPQ/Billing-
-style objects often need batch sizes as small as 50 to let triggers/Flows
-keep up) currently need a human to know that ahead of time and pass the
-right batch size manually. Idea: use what `analyze-org-risk` (#5) already
-knows about an object's automation (validation rule count, Apex triggers,
-active record-triggered Flows) to automatically dial down `bulkops`'
-batch size for objects likely to hit lock contention or Bulk API limits,
-instead of always using the same default.
-
-Not yet scoped: `bulk_op()` doesn't currently expose a batch-size
-parameter to the Bulk API call at all (`simple_salesforce`'s `bulk2`
-handler picks its own default chunking) — first needs confirming whether
-`simple_salesforce` exposes batch size control at all, and if not, what
-the actual Bulk API 2.0 parameter for it is, before any "dial it down
-automatically" logic can be built on top. Depends on #5 already existing
-for the automation signal (built) and #24 for the timing data that would
-let this be tuned from real observed performance rather than a guess.
+Also worth tracking here once scoped: whether tighter Salesforce-side
+security (permission sets, sharing rules, a dedicated API-only migration
+user per hard rule 8's note) needs its own roadmap treatment as adoption
+broadens beyond a single trusted operator -- likely an expansion of #5
+(org metadata risk analyzer) rather than a new item, since it's the same
+"what could this touch that it shouldn't" question applied to access
+control instead of automation conflicts.
 
 ---
 
@@ -887,7 +887,7 @@ lifecycle, not just a set of standalone tools. Roughly, in order:
    actually being migrated — a documented decision, not an implicit one.
    Generate RAIDD (Risks/Assumptions/Issues/Decisions/Dependencies) entries
    for anything that needs one, for a RAIDD log.
-3. **Auto-map** (BUILT, see #11): attempt source → target field mapping
+3. **Auto-map** (BUILT, see #10): attempt source → target field mapping
    based on the mapping document, profiling data, and the git-tracked
    synonym thesaurus, as a first draft, not a final answer.
 4. **Draft the solution document** (BUILT, see #4): once mapping and
@@ -908,7 +908,7 @@ lifecycle, not just a set of standalone tools. Roughly, in order:
    proactively, but doesn't load anything without that review.
 
 This ties together #2 (load order), #3 (mapping doc), #4 (solution doc),
-#5 (org metadata risk), #7 (profiling), and #11 (auto-mapping) into one
+#5 (org metadata risk), #7 (profiling), and #10 (auto-mapping) into one
 pipeline, plus one remaining new piece: RAIDD log generation. Scoping that
 into a concrete build is the next step — this section is the shape of
 where it's all going, not a spec for it yet.

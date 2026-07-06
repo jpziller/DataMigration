@@ -42,6 +42,7 @@ Git for Windows ──> clone this repo ──┬─> Python venv + pip install 
                                                                           └─> ODBC Driver 18 ──> create SF_Migration DB
 Salesforce CLI (sf) ──> auth target org ──> VS Code + Salesforce Extension Pack (auto-detects the auth)
 Mockaroo account (optional — only for mock-data generation) ──> API key
+GitHub CLI (gh, optional — only for PR/issue workflows) ──> gh auth login
 Claude Code (optional, needs Git for Windows) ──> authenticate
                                        all of the above ──> configure .env
 ```
@@ -86,7 +87,7 @@ everywhere.)
 Install separately from Microsoft — `pyodbc` (step 3) needs this at runtime;
 it doesn't ship with the SQL Server engine or with the Python package itself.
 Driver 18 encrypts by default, so for a local instance with a self-signed
-cert keep `SQL_TRUST_SERVER_CERT=yes` in `.env` (step 12) or connections fail.
+cert keep `SQL_TRUST_SERVER_CERT=yes` in `.env` (step 13) or connections fail.
 
 **7. Create the mirror database**
 In SSMS (step 5) or via `sqlcmd`:
@@ -114,13 +115,23 @@ first, or they'll have nothing to detect.
 **10. Mockaroo (optional — only needed for `generate-mock-data`)**
 Sign up free at mockaroo.com, then get an API key from mockaroo.com/account.
 Free tier: 200 requests/day, up to 5,000 records/request. Add it to `.env` in
-step 12 — never commit it or paste it into a chat/AI session (see step 12).
+step 13 — never commit it or paste it into a chat/AI session (see step 13).
 
-**11. Claude Code (optional, but this repo's operating model assumes it)**
+**11. GitHub CLI (`gh`, optional — only needed for PR/issue workflows)**
+Install from cli.github.com (or `winget install --id GitHub.cli`), then
+authenticate once:
+```bash
+gh auth login
+```
+Interactive — run it directly in your own terminal (not piped through an
+AI assistant) so you can see and respond to the prompts, including the
+one-time device code. Choose GitHub.com → HTTPS → login with a web browser.
+
+**12. Claude Code (optional, but this repo's operating model assumes it)**
 Needs Git for Windows (step 1) for its Bash shell. See "Claude Code operating
 layer" below for install + setup details.
 
-**12. Configure**
+**13. Configure**
 ```bash
 copy .env.example .env       # cp on Mac/Linux
 ```
