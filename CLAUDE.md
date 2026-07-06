@@ -139,8 +139,12 @@ don't jump straight to writing T-SQL:
 ## Licensing
 MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,
 and redistribute (including commercially), provided the copyright notice is
-kept. Don't reference competitor products (DBAmp, etc.) by name in code
-comments or docs — describe behavior generically instead.
+kept. Don't reference by name any tool this framework builds its own
+replacement for (DBAmp, Field Trip, Salesforce Inspector Reloaded, Maven,
+Workbench, etc.) in code, comments, docs, or generated file contents
+(including spreadsheet column headers) — describe the behavior generically
+instead. This does **not** apply to tools this framework actually integrates
+with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 
 ## Where things live
 - `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py`,
