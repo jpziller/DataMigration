@@ -177,12 +177,24 @@ default template isn't a file at all -- it's built directly from Python in
 `solution_doc.py`, so it's already template content, versioned like the
 rest of the framework.
 
-**Also generated, but living in SQL Server rather than as files** —
-`dbo.SourceRegistry`/`dbo.AutoMapSuggestions` (per-project auto-mapping
-state written by `auto-map`). Same rule applies: these are a deploy target,
-never the source of truth. The thesaurus they're matched against
+**Also generated, but living in SQL Server rather than as files** — every
+table below is a deploy target, safe to drop/regenerate by re-running the
+command that built it, never the source of truth for anything git already
+tracks:
+
+| Table | Written by |
+|---|---|
+| `dbo.FieldProfile`, `dbo.FieldProfileValues` | `profile-salesforce` / `profile-sql-table` |
+| `dbo.ObjectDependency`, `dbo.ObjectLoadOrder` | `analyze-load-order` |
+| `dbo.SourceRegistry`, `dbo.AutoMapSuggestions` | `auto-map` |
+| `dbo.ObjectAutomationRisk` | `analyze-org-risk` |
+| `<Object>_Mock` | `generate-mock-data` |
+| `<LoadTable>_Result`, `<LoadTable>_Retry` | `bulkops` (no `key_column`) / `bulkops-retry` |
+
+The one exception worth calling out: `auto-map`'s thesaurus
 (`reference/field_synonyms.json`) always originates in git, never in SQL
-Server.
+Server — `dbo.AutoMapSuggestions` stores *results*, not the matching rules
+themselves.
 
 If a real engagement wants a versioned copy of its own describe snapshots or
 mapping workbook, that's a deliberate choice to make for that project — not

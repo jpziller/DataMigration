@@ -3,6 +3,44 @@
 Notes on future tooling for this framework — captured as ideas to review and
 scope later, not committed designs. Nothing here is built yet unless marked.
 
+## Capabilities at a glance
+
+Read this table first — it's the answer to "what can this framework do
+today," so a fresh full read of every section below shouldn't be necessary
+just to find out what's built. Update this table in the same commit as any
+future item that flips status, so it never drifts from the sections it
+summarizes.
+
+| # | Item | Status | Command / skill |
+|---|---|---|---|
+| 1 | Reusable SQL function library | Built (library, no CLI wrapper) | `sql/functions/` |
+| 2 | Load-order dependency analyzer | **Built** | `analyze-load-order` |
+| 3 | Field-mapping spreadsheet tool | **Built** | `generate-mapping-doc`, `check-mapping-balance` |
+| 4 | Solution document generator | **Built** | `generate-solution-doc` |
+| 5 | Org metadata risk analyzer | **Built** | `analyze-org-risk` |
+| 6 | Mock/demo data generation | **Built** | `generate-mock-data` |
+| 7 | Data profiling toolset | **Built** | `profile-salesforce`, `profile-sql-table`, `export-profile-excel` |
+| 8 | Ad hoc query tool | **Built** | `query` |
+| 9 | Fuzzy matching / dedup | Deprioritized, not built | — |
+| 10 | Console output polish | **Built** | (applies to `query`/`profile-*`) |
+| 11 | Auto-mapping | **Built** | `auto-map` |
+| 12 | Web UI for less-technical users | Not built (future) | — |
+| 13 | SSO / multi-user access control | Not built, depends on #12 | — |
+| 14 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` |
+| 15 | Data Cloud (D360) query support | Not built — needs API research | — |
+| 16 | Data Cloud semantic model reference | Not built, depends on #15 | — |
+| 17 | DSO refresh/error monitoring | Not built — needs API research | — |
+| 18 | DSO→DLO mapping read + auto-map | Not built — needs API research | — |
+| 19 | Data Kit / Bundle documentation | Not built, depends on #15/#16 | — |
+| 20 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — |
+| 21 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #15 | — |
+
+Also load-bearing but not numbered above: `replicate` (org → SQL) and the
+`sql/transformations/*.sql` transform pattern are the core migration
+pipeline every other tool builds on — see `README.md`/`CLAUDE.md`, not
+this roadmap, since they're not backlog items, they're the framework's
+actual spine.
+
 ---
 
 ## 1. Reusable SQL function library
@@ -510,6 +548,105 @@ not run "to test," per hard rule 2; the resolved-rows and unresolved-rows
 code paths were each verified independently instead (resolution mapping,
 and the all-skip writeback path), and combine via ordinary boolean
 row filtering.
+
+## 15. Data Cloud (D360) query support (not built)
+
+`query_tool.py` is explicitly scoped to CRM objects via the standard REST
+Query API today (see its own docstring) — Data Cloud objects (DLOs, DMOs,
+Calculated Insights, Unified Profile) use a genuinely different query
+surface (the Data Cloud Query API, not `sf.query()`/SOQL) that isn't
+supported at all yet.
+
+Idea: extend querying to DLOs (Data Lake Objects), DMOs (Data Model
+Objects), Calculated Insights, and Unified Profile records, plus a way to
+pull data out of Data Graphs. Given how `risk_analyzer.py` turned out
+(`ValidationRule`/`ApexTrigger` needed the Tooling API while
+`FlowDefinitionView`/`ProcessDefinition` needed the standard REST API, and
+guessing wrong failed silently or errored outright), **do not assume any
+of these share one endpoint** — verify each against
+`developer.salesforce.com`'s current Data Cloud API docs, and probe live
+against a real org's Data Cloud instance, before writing a line of code.
+This is explicitly the kind of area CLAUDE.md already warns about
+trusting stale training knowledge for.
+
+## 16. Data Cloud semantic model reference (not built)
+
+Idea: understand and expose the semantic model (the layer that gives DMOs
+and their relationships business meaning beyond raw schema) as a reference
+data architects can query against — both the data and the metadata *about*
+it — the same spirit as `metadata.py`/`dump_describe()` does for CRM
+objects today, but for Data Cloud's own metadata layer. Needs real API
+research first (see #15's caution); likely depends on #15 existing first
+since both need the same Data Cloud API access.
+
+## 17. DSO refresh/error monitoring (not built)
+
+Problem: before trusting data pulled from a DSO (Data Source Object — the
+raw ingested layer, see #18), a data architect needs to know when it last
+refreshed and whether its last ingestion run had errors — silently working
+off stale or partially-failed ingested data is a real risk specific to the
+Data Cloud pipeline (source → DSO → DLO → DMO), distinct from anything
+`profiling.py` checks about the *content* of already-landed data.
+
+Idea: a check (`analyze-org-risk`-style, or its own command) reporting
+last-refresh timestamp and ingestion error count/detail per DSO. Needs
+research into which Data Cloud metadata object actually exposes this — not
+yet confirmed which one, if any, is queryable the way `FlowDefinitionView`
+turned out to be for record-triggered Flows.
+
+## 18. DSO→DLO mapping: read, then auto-map (not built)
+
+Problem raised directly: "can you read the data mapping from DSO to DLO,
+and is it possible to update it?" Conceptually well understood — a DSO's
+fields get mapped/transformed into a DLO's fields, which then map again
+into canonical DMO fields (see Salesforce's own "Data Objects in Data
+Cloud" docs) — but the *specific* API/metadata object that exposes this
+mapping programmatically, and whether it's writable outside Data Cloud's
+own Setup UI, is **not yet confirmed** and needs real API-doc research
+(plus a live probe against this org) before answering definitively, let
+alone building against it.
+
+If reading turns out to be possible, extending `auto_mapper.py`'s
+approach (thesaurus + fuzzy matching + a data-quality gate) to suggest
+DSO→DLO mappings is a natural, well-precedented next step — the matching
+*logic* built for CRM field mapping should mostly transfer; what's unknown
+is only the metadata read/write surface on the Data Cloud side.
+
+## 19. Data Kit / Bundle documentation (not built)
+
+Idea: surface what's in a Data Cloud Data Kit/Bundle that's actually
+relevant to a data architect scoping a migration, and document it the same
+way `generate-mapping-doc` documents CRM field mappings — one spreadsheet,
+reviewable structure, not a wall of raw metadata. Depends on #15/#16
+existing first (need real Data Cloud metadata access before there's
+anything to document).
+
+## 20. SQL-Server-backed local DSO ingestion (not built)
+
+Idea, raised directly: build something equivalent to Data Cloud's local
+CSV upload path for a DSO, but sourced from SQL Server instead of a local
+file — the same "SQL Server as the integration hub" principle this whole
+framework is built around, applied to Data Cloud ingestion instead of CRM
+`bulkops`. Real payoff called out directly: this would make `mock_data.py`
+(already built, Mockaroo-backed) useful for **Data Cloud** testing too, not
+just CRM object testing — generate mock rows into a SQL Server table, then
+push them into a DSO locally for testing without touching a real source
+system. Needs research into Data Cloud's actual ingestion API for local/
+manual uploads (as opposed to a configured Data Stream from a real
+connector) before scoping further.
+
+## 21. Calculated Insight scripting + testing + CI/CD (not built)
+
+Idea, raised directly: script Calculated Insight definitions (DMQL) here
+in the repo — versioned, reviewable, the same principle
+`sql/transformations/*.sql` already applies to CRM transform logic — write
+query-based tests against them, then deploy the resulting definition via a
+CI/CD pipeline rather than hand-building Calculated Insights in Data Cloud
+Setup each time. Depends on #15 (Data Cloud querying) existing first, to
+actually run the "query tests" part; the CI/CD deployment side would need
+its own research into how Calculated Insight metadata is deployed
+programmatically (Metadata API component type, if one exists, vs. Setup UI
+only today).
 
 ---
 

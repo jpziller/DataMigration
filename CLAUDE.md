@@ -220,13 +220,26 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `force-app/` — Salesforce metadata deployed via `sf project deploy`
   (custom fields, profile FLS grants).
 - `mapping/` — generated field-mapping workbooks (`generate-mapping-doc`).
-- `dbo.SourceRegistry`, `dbo.AutoMapSuggestions` (SQL Server, not files) —
-  per-project auto-mapping state written by `auto-map`: which source
-  tables have been auto-mapped against which target objects, and the
-  suggestions themselves (match method, score, migrate recommendation,
-  rationale). Deploy targets only, like every other table this framework
-  creates — never edited by hand, never the source of truth for the
-  thesaurus (that's always `reference/field_synonyms.json` in git).
+- **SQL Server tables this framework creates** (not files — all deploy
+  targets only, safe to drop/regenerate by re-running the command that
+  built them, never edited by hand, never the source of truth for anything
+  git already tracks):
+  - `dbo.FieldProfile`, `dbo.FieldProfileValues` — `profile-salesforce`/
+    `profile-sql-table` results.
+  - `dbo.ObjectDependency`, `dbo.ObjectLoadOrder` — `analyze-load-order`
+    results.
+  - `dbo.SourceRegistry`, `dbo.AutoMapSuggestions` — `auto-map` state
+    (which source tables have been auto-mapped against which target
+    objects, and the suggestions themselves — match method, score, migrate
+    recommendation, rationale). Never the source of truth for the
+    thesaurus itself (that's always `reference/field_synonyms.json` in git).
+  - `dbo.ObjectAutomationRisk` — `analyze-org-risk` results (validation
+    rules, Apex triggers, record-triggered Flows, workflow rules, approval
+    processes per object).
+  - `<Object>_Mock` — `generate-mock-data` output.
+  - `<LoadTable>_Result`, `<LoadTable>_Retry` — `bulkops`/`bulkops-retry`
+    writeback and retry tables (only when the load table has no
+    `key_column` for in-place writeback, or a retry was built).
 - `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
   `SOQL_QUERY_LIBRARY.md` (Tooling API queries), `SECURITY_OVERVIEW.md`
   (credential inventory, trust boundaries, what's code-enforced vs.

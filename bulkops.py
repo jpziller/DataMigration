@@ -346,5 +346,10 @@ def build_retry_table(engine, table, schema="dbo", error_column="Error", retry_s
             f"FROM [{schema}].[{table}] WHERE [{error_column}] IS NOT NULL;"
         ))
         count = cx.execute(text(f"SELECT COUNT(*) FROM [{schema}].[{retry_table}]")).scalar()
+        if count == 0:
+            # SELECT INTO creates the table even when the WHERE clause
+            # matches nothing -- don't leave a stray empty table behind
+            # just because a load had no failures to retry.
+            cx.execute(text(f"DROP TABLE [{schema}].[{retry_table}];"))
 
     return f"{schema}.{retry_table}", count
