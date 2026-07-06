@@ -21,6 +21,9 @@ Examples:
 """
 import click
 import pandas as pd
+from rich.console import Console
+from rich.table import Table
+from sqlalchemy import text
 
 from config import get_settings
 from sf_client import connect_salesforce
@@ -38,6 +41,20 @@ import mapping_doc as mpd
 def _ctx():
     s = get_settings()
     return s, connect_salesforce(s), make_engine(s)
+
+
+def _print_table(df, max_rows=50):
+    """Render a DataFrame as a rich console table, truncated to max_rows."""
+    if df.empty:
+        return
+    table = Table(show_lines=False)
+    for col in df.columns:
+        table.add_column(str(col))
+    for _, row in df.head(max_rows).iterrows():
+        table.add_row(*("" if pd.isna(v) else str(v) for v in row))
+    Console().print(table)
+    if len(df) > max_rows:
+        Console().print(f"[dim]... {len(df) - max_rows} more row(s) not shown[/dim]")
 
 
 @click.group()
@@ -127,6 +144,22 @@ def analyze_load_order_cmd(object_names, schema):
     click.echo(f"\nWritten to {schema}.ObjectDependency and {schema}.ObjectLoadOrder")
 
 
+def _print_profile_preview(engine, object_or_table, source_type, schema):
+    # Deliberately narrow -- just enough to decide "does this field look
+    # worth migrating" at a glance. Full detail (min/max, blank counts,
+    # value distributions) is in dbo.FieldProfile/FieldProfileValues and
+    # export-profile-excel, not crammed into a console preview.
+    df = pd.read_sql(
+        text(
+            f"SELECT FieldName, DataType, PopulatedPct, DistinctCount "
+            f"FROM [{schema}].[FieldProfile] "
+            "WHERE ObjectOrTable = :name AND SourceType = :st ORDER BY FieldName"
+        ),
+        engine, params={"name": object_or_table, "st": source_type},
+    )
+    _print_table(df)
+
+
 @cli.command("profile-salesforce")
 @click.argument("object_name")
 @click.option("--where", default=None, help="SOQL WHERE clause (no 'WHERE').")
@@ -139,6 +172,7 @@ def profile_salesforce_cmd(object_name, where, schema, top_n_values):
     )
     click.echo(f"Profiled {len(profiles)} fields on {object_name} "
                f"({len(distributions)} with value distributions captured)")
+    _print_profile_preview(engine, object_name, "salesforce", schema)
     click.echo(f"Results in {schema}.FieldProfile / {schema}.FieldProfileValues")
 
 
@@ -154,6 +188,7 @@ def profile_sql_table_cmd(table_name, schema, top_n_values, distinct_threshold):
     )
     click.echo(f"Profiled {len(profiles)} columns on {schema}.{table_name} "
                f"({len(distributions)} with value distributions captured)")
+    _print_profile_preview(engine, table_name, "sql_table", schema)
     click.echo(f"Results in {schema}.FieldProfile / {schema}.FieldProfileValues")
 
 
@@ -187,10 +222,7 @@ def query_cmd(soql, fetch_all, csv_path, excel_path, max_print_rows):
         qt.to_excel(records, excel_path)
         click.echo(f"Wrote {len(records)} row(s) to {excel_path}")
     elif records:
-        df = pd.DataFrame(records)
-        with pd.option_context("display.max_rows", max_print_rows,
-                                "display.max_columns", None, "display.width", None):
-            click.echo(df.to_string(index=False))
+        _print_table(pd.DataFrame(records), max_rows=max_print_rows)
 
     click.echo(f"\n{len(records)} of {total_size} total record(s) shown.")
     if truncated:

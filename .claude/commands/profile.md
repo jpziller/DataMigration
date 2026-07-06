@@ -10,10 +10,14 @@ migrating.
    replicated SQL Server table (`profile-sql-table`) — results can genuinely
    differ between the two (see README's Known limitations: long-text fields
    have no population stats via the Salesforce path at all).
-2. Run the appropriate command against `$ARGUMENTS`.
-3. Summarize notable findings from `dbo.FieldProfile`/`dbo.FieldProfileValues`:
-   fields that are mostly null/blank, low-cardinality fields worth reviewing,
-   and any fields the profiler couldn't get stats for.
+2. Run the appropriate command against `$ARGUMENTS` — it prints a compact
+   preview table (field name, type, populated %, distinct count) already;
+   paste that output rather than re-deriving a summary from scratch.
+3. Call out anything notable in it: fields that are mostly null/blank,
+   low-cardinality fields worth reviewing, and any fields the profiler
+   couldn't get stats for (full detail — min/max, blank counts, value
+   distributions — lives in `dbo.FieldProfile`/`dbo.FieldProfileValues`, not
+   the console preview).
 4. If asked for a spreadsheet, run `export-profile-excel` and report the path.
 
 Read-only against the org; writes only to dbo.FieldProfile/
