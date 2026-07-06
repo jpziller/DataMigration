@@ -96,11 +96,44 @@ in once a mapping is decided.
 Auto-mapping into this doc (source→target suggestions) is now built — see
 #11 below.
 
-## 4. Solution document generator (not built, depends on #2 and #3)
+## 4. Solution document generator — BUILT (`solution_doc.py`)
 
-Idea: auto-draft a migration solution/design document from the mapping
-spreadsheet + load-order analysis + object metadata, instead of writing it
-by hand each time.
+`python cli.py generate-solution-doc <output.docx> <Object> [<Object> ...]`:
+auto-drafts a migration solution/design Word document from data this
+framework already has -- load-order analysis (#2), a filled-in mapping doc
+(#3, optional via `--mapping-path`), and profiling data (#7) -- instead of
+writing one by hand for every project. Sections: what's being built (the
+object list, in load order), how it's being done (SQL-centric methodology,
+in plain language -- replicate/transform/load, fingerprint-based result
+mapping, sort/dedupe before load), a load-order table (flagging self-
+references and unresolved cycles), one subsection per object (source
+table, row count, field-mapping status, profiling summary), and an
+optional appendix (`--appendix`) with the full field-by-field mapping
+detail.
+
+Load order is re-analyzed fresh on every run (cheap, describe()-only) so
+it's never stale -- unlike profiling and mapping, which are deliberately
+separate, more expensive steps the user controls, not auto-triggered here.
+
+**No binary template is checked into git.** The default document is built
+entirely from Python (`_build_default_docx` in `solution_doc.py`) --
+reviewable, diffable content, the same principle auto_mapper.py's
+thesaurus follows (git is the source of truth, not an opaque generated
+artifact). A data architect at a different company who wants their own
+branding doesn't need a code change: `--template <custom.docx>` renders
+their own Word document instead, built with `docxtpl` (Jinja2 tags typed
+into a real Word doc, styled however they like) against the identical
+context dict the default path uses. If no template is given, falls back
+to the default -- exactly the requirement that shaped this design (every
+data architect has different requirements/branding; ship a working
+default, let anyone override it without touching code).
+
+Tested end to end: default template (cover page, all 5 sections, appendix)
+against `Account` with a real auto-mapped sheet; a hand-built custom
+`docxtpl`-tagged template rendering the same context correctly; and the
+graceful-degradation paths (no `--mapping-path` given, no profiling data
+for an object) -- both report the gap in plain language in the document
+itself rather than erroring or silently omitting the section.
 
 ## 5. Org metadata risk analyzer (not built)
 
@@ -306,15 +339,20 @@ lifecycle, not just a set of standalone tools. Roughly, in order:
 3. **Auto-map** (BUILT, see #11): attempt source → target field mapping
    based on the mapping document, profiling data, and the git-tracked
    synonym thesaurus, as a first draft, not a final answer.
-4. **Generate scripts**: build the T-SQL transform for each source →
+4. **Draft the solution document** (BUILT, see #4): once mapping and
+   profiling exist for the objects in scope, auto-draft the migration
+   solution/design document from them — a living draft that gets
+   regenerated as the mapping/profiling underneath it evolves, not a
+   one-time snapshot.
+5. **Generate scripts**: build the T-SQL transform for each source →
    target object pairing (following the standard workflow already in
    `CLAUDE.md`: mapping → confirm field names → build → sort → dupe-check).
-5. **AI review of transformed data**: review subsets of transformed
+6. **AI review of transformed data**: review subsets of transformed
    records and check them against the org's build/automation metadata —
    a **Risk Analyzer** distinct from #5 (which looks at org metadata
    ahead of time; this looks at actual transformed *data* against that
    metadata to catch problems #5 wouldn't surface from schema alone).
-6. **Human in the loop**: a person reviews everything generated so far and
+7. **Human in the loop**: a person reviews everything generated so far and
    polishes each object for real migration — AI proposes and drafts
    proactively, but doesn't load anything without that review.
 

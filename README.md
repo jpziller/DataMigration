@@ -138,7 +138,8 @@ whoever clones this repo:
 cli.py, config.py, sf_client.py, sql_client.py,        framework code
 replicate.py, bulkops.py, type_map.py, metadata.py,
 load_order.py, profiling.py, query_tool.py,
-mock_data.py, mapping_doc.py, auto_mapper.py
+mock_data.py, mapping_doc.py, auto_mapper.py,
+solution_doc.py
 
 reference/field_synonyms.json                           auto-mapping synonym thesaurus
                                                          (grows via real corrections, but the
@@ -158,9 +159,20 @@ org's schema and every project's field mappings are different:
 metadata/*.json          dump-describe output -- one specific org's schema
 mapping/*.xlsx           generate-mapping-doc/auto-map output -- one specific
                          project's field-mapping decisions
+*.docx (wherever you point generate-solution-doc)  one specific project's
+                         solution document -- put your own copy under
+                         version control deliberately if you want one
 _stage/                  CSV staging, dropped-in reference docs, scratch work
 .env                     real credentials
 ```
+
+A custom `--template` .docx for `generate-solution-doc` (a data architect's
+own branded Word template) is the same kind of org/project-specific,
+deliberately-versioned-if-you-want-it artifact -- there's no default
+location for it, and none is assumed. The document generator's *own*
+default template isn't a file at all -- it's built directly from Python in
+`solution_doc.py`, so it's already template content, versioned like the
+rest of the framework.
 
 **Also generated, but living in SQL Server rather than as files** —
 `dbo.SourceRegistry`/`dbo.AutoMapSuggestions` (per-project auto-mapping
@@ -237,6 +249,13 @@ python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/t
 # overwrites a row a human already filled in.
 python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
 
+# Auto-draft a migration solution/design document (Word) from load-order
+# analysis + a mapping doc + profiling data. No binary template lives in
+# git -- the default is built entirely from Python (solution_doc.py); pass
+# --template to swap in your own branded .docx instead.
+python cli.py generate-solution-doc Solution.docx Account Contact Opportunity \
+    --mapping-path mapping/Migration_Mapping.xlsx --company "Acme Corp" --appendix
+
 # Transform in T-SQL (sql/transformations/*.sql) to build *_Load tables
 
 # Load SQL -> org, with Id/Error written back into the load table
@@ -248,8 +267,8 @@ python cli.py bulkops Case delete Case_Purge --key-column LoadId
 Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/replicate`, `/build-load`, `/validate-load`, `/status`) — see
-"Claude Code operating layer" below.
+`/auto-map`, `/generate-solution-doc`, `/replicate`, `/build-load`,
+`/validate-load`, `/status`) — see "Claude Code operating layer" below.
 
 ---
 
@@ -316,6 +335,7 @@ SQL Server, **reviewed hands** for mutations.
   `/generate-mapping-doc <Object> <path.xlsx> <SourceTable>`,
   `/check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`,
   `/auto-map <Object> <mapping.xlsx> <SourceTable>`,
+  `/generate-solution-doc <output.docx> <Objects...>`,
   `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
   `/status`.
 

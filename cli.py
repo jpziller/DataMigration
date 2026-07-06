@@ -19,6 +19,7 @@ Examples:
     python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts  # same file -> adds a tab, doesn't overwrite
     python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
     python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
+    python cli.py generate-solution-doc Solution.docx Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
 """
 import click
 import pandas as pd
@@ -38,6 +39,7 @@ import query_tool as qt
 import mock_data as mkd
 import mapping_doc as mpd
 import auto_mapper as am
+import solution_doc as sd
 
 
 def _ctx():
@@ -302,6 +304,33 @@ def auto_map_cmd(object_name, mapping_path, source_table, schema):
     click.echo(f"Applied to {mapping_path}: {result['applied']} row(s) written, "
                f"{result['skipped_human_filled']} skipped (already had a human-filled Target field)")
     click.echo(f"Results also in {schema}.AutoMapSuggestions / {schema}.SourceRegistry")
+
+
+@cli.command("generate-solution-doc")
+@click.argument("output_path")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--mapping-path", default=None, help="Mapping workbook (generate-mapping-doc/auto-map output) to pull field-mapping summaries from.")
+@click.option("--template", "template_path", default=None, help="Custom branded .docx template with docxtpl tags -- falls back to the built-in default if omitted.")
+@click.option("--company", "company_name", default=None, help="Company/client name shown on the cover.")
+@click.option("--project", "project_name", default=None, help="Project name shown on the cover (defaults to a generic title).")
+@click.option("--prepared-by", default=None)
+@click.option("--schema", default="dbo")
+@click.option("--appendix", is_flag=True, help="Include a full field-by-field mapping appendix (needs --mapping-path).")
+def generate_solution_doc_cmd(output_path, object_names, mapping_path, template_path,
+                               company_name, project_name, prepared_by, schema, appendix):
+    s, sf, engine = _ctx()
+    path, context = sd.generate_solution_doc(
+        sf, engine, output_path, list(object_names), mapping_path=mapping_path,
+        template_path=template_path, schema=schema, company_name=company_name,
+        project_name=project_name, prepared_by=prepared_by, target_org_alias=s.sf_org_alias,
+        include_appendix=appendix,
+    )
+    template_note = f"custom template {template_path}" if template_path else "built-in default template"
+    click.echo(f"Wrote {path} covering {len(context['objects'])} object(s) ({template_note})")
+    if context["unresolved_cycles"]:
+        click.echo("Unresolved circular dependencies flagged in the document:")
+        for group in context["unresolved_cycles"]:
+            click.echo(f"  {', '.join(group)}")
 
 
 if __name__ == "__main__":

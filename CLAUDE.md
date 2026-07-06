@@ -73,6 +73,15 @@ venv may not be active in a fresh shell:
                 Writes suggestions into the mapping doc's Target block/Notes/Migrate Data columns,
                 but never overwrites a row where a human already filled in the Target field — see
                 `auto_mapper.py` for the full design rationale.)
+- Solution doc:  `.venv/Scripts/python.exe cli.py generate-solution-doc Solution.docx Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx`
+                (auto-drafts a migration solution/design Word document from load-order analysis,
+                a mapping doc, and profiling data — no binary template checked into git; the
+                default document is built entirely from Python in `solution_doc.py`, fully
+                reviewable like everything else this framework generates. `--company`/`--project`/
+                `--prepared-by` fill in the cover; `--appendix` adds the full field-by-field
+                mapping table; `--template <custom.docx>` lets a data architect swap in their own
+                branded Word template with the same context as `docxtpl` Jinja tags, falling back
+                to the default when omitted.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
@@ -82,7 +91,8 @@ venv may not be active in a fresh shell:
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/replicate`, `/build-load`, `/validate-load`, `/status`
+`/auto-map`, `/generate-solution-doc`, `/replicate`, `/build-load`,
+`/validate-load`, `/status`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -171,9 +181,9 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
-  `mapping_doc.py`, `auto_mapper.py` — the Data Architect toolbelt
-  (load-order analysis, profiling, ad hoc query, mock data, mapping doc,
-  auto-mapping).
+  `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py` — the Data Architect
+  toolbelt (load-order analysis, profiling, ad hoc query, mock data, mapping
+  doc, auto-mapping, solution document generation).
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always
