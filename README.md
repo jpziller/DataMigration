@@ -169,9 +169,10 @@ python cli.py generate-mock-data Account --count 50
 
 # Field-mapping workbook -- one shared file, one tab per object (reuse the
 # same output path across objects; it adds/replaces that object's sheet,
-# not the whole file). Doesn't guess the mapping -- a human fills it in.
-python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx --source-table SourceAccounts
-python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx
+# not the whole file). One row per SOURCE field from the named SQL table,
+# blank Target block for a human to fill in -- doesn't guess the mapping.
+python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts
+python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts
 python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
 
 # Transform in T-SQL (sql/transformations/*.sql) to build *_Load tables

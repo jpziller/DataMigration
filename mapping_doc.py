@@ -1,32 +1,39 @@
 """Field-mapping spreadsheet tool (roadmap #3).
 
-generate_mapping_workbook() builds an Excel mapping doc from a Salesforce
-object's describe() -- one row per target field (type, required, real
-picklist values), with blank Source Field/Source Type/Transformation Notes
-columns for a human to fill in. If a source SQL table is given, its columns
-are listed on a companion reference sheet. This does NOT auto-guess the
-mapping (that's a separate roadmap item) -- it only builds the structure.
+Column structure is modeled on a real-world field-inventory-and-mapping
+template (structure/column-names only -- reviewed for format, not content):
+one row per SOURCE field, a block of migration-decision columns (populated
+%, migrate data/field Y-N, business review/decision), then a blank Target
+block (Object/Field API/Label/Type/Description/Notes) for a human to fill
+in once a mapping is actually decided. This is the opposite orientation
+from an earlier version of this tool (which listed one row per TARGET
+field) -- row-per-source-field is the right shape, since the real workflow
+is "for each source field, decide if/how it maps," not the reverse.
+
+generate_mapping_workbook() builds this from a SQL Server source table's
+real columns (INFORMATION_SCHEMA) against a named Salesforce target object.
+If profiling data already exists for that table (see profiling.py),
+"Field Trip Populated On"/"Field Trip %" are pre-filled from it -- those
+columns exist for exactly that purpose. This does NOT auto-guess the
+mapping itself (that's a separate roadmap item) -- only the structure.
 
 check_mapping_balance() diffs a filled-in mapping doc against the actual
 `sql/transformations/*.sql` load-table-building code in both directions, so
 the human-readable doc and the executable transform can't silently drift
 apart:
-  - documented_not_implemented: the doc says a field is mapped (has a
-    Source Field), but the transform's INSERT INTO column list doesn't
-    populate it.
-  - implemented_not_documented: the transform populates a column the
-    mapping doc doesn't have a row for at all, or has a row for but with no
-    Source Field filled in. This also catches a transform populating a
-    field that doesn't even exist in the object's current describe() --
-    that field won't appear as a row at all, so it always surfaces here.
+  - documented_not_implemented: the doc shows a target field as mapped
+    (Target block's Field API is filled in), but the transform's INSERT
+    INTO column list doesn't populate it.
+  - implemented_not_documented: the transform populates a column with no
+    row showing it as mapped. This also catches a transform populating a
+    field that doesn't exist in the object's current describe() at all --
+    a nonexistent field can't have a row, so it always surfaces here.
 """
 import os
 import re
 
-import pandas as pd
+import openpyxl
 from sqlalchemy import text
-
-from type_map import is_compound
 
 _INSERT_INTO_RE = re.compile(
     r"INSERT\s+INTO\s+(?:\[?[\w]+\]?\.)?\[?(\w+)\]?\s*\(([^)]+)\)",
@@ -34,60 +41,82 @@ _INSERT_INTO_RE = re.compile(
 )
 _INVALID_SHEET_CHARS = re.compile(r"[:\\/?*\[\]]")
 
+_HEADERS = [
+    "Source Object", "Field API", "Field Label", "Data Type", "Description",
+    "Field Trip Populated On", "Field Trip %", "Notes",
+    "Migrate Data", "Migrate Field", "Biz Review Req", "Biz Decision",
+    None,  # spacer column between source and target blocks
+    "Target Object", "Field API", "Field Label", "Data Type", "Description", "Notes",
+]
+_TARGET_FIELD_API_COL = 15  # 1-indexed position of the Target block's "Field API" column
+
 
 def _safe_sheet_name(name):
     return _INVALID_SHEET_CHARS.sub("_", name)[:31]
 
 
-def generate_mapping_workbook(sf, object_name, output_path, engine=None, source_table=None, schema="dbo"):
-    desc = getattr(sf, object_name).describe()
-    rows = []
-    for f in desc["fields"]:
-        if is_compound(f):
-            continue
-        picklist_values = ""
-        if f["type"] in ("picklist", "multipicklist"):
-            picklist_values = "; ".join(
-                v["value"] for v in f.get("picklistValues", []) if v.get("active", True)
-            )
-        required = bool(f.get("createable")) and not f.get("nillable", True) and f["type"] != "boolean"
-        rows.append({
-            "Target Field": f["name"],
-            "Target Type": f["type"],
-            "Required": required,
-            "Picklist Values": picklist_values,
-            "Source Field": "",
-            "Source Type": "",
-            "Transformation Notes": "",
-        })
+def _table_exists(cx, schema, table):
+    return cx.execute(text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.{table}"}).scalar() is not None
 
-    df = pd.DataFrame(rows)
 
-    source_df = None
-    if source_table and engine is not None:
-        with engine.connect() as cx:
-            cols = cx.execute(
+def generate_mapping_workbook(sf, target_object, output_path, engine, source_table, schema="dbo"):
+    with engine.connect() as cx:
+        source_cols = cx.execute(
+            text(
+                "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table ORDER BY ORDINAL_POSITION"
+            ),
+            {"schema": schema, "table": source_table},
+        ).mappings().all()
+
+        if not source_cols:
+            raise ValueError(f"No such table: {schema}.{source_table}")
+
+        profile_by_field = {}
+        if _table_exists(cx, schema, "FieldProfile"):
+            profile_rows = cx.execute(
                 text(
-                    "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
-                    "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table ORDER BY ORDINAL_POSITION"
+                    f"SELECT FieldName, TotalRows, PopulatedCount, PopulatedPct "
+                    f"FROM [{schema}].[FieldProfile] "
+                    "WHERE ObjectOrTable = :table AND SourceType = 'sql_table'"
                 ),
-                {"schema": schema, "table": source_table},
+                {"table": source_table},
             ).mappings().all()
-        source_df = pd.DataFrame([{"Source Column": c["COLUMN_NAME"], "SQL Type": c["DATA_TYPE"]} for c in cols])
+            profile_by_field = {r["FieldName"]: r for r in profile_rows}
 
-    # Append as a new sheet in an existing workbook (one workbook, one tab
-    # per object) rather than overwriting it -- generating a second object's
-    # mapping into the same path must not silently erase the first one's.
+    sheet_name = _safe_sheet_name(target_object)
     if os.path.exists(output_path):
-        writer_kwargs = {"mode": "a", "if_sheet_exists": "replace"}
+        wb = openpyxl.load_workbook(output_path)
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
     else:
-        writer_kwargs = {"mode": "w"}
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
 
-    with pd.ExcelWriter(output_path, engine="openpyxl", **writer_kwargs) as writer:
-        df.to_excel(writer, sheet_name=_safe_sheet_name(object_name), index=False)
-        if source_df is not None and not source_df.empty:
-            source_df.to_excel(writer, sheet_name=_safe_sheet_name(f"{source_table}_Source"), index=False)
+    ws = wb.create_sheet(sheet_name)
+    ws.cell(row=1, column=1, value="Source Object:")
+    ws.cell(row=1, column=2, value=source_table)
+    ws.cell(row=1, column=3, value="Target Object:")
+    ws.cell(row=1, column=4, value=target_object)
 
+    for col_idx, header in enumerate(_HEADERS, start=1):
+        if header is not None:
+            ws.cell(row=3, column=col_idx, value=header)
+
+    row_idx = 4
+    for col in source_cols:
+        name = col["COLUMN_NAME"]
+        profile = profile_by_field.get(name)
+        ws.cell(row=row_idx, column=1, value=source_table)
+        ws.cell(row=row_idx, column=2, value=name)
+        ws.cell(row=row_idx, column=4, value=col["DATA_TYPE"])
+        if profile:
+            ws.cell(row=row_idx, column=6, value=f"{profile['PopulatedCount']} of {profile['TotalRows']}")
+            pct = profile["PopulatedPct"]
+            ws.cell(row=row_idx, column=7, value=float(pct) if pct is not None else None)
+        row_idx += 1
+
+    wb.save(output_path)
     return output_path
 
 
@@ -103,11 +132,18 @@ def extract_insert_columns(sql_text, table_name=None):
     return None
 
 
-def check_mapping_balance(mapping_path, object_name, transform_sql_path, load_table_name=None):
-    df = pd.read_excel(mapping_path, sheet_name=_safe_sheet_name(object_name))
+def check_mapping_balance(sf, mapping_path, object_name, transform_sql_path, load_table_name=None):
+    wb = openpyxl.load_workbook(mapping_path, data_only=True)
+    sheet_name = _safe_sheet_name(object_name)
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"No sheet named '{sheet_name}' in {mapping_path}")
+    ws = wb[sheet_name]
 
-    documented_mask = df["Source Field"].notna() & (df["Source Field"].astype(str).str.strip() != "")
-    documented = set(df.loc[documented_mask, "Target Field"])
+    documented = set()
+    for row in ws.iter_rows(min_row=4):
+        value = row[_TARGET_FIELD_API_COL - 1].value
+        if value is not None and str(value).strip():
+            documented.add(str(value).strip())
 
     with open(transform_sql_path, encoding="utf-8") as fh:
         sql_text = fh.read()
@@ -117,7 +153,21 @@ def check_mapping_balance(mapping_path, object_name, transform_sql_path, load_ta
         raise ValueError(f"No INSERT INTO statement found in {transform_sql_path}")
     implemented = set(implemented_cols)
 
+    # Unlike the mapping doc (free text) and the transform's INSERT list
+    # (whatever the SQL author typed), describe() is ground truth for what
+    # fields actually exist on the target object -- cross-check both sets
+    # against it so a typo'd/removed/never-deployed field name gets flagged
+    # explicitly, rather than only showing up as an ordinary imbalance.
+    real_fields = {f["name"] for f in getattr(sf, object_name).describe()["fields"]}
+    not_real_field = (documented | implemented) - real_fields
+
+    # A field that isn't real at all is the more urgent finding -- report it
+    # there only, not also as an ordinary documented/implemented imbalance.
+    documented -= not_real_field
+    implemented -= not_real_field
+
     return {
         "documented_not_implemented": sorted(documented - implemented),
         "implemented_not_documented": sorted(implemented - documented),
+        "not_a_real_field": sorted(not_real_field),
     }

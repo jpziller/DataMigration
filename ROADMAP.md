@@ -58,29 +58,40 @@ recommend-and-review step, not an auto-pilot one.
 
 ## 3. Field-mapping spreadsheet tool — BUILT (`mapping_doc.py`)
 
-`python cli.py generate-mapping-doc <Object> <path.xlsx> [--source-table Table]`:
-- One row per target field from describe() — type, required, real picklist
-  values — with blank Source Field/Source Type/Transformation Notes columns.
-  Does **not** guess the mapping (that's auto-mapping, a separate item
-  below) — this only builds the structure a human fills in.
-- `--source-table` adds a companion reference sheet listing that SQL
-  table's columns, for convenience while filling in Source Field.
+Column structure modeled on a real-world field-inventory-and-mapping
+template reviewed for format only (structure/column names, not content):
+one row per **source** field (not target — that was an earlier, wrong
+orientation this tool started with and was corrected), a block of
+migration-decision columns, then a blank Target block for a human to fill
+in once a mapping is decided.
+
+`python cli.py generate-mapping-doc <Object> <path.xlsx> <SourceTable>`:
+- Header block (Source/Target object names), then one row per column in
+  the named SQL source table: Source Object / Field API / Field Label /
+  Data Type / Description / Field Trip Populated On / Field Trip % / Notes /
+  Migrate Data / Migrate Field / Biz Review Req / Biz Decision / [spacer] /
+  Target Object / Field API / Field Label / Data Type / Description / Notes.
+  The Target block is left blank — does **not** guess the mapping (that's
+  auto-mapping, a separate item below).
+- If profiling data already exists for the source table (`profile-sql-table`),
+  "Field Trip Populated On"/"Field Trip %" are pre-filled from it automatically.
 - One shared workbook for the whole project (one tab per object) — reuse
   the same output path across objects. (Caught and fixed a real bug here:
   the first version overwrote the entire file per call via `pd.ExcelWriter`'s
   default mode, silently erasing every other object's sheet. Now appends/
-  replaces just that object's sheet via `mode="a", if_sheet_exists="replace"`.)
+  replaces just that object's sheet.)
 
 `python cli.py check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`:
-- Diffs a filled-in mapping doc against the transform's actual `INSERT INTO`
-  column list, in both directions — documented-but-not-implemented, and
-  implemented-but-not-documented.
-- Live-tested against the existing example transform
-  (`010_account_load.sql`) and genuinely caught a real, pre-existing issue:
-  it references `Legacy_Id__c`, a field that doesn't actually exist on this
-  org (only `MigrationID__c` was ever deployed) — surfaced automatically as
-  "implemented, not documented" since a nonexistent field can't have a row
-  in the generated doc at all.
+- Diffs the mapping doc's Target block against the transform's actual
+  `INSERT INTO` column list, in both directions — documented-but-not-
+  implemented, and implemented-but-not-documented.
+- Also cross-checks both sets against the object's live describe() and
+  flags anything that isn't a real field at all, as its own top-priority
+  category (a typo/removed/never-deployed field would otherwise only show
+  up as an ordinary imbalance). Live-tested against the existing example
+  transform (`010_account_load.sql`) and genuinely caught a real,
+  pre-existing issue: it references `Legacy_Id__c`, a field that doesn't
+  actually exist on this org (only `MigrationID__c` was ever deployed).
 
 Not yet built: auto-mapping into this doc (source→target suggestions) —
 still a separate roadmap item, see below.

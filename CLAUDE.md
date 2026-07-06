@@ -53,13 +53,16 @@ venv may not be active in a fresh shell:
 - Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
                 (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
                 get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)
-- Mapping doc:  `.venv/Scripts/python.exe cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx [--source-table Table]`
-                `.venv/Scripts/python.exe cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx`
+- Mapping doc:  `.venv/Scripts/python.exe cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts`
+                `.venv/Scripts/python.exe cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts`
                 (one workbook, one tab per object — reuse the SAME output path for every object in
-                the project; it appends/replaces that object's sheet, not the whole file.)
+                the project; it appends/replaces that object's sheet, not the whole file. One row per
+                SOURCE field from the named SQL table, with a blank Target block for a human to fill
+                in once a mapping is decided — doesn't guess the mapping itself. Auto-fills "Field Trip
+                Populated On/%" from existing profiling data for that source table, if any.)
                 `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql`
-                (generates the workbook structure only — doesn't guess the mapping;
-                balance-check diffs a filled-in doc against the transform's real INSERT INTO list, both directions.)
+                (diffs a filled-in doc's Target block against the transform's real INSERT INTO list,
+                both directions, plus flags any referenced field that doesn't actually exist on the object.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`

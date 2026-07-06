@@ -15,8 +15,8 @@ Examples:
     python cli.py query "SELECT Id, Name FROM Account LIMIT 10"
     python cli.py query "SELECT Id, Name, Account.Name FROM Contact" --csv out.csv
     python cli.py generate-mock-data Account --count 50
-    python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx --source-table SourceAccounts
-    python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx   # same file -> adds a tab, doesn't overwrite
+    python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts
+    python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts  # same file -> adds a tab, doesn't overwrite
     python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
 """
 import click
@@ -215,13 +215,12 @@ def generate_mock_data_cmd(object_name, count, schema):
 @cli.command("generate-mapping-doc")
 @click.argument("object_name")
 @click.argument("output_path")
-@click.option("--source-table", default=None, help="A SQL Server table to list on a reference sheet.")
+@click.argument("source_table")
 @click.option("--schema", default="dbo")
 def generate_mapping_doc_cmd(object_name, output_path, source_table, schema):
     _, sf, engine = _ctx()
-    path = mpd.generate_mapping_workbook(sf, object_name, output_path, engine=engine,
-                                         source_table=source_table, schema=schema)
-    click.echo(f"Wrote {path}")
+    path = mpd.generate_mapping_workbook(sf, object_name, output_path, engine, source_table, schema=schema)
+    click.echo(f"Wrote {path} ({source_table} -> {object_name})")
 
 
 @cli.command("check-mapping-balance")
@@ -230,19 +229,23 @@ def generate_mapping_doc_cmd(object_name, output_path, source_table, schema):
 @click.argument("transform_sql_path")
 @click.option("--load-table", default=None, help="Load table name to match in the INSERT INTO (defaults to the first one found).")
 def check_mapping_balance_cmd(object_name, mapping_path, transform_sql_path, load_table):
-    result = mpd.check_mapping_balance(mapping_path, object_name, transform_sql_path, load_table_name=load_table)
+    _, sf, _e = _ctx()
+    result = mpd.check_mapping_balance(sf, mapping_path, object_name, transform_sql_path, load_table_name=load_table)
 
+    if result["not_a_real_field"]:
+        click.echo(f"Not a real field on {object_name} (typo, removed, or never deployed -- fix before loading):")
+        for field in result["not_a_real_field"]:
+            click.echo(f"  {field}")
     if result["documented_not_implemented"]:
         click.echo("Documented as mapped, but the transform doesn't populate them:")
         for field in result["documented_not_implemented"]:
             click.echo(f"  {field}")
     if result["implemented_not_documented"]:
-        click.echo("Transform populates these, but they're not documented as mapped "
-                   "(or don't exist as a field at all -- check for typos/removed fields):")
+        click.echo("Transform populates these, but they're not documented as mapped:")
         for field in result["implemented_not_documented"]:
             click.echo(f"  {field}")
-    if not result["documented_not_implemented"] and not result["implemented_not_documented"]:
-        click.echo("In balance -- mapping doc and transform agree.")
+    if not any(result.values()):
+        click.echo("In balance -- mapping doc and transform agree, and every field is real.")
 
 
 if __name__ == "__main__":
