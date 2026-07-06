@@ -187,10 +187,11 @@ python cli.py bulkops Contact insert Contact_Load --key-column LoadId
 python cli.py bulkops Case delete Case_Purge --key-column LoadId
 ```
 
-Matching slash-command skills exist for the read-only ones (`/query`,
-`/profile`, `/analyze-load-order`, `/generate-mock-data`, `/replicate`,
-`/build-load`, `/validate-load`, `/status`) — see "Claude Code operating
-layer" below.
+Matching slash-command skills exist for the read-only ones (`/list-objects`,
+`/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
+`/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
+`/replicate`, `/build-load`, `/validate-load`, `/status`) — see "Claude Code
+operating layer" below.
 
 ---
 
@@ -251,8 +252,11 @@ SQL Server, **reviewed hands** for mutations.
   without prompts; `bulkops` (writes to Salesforce), `git commit`/`push`, and
   `sf project deploy` are gated behind an approval prompt; secrets and dangerous
   commands are denied outright.
-- `.claude/commands/` — slash commands: `/query <SOQL>`, `/profile <Object>`,
+- `.claude/commands/` — slash commands: `/list-objects`, `/describe <Object>`,
+  `/dump-describe <Object>`, `/query <SOQL>`, `/profile <Object>`,
   `/analyze-load-order <Objects...>`, `/generate-mock-data <Object>`,
+  `/generate-mapping-doc <Object> <path.xlsx> <SourceTable>`,
+  `/check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`,
   `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
   `/status`.
 

@@ -3,11 +3,8 @@
     "allow": [
       "Read(**)",
       "Edit(sql/**)",
-      "Edit(cli.py)",
-      "Edit(replicate.py)",
-      "Edit(bulkops.py)",
-      "Edit(metadata.py)",
-      "Edit(type_map.py)",
+      "Edit(docs/**)",
+      "Edit(*.py)",
       "Bash(sqlcmd *)",
       "Bash(.venv/Scripts/python.exe cli.py list-objects*)",
       "Bash(.venv/Scripts/python.exe cli.py describe *)",

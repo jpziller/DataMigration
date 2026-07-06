@@ -162,6 +162,25 @@ Salesforce directly, with results reviewed in Excel.
   plus a companion `_Values` sheet for picklist/low-cardinality
   distributions, for reviewing what's worth migrating.
 
+## 8. Ad hoc Query Tool — BUILT (`query_tool.py`)
+
+The first item from the "Data Architect toolbelt" discussion — replacing
+the daily need for an external ad hoc query tool with something built into
+this framework.
+
+`python cli.py query "<SOQL>"`:
+- Runs via the REST Query API (`sf.query`/`sf.query_all`), not Bulk API —
+  built for quick lookups/troubleshooting, not large extracts (`replicate`
+  is for that).
+- Flattens relationship fields (e.g. `Account.Name` on a Contact query) to
+  dotted keys for display.
+- Defaults to a single page with a clear "not all records fetched" notice
+  if there's more; `--all` paginates everything via `query_all()`.
+- Results print to console, or export via `--csv`/`--excel`.
+- Scoped to CRM objects for now — Data Cloud/D360 objects use a genuinely
+  different query surface (Data Model Objects via the Data Cloud Query
+  API, not standard SOQL) and aren't supported yet; a possible phase 2.
+
 ---
 
 ## End-to-end project workflow (vision, not built)

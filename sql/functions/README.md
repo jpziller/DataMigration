@@ -11,6 +11,12 @@ Zero-dependency string/number/date helpers: `CleanNumber`, `RemoveNonAscii`,
 `GetMonthsBetweenDates`, `EscapeContentNote`, `ToBase64`/`FromBase64`,
 `UrlDecode`, `RemoveInvalidXmlChars`.
 
+Also here (load-table pre-flight checks, not string/date helpers, but same
+folder): `AddBulkLoadSortColumn` (numbers a load table by parent key so
+same-parent rows land in the same Bulk API batch — CLAUDE.md hard rule 6)
+and `CheckLoadTableDuplicateKeys` (flags duplicate/NULL migration-key values
+before `bulkops` — hard rule 7).
+
 ## cleansing/
 `GetFirstName` / `GetLastName` (splits a "Full Name" column, handles
 Mr/Mrs/Ms/Dr titles and Jr/Sr/II/III suffixes), `IsValidEmail`,

@@ -69,17 +69,16 @@ venv may not be active in a fresh shell:
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
 
-Matching slash-command skills exist for the read-only ones — `/query`,
-`/profile`, `/analyze-load-order`, `/generate-mock-data`,
-`/generate-mapping-doc`, `/check-mapping-balance`, `/replicate`,
-`/build-load`, `/validate-load`, `/status` (`.claude/commands/*.md`). These
-are the
-project's "skills": pre-scoped, no-prompt capabilities for anyone who opens
-this repo in Claude Code, so asking for one of these doesn't require
-re-deriving how to do it from scratch each time. They're an efficiency
-layer, not a boundary — general reasoning/coding (Apex, LWC, architecture
-work, anything else) is still available even when there's no dedicated skill
-for it.
+Matching slash-command skills exist for the read-only ones — `/list-objects`,
+`/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
+`/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
+`/replicate`, `/build-load`, `/validate-load`, `/status`
+(`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
+no-prompt capabilities for anyone who opens this repo in Claude Code, so
+asking for one of these doesn't require re-deriving how to do it from
+scratch each time. They're an efficiency layer, not a boundary — general
+reasoning/coding (Apex, LWC, architecture work, anything else) is still
+available even when there's no dedicated skill for it.
 
 ## Hard rules
 1. `replicate` and any `DROP`/`CREATE` run ONLY against the mirror DB
@@ -147,8 +146,21 @@ instead. This does **not** apply to tools this framework actually integrates
 with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 
 ## Where things live
-- `cli.py`, `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py`,
-  `load_order.py` — framework.
+- `cli.py` — CLI entry point wiring every verb together.
+- `config.py`, `sf_client.py`, `sql_client.py` — settings/env, Salesforce
+  auth, SQL Server connection.
+- `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
+  movement and SF type mapping.
+- `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
+  `mapping_doc.py` — the Data Architect toolbelt (load-order analysis,
+  profiling, ad hoc query, mock data, mapping doc).
 - `sql/transformations/*.sql` — the migration logic (numbered; run in order).
+- `sql/functions/` — reusable T-SQL function library (see its own README).
+- `force-app/` — Salesforce metadata deployed via `sf project deploy`
+  (custom fields, profile FLS grants).
+- `mapping/` — generated field-mapping workbooks (`generate-mapping-doc`).
+- `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
+  `SOQL_QUERY_LIBRARY.md` (Tooling API queries).
+- `ROADMAP.md` — idea backlog and build status for planned tooling.
 - `metadata/*.json` — committed describe snapshots.
 - `.env` — connection config. Never commit, never print.
