@@ -242,10 +242,9 @@ the same time.
   (CPQ/Billing automation is the classic case), a smaller batch size gives
   that logic time to keep up and can resolve the problem outright, not just
   shrink its blast radius.
-- **Retry pattern for failures**: copy failed rows (`WHERE Error NOT LIKE
-  '%success%'`) into a new table and resubmit, rather than re-running the
-  whole load. This is a natural fit for a future `bulkops`-retry helper in
-  this framework — not built yet.
+- **Retry pattern for failures**: copy failed rows (`WHERE Error IS NOT
+  NULL`) into a new table and resubmit, rather than re-running the whole
+  load — `python cli.py bulkops-retry <LoadTable>` does exactly this.
 
 ### Object migration order
 General principles, not just a fixed list:

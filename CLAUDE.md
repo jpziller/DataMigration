@@ -84,6 +84,17 @@ venv may not be active in a fresh shell:
                 to the default when omitted.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
+                (every sent column is checked against the target object's live describe() before
+                the API is ever called — a typo'd, removed, or non-writable field aborts the whole
+                call up front rather than burning a real Bulk API batch to find out the same thing;
+                a required-but-unsent field on insert is reported as a warning instead, since
+                automation could still default it. See `bulkops.py`'s pre-flight check.)
+- Retry a failed load:
+                `.venv/Scripts/python.exe cli.py bulkops-retry Contact_Load`
+                (copies only the failed rows — where `Error` is populated — from a load table or its
+                `_Result` table into a fresh `<table>_Retry` table. Does not call Salesforce itself;
+                resubmit the new table via a normal, separately-confirmed `bulkops` call once you've
+                looked at why those rows failed.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
@@ -91,8 +102,8 @@ venv may not be active in a fresh shell:
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/generate-solution-doc`, `/replicate`, `/build-load`,
-`/validate-load`, `/status`
+`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/replicate`,
+`/build-load`, `/validate-load`, `/status`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from

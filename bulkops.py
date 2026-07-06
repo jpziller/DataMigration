@@ -23,6 +23,28 @@ Writeback target:
   If `key_column` exists in the load table, Id/Error are UPDATEd in place keyed
   on it. Otherwise a `<table>_Result` table is written instead (no in-place
   update possible without a stable local key).
+
+PRE-FLIGHT CHECK (roadmap #1's "rebuild instead of port" -- a legacy
+column/permission compare tool, rebuilt here as a live describe() check
+rather than ported verbatim):
+  Before ever calling the Bulk API, every sent column is checked against the
+  target object's live describe(): does the field exist at all, and can this
+  operation actually write it (createable for insert, updateable for
+  update/upsert)? Either failure aborts before spending a real API call --
+  Salesforce would reject the whole job or every row for the same reason,
+  just after burning a batch and taking longer to find out. This is a schema/
+  permission check only, not a data-content one (see
+  sql/functions/utilities/CheckLoadTableDuplicateKeys.sql for that). A
+  required-but-not-sent field on insert is reported as a warning, not a
+  hard stop -- automation could still default it, so it isn't guaranteed to
+  fail the way a missing/non-writable field is.
+
+RETRY HELPER (build_retry_table):
+  Copies only the failed rows (Error column populated) from a load table or
+  its `_Result` table into a fresh `<table>_Retry` table, so a partial
+  failure can be resubmitted via a normal `bulk_op()` call against just the
+  rows that need it, instead of re-running (and re-charging batches for)
+  the whole original load.
 """
 import io
 import os
@@ -40,6 +62,36 @@ def _read_result_csv(csv_text):
 
 def _fingerprint(df, cols):
     return df[cols].astype(str).agg("\x1f".join, axis=1)
+
+
+def _preflight_check(sf, object_name, operation, sent_columns, id_column="Id"):
+    desc = getattr(sf, object_name).describe()
+    fields_by_name = {f["name"]: f for f in desc["fields"]}
+
+    checked_columns = [c for c in sent_columns if c != id_column]
+    not_real_field = [c for c in checked_columns if c not in fields_by_name]
+    writable_columns = [c for c in checked_columns if c in fields_by_name]
+
+    if operation == "insert":
+        not_writable = [c for c in writable_columns if not fields_by_name[c].get("createable")]
+    elif operation in ("update", "upsert"):
+        not_writable = [c for c in writable_columns if not fields_by_name[c].get("updateable")]
+    else:  # delete only ever sends id_column, already excluded above
+        not_writable = []
+
+    required_not_sent = []
+    if operation == "insert":
+        sent_set = set(sent_columns)
+        for f in desc["fields"]:
+            if (f.get("createable") and not f.get("nillable", True)
+                    and not f.get("defaultedOnCreate") and f["name"] not in sent_set):
+                required_not_sent.append(f["name"])
+
+    return {
+        "not_a_real_field": not_real_field,
+        "not_writable": not_writable,
+        "required_not_sent": required_not_sent,
+    }
 
 
 def bulk_op(sf, engine, object_name, operation, source_table,
@@ -78,6 +130,19 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     missing = [c for c in sent if c not in df.columns]
     if missing:
         raise ValueError(f"Columns not in {source_table}: {missing}")
+
+    preflight = _preflight_check(sf, object_name, operation, sent, id_column=id_column)
+    fatal_details = []
+    if preflight["not_a_real_field"]:
+        fatal_details.append(f"not a real field on {object_name}: {preflight['not_a_real_field']}")
+    if preflight["not_writable"]:
+        verb = "createable" if operation == "insert" else "updateable"
+        fatal_details.append(f"not {verb} on {object_name}: {preflight['not_writable']}")
+    if fatal_details:
+        raise ValueError(
+            f"Pre-flight check failed for {source_table} -> {object_name} ({operation}): "
+            + "; ".join(fatal_details)
+        )
 
     payload = df[sent].copy()
     os.makedirs(stage_dir, exist_ok=True)
@@ -150,6 +215,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         "failed": int(n_err),
         "ambiguous": ambiguous,
         "written_to": target,
+        "preflight_warnings": preflight["required_not_sent"],
     }
 
 
@@ -184,3 +250,34 @@ def _writeback_result_table(engine, schema, table, df, sent,
     out.to_sql(result_table, engine, schema=schema,
                if_exists="replace", index=False)
     return f"{schema}.{result_table}"
+
+
+def build_retry_table(engine, table, schema="dbo", error_column="Error", retry_suffix="_Retry"):
+    """Copy only the failed rows from `table` (a load table written back in
+    place, or a `<table>_Result` table) into a fresh `<table>_Retry` table --
+    for resubmission via a normal bulk_op() call against just what failed,
+    not the whole original load. Never resubmits anything itself; that's a
+    separate, explicit bulkops call against the returned table name."""
+    with engine.connect() as cx:
+        has_error_col = cx.execute(
+            text("SELECT COL_LENGTH(:t, :c)"),
+            {"t": f"{schema}.{table}", "c": error_column},
+        ).scalar() is not None
+    if not has_error_col:
+        raise ValueError(
+            f"{schema}.{table} has no [{error_column}] column -- has bulkops been run against it yet?"
+        )
+
+    retry_table = f"{table}{retry_suffix}"
+    with engine.begin() as cx:
+        cx.execute(text(
+            f"IF OBJECT_ID('{schema}.{retry_table}', 'U') IS NOT NULL "
+            f"DROP TABLE [{schema}].[{retry_table}];"
+        ))
+        cx.execute(text(
+            f"SELECT * INTO [{schema}].[{retry_table}] "
+            f"FROM [{schema}].[{table}] WHERE [{error_column}] IS NOT NULL;"
+        ))
+        count = cx.execute(text(f"SELECT COUNT(*) FROM [{schema}].[{retry_table}]")).scalar()
+
+    return f"{schema}.{retry_table}", count

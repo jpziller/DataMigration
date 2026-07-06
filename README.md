@@ -261,17 +261,27 @@ python cli.py generate-solution-doc Solution.docx Account Contact Opportunity \
 
 # Transform in T-SQL (sql/transformations/*.sql) to build *_Load tables
 
-# Load SQL -> org, with Id/Error written back into the load table
+# Load SQL -> org, with Id/Error written back into the load table.
+# Every sent column is checked against the target object's live describe()
+# before the API is ever called -- a typo'd/removed/non-writable field
+# aborts up front instead of burning a real Bulk API batch to find out.
 python cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c
 python cli.py bulkops Contact insert Contact_Load --key-column LoadId
 python cli.py bulkops Case delete Case_Purge --key-column LoadId
+
+# After a load with failures: copy only the failed rows into a fresh
+# <table>_Retry table (does not call Salesforce itself), then resubmit
+# just that table via a normal, separately-confirmed bulkops call.
+python cli.py bulkops-retry Contact_Load
+python cli.py bulkops Contact insert Contact_Load_Retry --key-column LoadId
 ```
 
 Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/generate-solution-doc`, `/replicate`, `/build-load`,
-`/validate-load`, `/status`) — see "Claude Code operating layer" below.
+`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/replicate`,
+`/build-load`, `/validate-load`, `/status`) — see "Claude Code operating
+layer" below.
 
 ---
 
@@ -293,6 +303,22 @@ joins results back on that fingerprint:
 Writeback target: if the load table has the `key_column` (default `LoadId`),
 `Id`/`Error` are updated in place. Otherwise a `<table>_Result` table is
 written instead.
+
+**Pre-flight check.** Before any of the above, every column about to be sent
+is checked against the target object's live `describe()`: does the field
+exist, and can this operation actually write it (`createable` for insert,
+`updateable` for update/upsert)? Either failure aborts the whole call before
+it ever reaches the Bulk API -- Salesforce would reject it for the same
+reason anyway, just after spending a real batch to find out. A
+required-but-unsent field on insert is reported as a warning, not a hard
+stop, since automation could still default it.
+
+**Retrying a partial failure.** `bulkops-retry <table>` copies only the
+failed rows (`Error` populated) from a load table or its `_Result` table
+into a fresh `<table>_Retry` table. It does not call Salesforce itself --
+resubmit the new table via a normal, separately-confirmed `bulkops` call
+once you've looked at *why* those rows failed (the same root cause across
+every failure usually means the transform needs a fix, not a blind retry).
 
 ---
 
@@ -339,6 +365,7 @@ SQL Server, **reviewed hands** for mutations.
   `/check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`,
   `/auto-map <Object> <mapping.xlsx> <SourceTable>`,
   `/generate-solution-doc <output.docx> <Objects...>`,
+  `/bulkops-retry <LoadTable>`,
   `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
   `/status`.
 

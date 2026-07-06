@@ -8,6 +8,7 @@ Examples:
     python cli.py replicate Contact --where "CreatedDate = LAST_N_DAYS:30" --raw
     python cli.py bulkops Account insert Account_Load --key-column LoadId
     python cli.py bulkops Contact upsert Contact_Load --external-id Legacy_Id__c
+    python cli.py bulkops-retry Contact_Load  # copies failed rows into Contact_Load_Retry for resubmission
     python cli.py analyze-load-order Account Contact Opportunity OpportunityLineItem
     python cli.py profile-salesforce Account
     python cli.py profile-sql-table Account
@@ -116,8 +117,25 @@ def bulkops_cmd(object_name, operation, source_table, external_id, key_column, s
     summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
                          external_id=external_id, key_column=key_column,
                          schema=schema, stage_dir=s.stage_dir)
+    warnings = summary.pop("preflight_warnings", [])
     for k, v in summary.items():
         click.echo(f"{k:12}: {v}")
+    if warnings:
+        click.echo(f"Warning: required field(s) not sent (only fails if nothing else defaults them): {warnings}")
+
+
+@cli.command("bulkops-retry")
+@click.argument("table")
+@click.option("--schema", default="dbo")
+@click.option("--error-column", default="Error")
+def bulkops_retry_cmd(table, schema, error_column):
+    _, _, engine = _ctx()
+    retry_table, count = bo.build_retry_table(engine, table, schema=schema, error_column=error_column)
+    if count == 0:
+        click.echo(f"No failed rows found in {schema}.{table} (column {error_column}) -- nothing to retry.")
+    else:
+        click.echo(f"Copied {count} failed row(s) from {schema}.{table} into {retry_table}")
+        click.echo(f"Review it, then resubmit: python cli.py bulkops <Object> <operation> {retry_table.split('.')[-1]} ...")
 
 
 @cli.command("analyze-load-order")

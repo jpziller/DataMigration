@@ -21,6 +21,7 @@
       "Bash(.venv/Scripts/python.exe cli.py check-mapping-balance *)",
       "Bash(.venv/Scripts/python.exe cli.py auto-map *)",
       "Bash(.venv/Scripts/python.exe cli.py generate-solution-doc *)",
+      "Bash(.venv/Scripts/python.exe cli.py bulkops-retry *)",
       "Bash(sf org list*)",
       "Bash(sf org display*)",
       "Bash(sf sobject *)",

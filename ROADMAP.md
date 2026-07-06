@@ -27,11 +27,11 @@ generic, reusable set for this framework's `sql/` tree.
   copyright notices ("developed by Herb Whitacre, all rights reserved" and
   "Copyright Apps Associates 2018") — rewrite these from scratch off the
   public algorithm/spec instead of copying, since this repo is going MIT.
-- **Rebuild instead of port**: a legacy tool-coupled column/permission
-  pre-flight check (`SF_ColCompare`) — the concept (validate a load table's columns
-  against the target object's createable/updatable fields before
-  submitting) is good, but should be a Python pre-flight step in
-  `bulkops.py` using `metadata.list_fields()`, which already has this data.
+- **Rebuilt instead of ported — BUILT**: a legacy tool-coupled column/
+  permission pre-flight stored procedure's concept (validate a load table's
+  columns against the target object's createable/updatable fields before
+  submitting) is now a live `describe()` check built directly into
+  `bulkops.py`'s `bulk_op()` — see #14 for the full writeup.
 
 ## 2. Load-order dependency analyzer — BUILT (`load_order.py`)
 
@@ -393,9 +393,45 @@ broadens beyond a single trusted operator -- likely an expansion of #5
 "what could this touch that it shouldn't" question applied to access
 control instead of automation conflicts.
 
----
+## 14. Bulk load pre-flight check + retry helper — BUILT (`bulkops.py`)
 
-## End-to-end project workflow (vision, not built)
+Two additions to `bulk_op()`/`bulkops`, picked over the bigger, riskier #12/
+#13 UI work as the next concrete step -- both slot directly into the load
+workflow every migration already goes through, no new subsystem needed.
+
+**Pre-flight check** (the rebuild-instead-of-port item from #1):
+`_preflight_check()` validates every column about to be sent against the
+target object's *live* `describe()`, before `bulk_op()` ever calls the Bulk
+API:
+- **Not a real field** on the target object, or **not writable** for the
+  operation (`createable` for insert, `updateable` for update/upsert) --
+  either one raises a `ValueError` and aborts the whole call. Salesforce
+  would reject it for the identical reason anyway, just after spending a
+  real batch (and the 10-minute-per-batch window) to find out.
+- **Required field not sent** (insert only) -- reported as a warning in the
+  result dict (`preflight_warnings`), not a hard stop, since automation
+  could still default it and this pre-flight has no way to know that.
+- Schema/permission check only, not a data-content one -- duplicate/NULL
+  migration keys are still `CheckLoadTableDuplicateKeys`' job (hard rule 7).
+
+Verified live against a real org (read-only `describe()` calls, no actual
+Bulk API call needed to test the check itself): a deliberately typo'd field
+and a non-writable field (`CreatedDate` on update) were both caught
+correctly, and a genuinely bad load table (`insert` with an unknown column)
+was confirmed to raise and abort **before** `bulk_op()` ever reached
+`sf.bulk2`, not just report a bad result afterward.
+
+**Retry helper**: `bulkops-retry <table>` (`build_retry_table()`) copies
+only the failed rows (`Error` populated) from a load table or its
+`_Result` table into a fresh `<table>_Retry` table -- the pattern already
+named as a gap in `docs/MIGRATION_PLAYBOOK.md` §6. Deliberately does *not*
+resubmit anything itself; that's a separate, normally-confirmed `bulkops`
+call against the new table, same as any other load. Tested against a
+synthetic mixed-result table (2 succeeded, 1 failed) -- correctly copied
+only the failed row; a table with an `Error` column but zero failures
+reports "nothing to retry" instead of creating an empty table; a table
+that's never been through `bulkops` at all (no `Error` column) raises a
+clear error rather than silently copying everything.
 
 The long-term shape this framework is heading toward — a full project
 lifecycle, not just a set of standalone tools. Roughly, in order:
