@@ -6,3 +6,11 @@ server.key
 *.log
 .mcp.json
 .claude/settings.local.json
+
+# Generated, org-specific artifacts -- every org's schema/mappings differ,
+# so these aren't template content. Commit your own deliberately if a real
+# engagement wants a versioned copy (see README's "Repository structure").
+metadata/*.json
+mapping/*.xlsx
+!metadata/.gitkeep
+!mapping/.gitkeep

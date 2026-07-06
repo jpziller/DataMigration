@@ -162,5 +162,8 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
   `SOQL_QUERY_LIBRARY.md` (Tooling API queries).
 - `ROADMAP.md` — idea backlog and build status for planned tooling.
-- `metadata/*.json` — committed describe snapshots.
+- `metadata/*.json`, `mapping/*.xlsx` — generated, org-specific artifacts.
+  Gitignored by default (every org's schema/mappings differ, so these
+  aren't template content) — commit your own deliberately if a real
+  engagement wants a versioned copy.
 - `.env` — connection config. Never commit, never print.

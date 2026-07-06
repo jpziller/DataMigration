@@ -25,4 +25,6 @@ source SQL table name — all three required).
    starting structure to fill in, not a finished mapping.
 
 Read-only against the org and mirror DB; writes only a local .xlsx file —
-safe to run without confirmation.
+safe to run without confirmation. `mapping/*.xlsx` is gitignored by default
+(it's project-specific mapping decisions, not template content) — mention
+that committing it is a deliberate choice if the user asks.

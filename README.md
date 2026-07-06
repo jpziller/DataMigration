@@ -128,6 +128,46 @@ mock data) `MOCKAROO_API_KEY`. `.gitignore` already excludes `.env`,
 
 ---
 
+## Repository structure: template vs. generated
+
+Two categories, and the distinction matters for what gets committed:
+
+**Template content** — the framework itself, always committed, identical
+whoever clones this repo:
+```
+cli.py, config.py, sf_client.py, sql_client.py,        framework code
+replicate.py, bulkops.py, type_map.py, metadata.py,
+load_order.py, profiling.py, query_tool.py,
+mock_data.py, mapping_doc.py
+
+sql/functions/                                          reusable T-SQL library
+sql/transformations/010_account_load.sql                illustrative example (hypothetical
+                                                         source table, not real data)
+force-app/                                               reusable field metadata pattern
+                                                         (MigrationID__c + its FLS grant)
+docs/, CLAUDE.md, README.md, ROADMAP.md                  documentation
+.env.example, .mcp.json.example                          config templates (not real config)
+```
+
+**Generated, org-specific artifacts** — gitignored by default, because every
+org's schema and every project's field mappings are different:
+```
+metadata/*.json          dump-describe output -- one specific org's schema
+mapping/*.xlsx           generate-mapping-doc output -- one specific project's
+                         field-mapping decisions
+_stage/                  CSV staging, dropped-in reference docs, scratch work
+.env                     real credentials
+```
+
+If a real engagement wants a versioned copy of its own describe snapshots or
+mapping workbook, that's a deliberate choice to make for that project — not
+something this template repo assumes for you. (`sql/transformations/*.sql`
+is the one exception that genuinely *is* meant to be committed even for a
+real project — that's the actual migration logic, the whole point of
+keeping it in git per-object as you build it out.)
+
+---
+
 ## Auth modes
 
 `SF_AUTH_MODE` in `.env`:
@@ -149,7 +189,7 @@ mock data) `MOCKAROO_API_KEY`. `.gitignore` already excludes `.env`,
 # Inspect the org
 python cli.py list-objects
 python cli.py describe Account
-python cli.py dump-describe Account          # -> metadata/Account.json (commit it)
+python cli.py dump-describe Account          # -> metadata/Account.json (gitignored by default -- see "Repository structure")
 
 # Ad hoc query (console, or --csv/--excel to export)
 python cli.py query "SELECT Id, Name, Account.Name FROM Contact LIMIT 10"
