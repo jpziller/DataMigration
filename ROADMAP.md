@@ -114,7 +114,13 @@ against the org's automation metadata (Flows, validation rules, maybe Apex
 triggers) and produces a report of "here's what might interfere with this
 load and why" before you run bulkops for real.
 
-## 6. Mock/demo data generation — Mockaroo half BUILT (`mock_data.py`), Snowfakery not started
+Candidate library: `pandera` or `great_expectations` for declarative data
+quality rules ("this field must be non-null," "this must match regex X")
+as a complement to `profiling.py`'s stats — rules-as-code instead of
+eyeballing profile output, and something a non-technical reviewer could
+still read.
+
+## 6. Mock/demo data generation — Mockaroo half BUILT (`mock_data.py`), Snowfakery/Faker not started
 
 `python cli.py generate-mock-data <Object> --count N`:
 - Derives a mock schema from the object's describe() — only createable
@@ -130,7 +136,10 @@ load and why" before you run bulkops for real.
 
 Snowfakery integration (for relationship-aware multi-object fake data, e.g.
 matching Accounts/Contacts/Opportunities together rather than independently
-random rows per object) is still just an idea, not started.
+random rows per object) is still just an idea, not started. `Faker` is a
+lower-priority alternative worth knowing about too — no API key, no rate
+limit, works fully offline — for whenever Mockaroo's 200-requests/day free
+tier becomes the actual bottleneck rather than a theoretical one.
 
 ## 7. Data profiling toolset — BUILT (`profiling.py`)
 
@@ -180,6 +189,32 @@ this framework.
 - Scoped to CRM objects for now — Data Cloud/D360 objects use a genuinely
   different query surface (Data Model Objects via the Data Cloud Query
   API, not standard SOQL) and aren't supported yet; a possible phase 2.
+
+## 9. Fuzzy matching / dedup (deprioritized, not built)
+
+Explicitly lower priority than everything else here — there's real value
+in "free, runs as a SQL Server + Python job" versus paying for a
+commercial dedup tool, but matching rules, merge survivorship, and a
+review UI are a deep enough rabbit hole that it competes for time against
+things with clearer immediate payoff. `sql/functions/matching/` already
+has Jaro-Winkler/Soundex/N-gram T-SQL functions from the SQL function
+library port. If this ever gets picked up in earnest, `recordlinkage` or
+`dedupe` (Python) are worth evaluating against hand-rolled T-SQL matching
+before building more of the latter — `rapidfuzz` specifically for a fast
+Levenshtein-family option if T-SQL's `JaroWinklerDistance` turns out too
+slow at scale.
+
+## 10. Console output polish — BUILT (`rich` in `cli.py`)
+
+`query` and `profile-salesforce`/`profile-sql-table` render results as
+`rich` tables instead of raw pandas `to_string()` output (which silently
+truncated wide values) or, for profile, no data at all (previously just a
+summary count). Long values wrap onto multiple lines rather than getting
+cut off. The profile preview is deliberately narrow — field/type/populated
+%/distinct count, the four columns that matter for an at-a-glance "is this
+worth migrating" call — full detail stays in `dbo.FieldProfile`/
+`FieldProfileValues` and `export-profile-excel`, not crammed into a
+console table.
 
 ---
 
