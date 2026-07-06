@@ -16,10 +16,19 @@ for you, and it'll stick for future sessions too.
 
 - **Show actual output, don't narrate it.** When asked to run a query, test,
   or command so the user can see the result, paste the real output into the
-  reply (a code block for tabular/console output, verbatim for logs/errors)
-  — not a summary of what it showed. The user only sees text replies, not
-  raw tool call results, so "it worked" or "here's what came back" is not a
-  substitute for actually showing it.
+  reply — not a summary of what it showed. The user only sees text replies,
+  not raw tool call results, so "it worked" or "here's what came back" is
+  not a substitute for actually showing it.
+- **Tabular results as Markdown tables, not the CLI's ASCII box.** `query`,
+  `profile-salesforce`/`profile-sql-table`, and similar commands render to
+  the console via `rich` as a plain ASCII box (`+`/`-`/`|` characters) —
+  fine on a real terminal, but shows as literal characters if pasted into
+  a chat reply's code block instead of rendering as a grid. When relaying
+  tabular/query results in a chat reply, reformat them as a Markdown pipe
+  table (`| col | col |`) instead of pasting the raw console output —
+  logs/errors/non-tabular output still go verbatim in a code block. This
+  only changes how results are *presented in chat*; running a command
+  directly in a terminal still shows `rich`'s own ASCII-box style.
 - **Working past Claude's training cutoff**: this org runs API version 67.0
   (Summer '26), after Claude's training cutoff (January 2026). Don't assume
   training-era knowledge of SOQL functions, API behavior, or Data Cloud/D360
