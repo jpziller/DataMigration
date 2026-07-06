@@ -17,8 +17,8 @@ names, optionally followed by `--mapping-path <xlsx>`).
    migrated target fields (`Migrate Data == Yes` in the mapping doc) and
    flagged as a **direct hit** — a much stronger signal than "this rule
    exists somewhere on the object." Call out direct hits first.
-4. Report, per object: counts of each automation type, then the full text
-   of every *active* validation rule's error message (these are the ones
+4. Report, per object: counts of each automation type, then every *active*
+   validation rule by name plus its error message (these are the ones
    that can outright reject a row), with direct hits called out
    distinctly. If any warnings are reported (a metadata query failed for
    that object), say so rather than silently treating it as "no findings."
