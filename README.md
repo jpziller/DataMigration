@@ -13,7 +13,10 @@ written back). All transformation logic stays in T-SQL, version-controlled in
 
 See [`docs/MIGRATION_PLAYBOOK.md`](docs/MIGRATION_PLAYBOOK.md) for the
 methodology behind this framework — script pattern, row-lock/batching
-considerations, object-by-object migration notes, and more.
+considerations, object-by-object migration notes, and more. See
+[`docs/SECURITY_OVERVIEW.md`](docs/SECURITY_OVERVIEW.md) before a security
+review — credential inventory, trust boundaries, and what's actually
+code-enforced versus convention-enforced today.
 
 ```
 org  --replicate-->  SQL Server (typed mirror tables)

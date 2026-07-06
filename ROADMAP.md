@@ -323,6 +323,76 @@ testing, all confirmed via live re-test against SQL Server:
    reported "no match," missing the more useful "no match, and also not
    worth migrating" signal the user's original design ask called for.
 
+## 12. Web UI for less-technical users (not built)
+
+Problem: everything so far assumes an operator comfortable with a terminal
+and Claude Code. A data architect isn't always the only person who needs
+to see this framework's output, and not everyone is going to run a CLI.
+
+Idea: a lightweight local web console -- not a rebuild of Salesforce's own
+UI (deliberately out of scope; Setup UI stays Setup UI), but a friendlier
+front end for *this* framework's own surface:
+- An environment/connection picker (which SQL Server, which Salesforce org
+  alias) instead of editing `.env` by hand.
+- A SQL Server browser + query window with a real results grid (not flat
+  console text).
+- A "skills menu" -- reflect `.claude/commands/*.md`'s own descriptions into
+  buttons, each shelling out to the same CLI verb this framework already
+  has. No new logic, just a friendlier way to trigger it.
+- A flat-file loader: upload a CSV/Excel file in the browser, land it in a
+  SQL Server table -- the same `pandas`/`SQLAlchemy` path `replicate.py`
+  already uses, just fed from an upload instead of the org.
+- A chat pane. Explicitly **not** a from-scratch reimplementation of an
+  agent tool-use loop -- that's Claude Code's own job. If this gets built,
+  it should wire in the Claude Agent SDK for a scoped assistant, or embed/
+  launch Claude Code itself, rather than duplicate it.
+
+Candidate stack: Streamlit (Python-native, matches this repo's stack
+already; built-in file-uploader widget covers the CSV loader almost for
+free) plus `streamlit-aggrid` for a real spreadsheet-style results grid.
+Evaluated and set aside for now: Retool/Appsmith-style low-code app
+builders (real capability, but add a self-hosted server and more moving
+parts than a single Streamlit script justifies at this stage); Gradio (more
+ML-demo-shaped than data-grid-shaped).
+
+**This is a bigger step than it looks.** Today this framework is a CLI one
+already-credentialed operator runs at a terminal -- no listening network
+port, no session/auth boundary of its own. A web UI is a new, listening,
+possibly-multi-user surface, which is a genuinely different trust model,
+not just a new feature. See `docs/SECURITY_OVERVIEW.md` §8 -- building this
+requires a fresh security review pass, not an incremental patch to the
+existing one. Single sign-on and any real multi-user access control belong
+here too once this is picked up (tracked as #13, not folded into this item,
+since SSO is its own scoping exercise even once a UI exists to put it in
+front of).
+
+## 13. SSO / multi-user access control (not built, depends on #12)
+
+Problem: once #12 exists, "who can open this web console, and as whom"
+becomes a real question for the first time -- today the CLI has no
+independent auth boundary at all (whoever can run it, can use it, same as
+`sqlcmd` or Data Loader). A browser-accessible tool changes that.
+
+Idea, roughly in order of how this is typically layered rather than a
+committed design: start with an identity-provider-backed reverse proxy
+(e.g. an OAuth2 proxy in front of Streamlit) rather than hand-rolling
+session/auth code -- consistent with this framework's general preference
+for well-established components over custom security-sensitive code (see
+`docs/SECURITY_OVERVIEW.md` §9's supply-chain stance). Scope should include
+at minimum: who can authenticate, whether different users get different
+Salesforce/SQL Server credentials or share the tool's own service
+credentials (the latter needs its own audit-trail story), and whether
+this needs to plug into an org's existing SSO (Okta, Azure AD, etc.) rather
+than manage its own user directory.
+
+Also worth tracking here once scoped: whether tighter Salesforce-side
+security (permission sets, sharing rules, a dedicated API-only migration
+user per hard rule 8's note) needs its own roadmap treatment as adoption
+broadens beyond a single trusted operator -- likely an expansion of #5
+(org metadata risk analyzer) rather than a new item, since it's the same
+"what could this touch that it shouldn't" question applied to access
+control instead of automation conflicts.
+
 ---
 
 ## End-to-end project workflow (vision, not built)

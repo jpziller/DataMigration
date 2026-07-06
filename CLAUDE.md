@@ -204,7 +204,11 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   creates — never edited by hand, never the source of truth for the
   thesaurus (that's always `reference/field_synonyms.json` in git).
 - `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
-  `SOQL_QUERY_LIBRARY.md` (Tooling API queries).
+  `SOQL_QUERY_LIBRARY.md` (Tooling API queries), `SECURITY_OVERVIEW.md`
+  (credential inventory, trust boundaries, what's code-enforced vs.
+  convention-enforced — read this before a security review, and update it
+  alongside any change that adds a credential type, network listener, or
+  auth boundary).
 - `ROADMAP.md` — idea backlog and build status for planned tooling.
 - `metadata/*.json`, `mapping/*.xlsx` — generated, org-specific artifacts.
   Gitignored by default (every org's schema/mappings differ, so these
