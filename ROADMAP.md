@@ -27,7 +27,7 @@ summarizes.
 | 12 | Web UI for less-technical users | Not built (future) | — |
 | 13 | SSO / multi-user access control | Not built, depends on #12 | — |
 | 14 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` |
-| 15 | Data Cloud (D360) query support | Not built — needs API research | — |
+| 15 | Data Cloud (D360) query support | Not built — API surface researched, live verification blocked (no Data Cloud org available) | — |
 | 16 | Data Cloud semantic model reference | Not built, depends on #15 | — |
 | 17 | DSO refresh/error monitoring | Not built — needs API research | — |
 | 18 | DSO→DLO mapping read + auto-map | Not built — needs API research | — |
@@ -549,25 +549,88 @@ code paths were each verified independently instead (resolution mapping,
 and the all-skip writeback path), and combine via ordinary boolean
 row filtering.
 
-## 15. Data Cloud (D360) query support (not built)
+## 15. Data Cloud (D360) query support (not built — API surface researched, live verification blocked)
 
 `query_tool.py` is explicitly scoped to CRM objects via the standard REST
 Query API today (see its own docstring) — Data Cloud objects (DLOs, DMOs,
-Calculated Insights, Unified Profile) use a genuinely different query
-surface (the Data Cloud Query API, not `sf.query()`/SOQL) that isn't
-supported at all yet.
+Calculated Insights, Unified Profile) use query surfaces this framework
+doesn't touch at all yet. Current Salesforce docs (as of this research
+pass) call the product **Data 360** now, not Data Cloud — same platform,
+newer name; both terms are used interchangeably in this section since
+that's what the docs themselves currently do.
 
-Idea: extend querying to DLOs (Data Lake Objects), DMOs (Data Model
-Objects), Calculated Insights, and Unified Profile records, plus a way to
-pull data out of Data Graphs. Given how `risk_analyzer.py` turned out
-(`ValidationRule`/`ApexTrigger` needed the Tooling API while
-`FlowDefinitionView`/`ProcessDefinition` needed the standard REST API, and
-guessing wrong failed silently or errored outright), **do not assume any
-of these share one endpoint** — verify each against
-`developer.salesforce.com`'s current Data Cloud API docs, and probe live
-against a real org's Data Cloud instance, before writing a line of code.
-This is explicitly the kind of area CLAUDE.md already warns about
-trusting stale training knowledge for.
+**Hard blocker found before any code could be written**: the org this
+framework is connected to has **zero Data Cloud objects provisioned** --
+`sf.describe()` returns no `__dlo`/`__dlm` objects at all. Every finding
+below is verified against current `developer.salesforce.com` docs, not
+against a live call — nothing here has actually been executed. Building
+or testing real integration code needs a Data Cloud-licensed org to point
+at; this item is blocked on that, not on further reading.
+
+**Research finding: this splits into (at least) two genuinely different
+API surfaces, not one** — the same lesson `risk_analyzer.py`'s build
+already taught (guessing which endpoint a metadata type needs fails
+silently or errors outright, never partially works):
+
+1. **Basic DLO/DMO querying is plain SOQL, no separate auth.** DLOs
+   (`__dlo` suffix) and DMOs (`__dlm` suffix; fields use the ordinary
+   `__c` suffix) are queryable through the *same* core-org REST endpoint
+   and access token `query_tool.py` already uses (`sf.query()`) — confirmed
+   via Salesforce's own REST API Developer Guide, e.g.:
+   ```sql
+   SELECT PartyId__c FROM ContactPointEmail__dlm WHERE EmailAddress__c='jjones@email.com' LIMIT 100
+   ```
+   If this holds up against a real Data Cloud org, extending
+   `query_tool.py` for basic DLO/DMO lookups could be a small addition —
+   possibly just documentation plus a naming-convention note, not new
+   auth plumbing. This is the cheapest, highest-confidence piece to build
+   first once a test org exists.
+
+2. **Complex cross-object queries (joins/aggregations/window functions
+   spanning DLO+DMO+Calculated Insights together) need a separate Data
+   Cloud tenant** — a genuinely different instance URL and access token,
+   not the core org's. Token exchange: `POST
+   {core-org-instance-url}/services/a360/token` with `grant_type=urn:
+   salesforce:grant-type:external:cdp` and the core org's own access
+   token as `subject_token` (`subject_token_type=urn:ietf:params:oauth:
+   token-type:access_token`), returning `DATA_CLOUD_ACCESS_TOKEN` +
+   `DATA_CLOUD_INSTANCE_URL`. Queries then go to that tenant's own
+   `/api/v3/query` (or the older Connect REST API's `/services/data/
+   v64.0/ssot/query-sql`) with a SQL string in the body, following an
+   async job pattern: submit → poll status → fetch rows/chunks → cancel
+   if needed. This is a materially bigger lift than CRM's Bulk API 2.0
+   pattern this framework already handles, since it's a whole second
+   authentication hop layered on top of the first.
+3. **Calculated Insights** have their own dedicated endpoint (`GET
+   /api/v1/insight/calculated-insights/{ci-name}`) supporting SQL-style
+   dimensions/measures/filters and pagination (limit/offset/order by,
+   default cap 4,999 rows/call) — not plain SOQL, not the same surface
+   as #2 either.
+4. **Unified Profile** has a dedicated Profile API (`GET /api/v1/profile/
+   {dataModelName}`, AND+equality filters only, 50-field cap per request,
+   date format `YYYY-MM-DD HH:MM:SS`) *and* is separately reachable via
+   plain SOQL against Unified DMOs directly (same #1 mechanism) — two
+   different paths to related data, worth confirming which one actually
+   fits this framework's needs once there's an org to test against rather
+   than building both speculatively.
+5. **Data Graphs** have their own distinct query endpoint plus a separate
+   metadata-discovery endpoint (what data graphs exist, what they expose)
+   — a third, independent surface from all of the above.
+
+Sources consulted (all current as of this research pass, not relied on
+from training knowledge): [Query API Reference](https://developer.salesforce.com/docs/data/data-cloud-query-guide/references/data-cloud-query-api-reference/c360a-api-queryservices-overview.html),
+[SQL Query APIs](https://developer.salesforce.com/docs/data/data-cloud-query-guide/guide/dc-sql-query-apis.html),
+[OAuth Token Exchange Flow](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_token_exchange_overview.htm),
+[Query Data Cloud via standard REST API](https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/resources_cdp_query.htm),
+[Calculated Insights API](https://developer.salesforce.com/docs/data/data-cloud-query-guide/references/data-cloud-query-api-reference/c360a-api-ci-call-overview.html),
+[Profile API](https://developer.salesforce.com/docs/atlas.en-us.c360a_api.meta/c360a_api/c360a_api_profile_call_overview.htm),
+[Data Cloud object suffixes](https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_concepts_data_cloud_objects.htm),
+[Data Graphs API](https://developer.salesforce.com/docs/data/data-cloud-query-guide/references/data-cloud-query-api-reference/c360a-api-data-graphs-overview.html).
+
+**Next step, once a Data Cloud-provisioned org is available**: verify
+finding #1 live first (lowest cost, highest confidence) before touching
+the token-exchange path at all — same incremental, verify-before-build
+approach every other tool in this framework has followed.
 
 ## 16. Data Cloud semantic model reference (not built)
 
