@@ -120,7 +120,17 @@ as a complement to `profiling.py`'s stats — rules-as-code instead of
 eyeballing profile output, and something a non-technical reviewer could
 still read.
 
-## 6. Mock/demo data generation — Mockaroo half BUILT (`mock_data.py`), Snowfakery/Faker not started
+## 6. Mock/demo data generation — Mockaroo integration BUILT and working (`mock_data.py`)
+
+Three possible data-generation backends were scoped for this item;
+Mockaroo is the only one built so far, and it's fully functional, not
+partial — tested live end to end (schema derived from describe(), real
+mock rows generated via Mockaroo's API, loaded into a mirror-DB table),
+with three real bugs found and fixed along the way (a nonexistent
+Mockaroo type name, a missing phone/email/url mapping, and a numeric
+overflow on tightly-scaled decimal columns). Snowfakery and Faker (below)
+are separate, unstarted ideas for *additional* backends, not gaps in the
+Mockaroo path itself.
 
 `python cli.py generate-mock-data <Object> --count N`:
 - Derives a mock schema from the object's describe() — only createable
