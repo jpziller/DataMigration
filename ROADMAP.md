@@ -481,6 +481,40 @@ reports "nothing to retry" instead of creating an empty table; a table
 that's never been through `bulkops` at all (no `Error` column) raises a
 clear error rather than silently copying everything.
 
+**Delete by external id** (`bulkops <Object> delete <table> --external-id <field>`):
+Bulk API 2.0's delete operation only ever accepts the real Salesforce Id —
+confirmed against Salesforce's own docs ("bulk deletion requests can
+include only the Id field"), unlike update/upsert, which do accept an
+external id via `externalIdFieldName`. So this doesn't send the external
+id to the API directly; it resolves those values to real Ids via a SOQL
+query first (`_resolve_external_ids_to_sf_id`, chunked at 200 values per
+query), then runs a normal Id-based delete against whatever resolved. A
+value with no matching org record never reaches the API at all (nothing
+to delete) — it gets a clear, locally-generated "no matching record found"
+error written back on that row, the same shape as any other failure,
+rather than being silently dropped or erroring out the whole batch.
+Update/upsert already supported external id-based matching natively
+(that's what `upsert` *is*) — this closes the one real gap, which was
+delete specifically.
+
+Tested live: the SOQL resolution step itself, confirmed correct via real
+(read-only) `Account` records — resolved every real value to its actual
+Id and correctly omitted a deliberately fake one. The all-unresolved path
+was verified end to end against a synthetic load table where every
+external id value was fake: confirmed **zero live Bulk API calls were
+made** (the code path skips calling `sf.bulk2` entirely when nothing
+resolved) and both rows got the clear local error written back correctly.
+The mixed resolved/unresolved case was **not** tested live, since that
+would require an actual delete against a real org record — deliberately
+not run "to test," per hard rule 2; the resolved-rows and unresolved-rows
+code paths were each verified independently instead (resolution mapping,
+and the all-skip writeback path), and combine via ordinary boolean
+row filtering.
+
+---
+
+## End-to-end project workflow (vision, not built)
+
 The long-term shape this framework is heading toward — a full project
 lifecycle, not just a set of standalone tools. Roughly, in order:
 

@@ -45,6 +45,19 @@ RETRY HELPER (build_retry_table):
   failure can be resubmitted via a normal `bulk_op()` call against just the
   rows that need it, instead of re-running (and re-charging batches for)
   the whole original load.
+
+DELETE BY EXTERNAL ID:
+  Bulk API 2.0's delete operation only ever accepts the real Salesforce Id
+  column -- confirmed against Salesforce's own Bulk API 2.0 docs ("bulk
+  deletion requests can include only the Id field"), unlike update/upsert,
+  which do accept an external id via `externalIdFieldName`. So `delete`
+  with `external_id` set doesn't send the external id to the API directly
+  -- it resolves those values to real Ids via a SOQL query first
+  (`_resolve_external_ids_to_sf_id`), then runs a normal Id-based delete
+  against the resolved rows. A value with no matching org record is never
+  submitted to the API at all (there's no Id to delete); it's reported
+  back as a local "no matching record found" error on that row, the same
+  writeback shape as any other failure, not silently dropped.
 """
 import io
 import os
@@ -62,6 +75,22 @@ def _read_result_csv(csv_text):
 
 def _fingerprint(df, cols):
     return df[cols].astype(str).agg("\x1f".join, axis=1)
+
+
+def _resolve_external_ids_to_sf_id(sf, object_name, external_id_field, values, chunk_size=200):
+    """Resolve external ID field values to real Salesforce Ids via SOQL --
+    see this module's "DELETE BY EXTERNAL ID" docstring section for why
+    this is necessary before a delete. Returns {value_as_str: sf_id}; a
+    value with no matching org record is simply absent from the result."""
+    resolved = {}
+    unique_values = sorted({str(v) for v in values if v not in (None, "") and pd.notna(v)})
+    for i in range(0, len(unique_values), chunk_size):
+        chunk = unique_values[i:i + chunk_size]
+        quoted = ", ".join("'" + v.replace("\\", "\\\\").replace("'", "\\'") + "'" for v in chunk)
+        soql = f"SELECT Id, {external_id_field} FROM {object_name} WHERE {external_id_field} IN ({quoted})"
+        for rec in sf.query(soql).get("records", []):
+            resolved[str(rec[external_id_field])] = rec["Id"]
+    return resolved
 
 
 def _preflight_check(sf, object_name, operation, sent_columns, id_column="Id"):
@@ -116,6 +145,20 @@ def bulk_op(sf, engine, object_name, operation, source_table,
 
     df = pd.read_sql(f"SELECT * FROM [{schema}].[{source_table}]{order_by}", engine)
 
+    # Delete-by-external-id: resolve to real Ids first (see this module's
+    # "DELETE BY EXTERNAL ID" docstring section). skip_mask marks rows with
+    # no matching org record -- they never reach the API, but still get a
+    # clear, locally-generated error written back like any other failure.
+    skip_mask = pd.Series(False, index=df.index)
+    not_found_count = 0
+    if operation == "delete" and external_id:
+        if external_id not in df.columns:
+            raise ValueError(f"Column {external_id} not in {source_table}")
+        resolved = _resolve_external_ids_to_sf_id(sf, object_name, external_id, df[external_id])
+        df[id_column] = df[external_id].astype(str).map(resolved)
+        skip_mask = df[id_column].isna()
+        not_found_count = int(skip_mask.sum())
+
     # Which columns get sent to Salesforce.
     if operation == "delete":
         sent = [id_column]
@@ -144,41 +187,49 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             + "; ".join(fatal_details)
         )
 
-    payload = df[sent].copy()
+    # Rows that failed external-id resolution never reach the API -- they
+    # get a locally-generated error instead (see skip_mask above).
+    submit_df = df[~skip_mask] if skip_mask.any() else df
+
     os.makedirs(stage_dir, exist_ok=True)
     csv_path = os.path.join(stage_dir, f"{source_table}_{operation}.csv")
-    payload.to_csv(csv_path, index=False)
 
-    handler = getattr(sf.bulk2, object_name)
-    if operation == "insert":
-        results = handler.insert(csv_path)
-    elif operation == "update":
-        results = handler.update(csv_path)
-    elif operation == "upsert":
-        if not external_id:
-            raise ValueError("upsert requires external_id")
-        results = handler.upsert(csv_path, external_id)
-    else:  # delete
-        results = handler.delete(csv_path)
+    if submit_df.empty:
+        successes, failures = pd.DataFrame(), pd.DataFrame()
+        echo_cols = []
+    else:
+        payload = submit_df[sent].copy()
+        payload.to_csv(csv_path, index=False)
 
-    # Collect per-job successful + failed records.
-    succ_frames, fail_frames = [], []
-    for job in results:
-        job_id = job["job_id"]
-        succ_frames.append(_read_result_csv(handler.get_successful_records(job_id)))
-        fail_frames.append(_read_result_csv(handler.get_failed_records(job_id)))
-    successes = pd.concat([f for f in succ_frames if not f.empty],
-                          ignore_index=True) if any(not f.empty for f in succ_frames) else pd.DataFrame()
-    failures = pd.concat([f for f in fail_frames if not f.empty],
-                         ignore_index=True) if any(not f.empty for f in fail_frames) else pd.DataFrame()
+        handler = getattr(sf.bulk2, object_name)
+        if operation == "insert":
+            results = handler.insert(csv_path)
+        elif operation == "update":
+            results = handler.update(csv_path)
+        elif operation == "upsert":
+            if not external_id:
+                raise ValueError("upsert requires external_id")
+            results = handler.upsert(csv_path, external_id)
+        else:  # delete
+            results = handler.delete(csv_path)
 
-    # Build fingerprint -> (Id, Error) using the sent business columns that are
-    # echoed back in the result files.
-    echo_cols = [c for c in sent if (
-        (not successes.empty and c in successes.columns) or
-        (not failures.empty and c in failures.columns)
-    )]
-    payload_fp = _fingerprint(payload, echo_cols)
+        # Collect per-job successful + failed records.
+        succ_frames, fail_frames = [], []
+        for job in results:
+            job_id = job["job_id"]
+            succ_frames.append(_read_result_csv(handler.get_successful_records(job_id)))
+            fail_frames.append(_read_result_csv(handler.get_failed_records(job_id)))
+        successes = pd.concat([f for f in succ_frames if not f.empty],
+                              ignore_index=True) if any(not f.empty for f in succ_frames) else pd.DataFrame()
+        failures = pd.concat([f for f in fail_frames if not f.empty],
+                             ignore_index=True) if any(not f.empty for f in fail_frames) else pd.DataFrame()
+
+        # Build fingerprint -> (Id, Error) using the sent business columns that are
+        # echoed back in the result files.
+        echo_cols = [c for c in sent if (
+            (not successes.empty and c in successes.columns) or
+            (not failures.empty and c in failures.columns)
+        )]
 
     id_by_fp, err_by_fp, ambiguous = {}, {}, 0
     if not successes.empty:
@@ -192,28 +243,44 @@ def bulk_op(sf, engine, object_name, operation, source_table,
                             failures.get("sf__Error", pd.Series(dtype=str))):
             err_by_fp[fp] = serr
 
-    df["_result_id"] = payload_fp.map(id_by_fp)
-    df["_result_error"] = payload_fp.map(err_by_fp)
+    df["_result_id"] = pd.Series(dtype=object, index=df.index)
+    df["_result_error"] = pd.Series(dtype=object, index=df.index)
+    if not submit_df.empty:
+        submit_fp = _fingerprint(submit_df, echo_cols)
+        df.loc[submit_df.index, "_result_id"] = submit_fp.map(id_by_fp)
+        df.loc[submit_df.index, "_result_error"] = submit_fp.map(err_by_fp)
+    if skip_mask.any():
+        not_found_msg = f"No {object_name} record found with {external_id} matching this row's value"
+        df.loc[skip_mask, "_result_error"] = not_found_msg
 
     n_ok = df["_result_id"].notna().sum()
     n_err = df["_result_error"].notna().sum()
 
-    # Write results back.
+    # Write results back. For delete-by-external-id, the result table should
+    # still show the external id value a row was submitted for, even though
+    # only the resolved Id was ever sent to the API -- otherwise a "no
+    # matching record" row would be unreviewable (blank Id, no external id
+    # either).
+    report_columns = sent
+    if operation == "delete" and external_id and external_id not in sent:
+        report_columns = sent + [external_id]
+
     if key_column in df.columns:
         _writeback_inplace(engine, schema, source_table, df,
                            key_column, id_column, error_column)
         target = f"{schema}.{source_table}"
     else:
         target = _writeback_result_table(engine, schema, source_table, df,
-                                          sent, id_column, error_column)
+                                          report_columns, id_column, error_column)
 
     return {
         "operation": operation,
         "object": object_name,
-        "submitted": len(df),
+        "submitted": len(submit_df),
         "succeeded": int(n_ok),
         "failed": int(n_err),
         "ambiguous": ambiguous,
+        "external_id_not_found": not_found_count,
         "written_to": target,
         "preflight_warnings": preflight["required_not_sent"],
     }

@@ -111,7 +111,7 @@ def replicate_cmd(object_name, where, schema, raw):
 @click.argument("object_name")
 @click.argument("operation", type=click.Choice(["insert", "update", "upsert", "delete"]))
 @click.argument("source_table")
-@click.option("--external-id", default=None, help="External id field (upsert).")
+@click.option("--external-id", default=None, help="External id field (upsert; also delete -- resolved to real Ids via a query first, since Bulk API 2.0's delete only ever accepts Id).")
 @click.option("--key-column", default="LoadId", help="Local unique key for in-place writeback.")
 @click.option("--schema", default="dbo")
 def bulkops_cmd(object_name, operation, source_table, external_id, key_column, schema):

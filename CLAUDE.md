@@ -89,6 +89,11 @@ venv may not be active in a fresh shell:
                 call up front rather than burning a real Bulk API batch to find out the same thing;
                 a required-but-unsent field on insert is reported as a warning instead, since
                 automation could still default it. See `bulkops.py`'s pre-flight check.)
+                `.venv/Scripts/python.exe cli.py bulkops Account delete Account_Purge --external-id Legacy_Id__c`
+                (delete by external id — Bulk API 2.0's delete only ever accepts a real Id, so this
+                resolves external id values to real Ids via a query first, then deletes the resolved
+                rows. A value with no matching org record never reaches the API; it gets a clear
+                local "no matching record found" error written back like any other failure.)
 - Retry a failed load:
                 `.venv/Scripts/python.exe cli.py bulkops-retry Contact_Load`
                 (copies only the failed rows — where `Error` is populated — from a load table or its

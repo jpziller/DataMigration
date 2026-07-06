@@ -269,6 +269,12 @@ python cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c
 python cli.py bulkops Contact insert Contact_Load --key-column LoadId
 python cli.py bulkops Case delete Case_Purge --key-column LoadId
 
+# Delete by external id -- Bulk API 2.0's delete only ever accepts a real
+# Id, so this resolves external id values to real Ids via a query first,
+# then deletes the resolved rows. A value with no matching org record
+# never reaches the API; it's reported back as a clear local error.
+python cli.py bulkops Account delete Account_Purge --external-id Legacy_Id__c
+
 # After a load with failures: copy only the failed rows into a fresh
 # <table>_Retry table (does not call Salesforce itself), then resubmit
 # just that table via a normal, separately-confirmed bulkops call.
@@ -324,6 +330,14 @@ into a fresh `<table>_Retry` table. It does not call Salesforce itself --
 resubmit the new table via a normal, separately-confirmed `bulkops` call
 once you've looked at *why* those rows failed (the same root cause across
 every failure usually means the transform needs a fix, not a blind retry).
+
+**Delete by external id.** Bulk API 2.0's delete operation only ever
+accepts the real Salesforce `Id` -- unlike update/upsert, it has no
+`externalIdFieldName` equivalent. `bulkops <Object> delete <table>
+--external-id <field>` resolves external id values to real Ids via a SOQL
+query first, then deletes the resolved rows. A value with no matching org
+record never reaches the API at all -- it's reported back as a clear,
+locally-generated error on that row, the same shape as any other failure.
 
 ---
 
