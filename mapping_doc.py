@@ -13,7 +13,7 @@ is "for each source field, decide if/how it maps," not the reverse.
 generate_mapping_workbook() builds this from a SQL Server source table's
 real columns (INFORMATION_SCHEMA) against a named Salesforce target object.
 If profiling data already exists for that table (see profiling.py),
-"Field Trip Populated On"/"Field Trip %" are pre-filled from it -- those
+"Data Profile Populated On"/"Data Profile %" are pre-filled from it -- those
 columns exist for exactly that purpose. This does NOT auto-guess the
 mapping itself (that's a separate roadmap item) -- only the structure.
 
@@ -43,7 +43,7 @@ _INVALID_SHEET_CHARS = re.compile(r"[:\\/?*\[\]]")
 
 _HEADERS = [
     "Source Object", "Field API", "Field Label", "Data Type", "Description",
-    "Field Trip Populated On", "Field Trip %", "Notes",
+    "Data Profile Populated On", "Data Profile %", "Notes",
     "Migrate Data", "Migrate Field", "Biz Review Req", "Biz Decision",
     None,  # spacer column between source and target blocks
     "Target Object", "Field API", "Field Label", "Data Type", "Description", "Notes",

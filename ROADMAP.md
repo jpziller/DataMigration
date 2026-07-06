@@ -68,13 +68,13 @@ in once a mapping is decided.
 `python cli.py generate-mapping-doc <Object> <path.xlsx> <SourceTable>`:
 - Header block (Source/Target object names), then one row per column in
   the named SQL source table: Source Object / Field API / Field Label /
-  Data Type / Description / Field Trip Populated On / Field Trip % / Notes /
+  Data Type / Description / Data Profile Populated On / Data Profile % / Notes /
   Migrate Data / Migrate Field / Biz Review Req / Biz Decision / [spacer] /
   Target Object / Field API / Field Label / Data Type / Description / Notes.
   The Target block is left blank — does **not** guess the mapping (that's
   auto-mapping, a separate item below).
 - If profiling data already exists for the source table (`profile-sql-table`),
-  "Field Trip Populated On"/"Field Trip %" are pre-filled from it automatically.
+  "Data Profile Populated On"/"Data Profile %" are pre-filled from it automatically.
 - One shared workbook for the whole project (one tab per object) — reuse
   the same output path across objects. (Caught and fixed a real bug here:
   the first version overwrote the entire file per call via `pd.ExcelWriter`'s
@@ -139,7 +139,7 @@ population counts, min/max, distinct counts, null/blank breakdowns, and
 picklist value distributions — the standard best-practice profiling pass.
 Past practice was a DBA-built SQL tool (`sys.tables`/`sys.columns`-driven)
 for source-system tables, plus a separate tool used directly against
-Salesforce (FieldTrip-style), with results reviewed in Excel.
+Salesforce directly, with results reviewed in Excel.
 
 `python cli.py profile-salesforce <Object>` / `profile-sql-table <Table>`:
 - **Salesforce path**: describe()-driven, batched aggregate SOQL queries

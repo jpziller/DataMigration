@@ -13,13 +13,13 @@ source SQL table name — all three required).
 2. Structure (matches a real-world field-inventory template — one row per
    **source** field, not target): header block (Source/Target object
    names), then columns Source Object / Field API / Field Label / Data Type
-   / Description / Field Trip Populated On / Field Trip % / Notes / Migrate
+   / Description / Data Profile Populated On / Data Profile % / Notes / Migrate
    Data / Migrate Field / Biz Review Req / Biz Decision / [spacer] / Target
    Object / Field API / Field Label / Data Type / Description / Notes. The
    Target block is left blank — it does **not** guess the mapping (that's a
    human, or a future auto-mapping tool).
 3. If profiling data already exists for the source table (`/profile`),
-   "Field Trip Populated On"/"Field Trip %" are pre-filled automatically —
+   "Data Profile Populated On"/"Data Profile %" are pre-filled automatically —
    mention this if it happened.
 4. Report the path and row count, and remind the user the Target block is a
    starting structure to fill in, not a finished mapping.

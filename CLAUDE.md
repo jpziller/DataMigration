@@ -58,7 +58,7 @@ venv may not be active in a fresh shell:
                 (one workbook, one tab per object — reuse the SAME output path for every object in
                 the project; it appends/replaces that object's sheet, not the whole file. One row per
                 SOURCE field from the named SQL table, with a blank Target block for a human to fill
-                in once a mapping is decided — doesn't guess the mapping itself. Auto-fills "Field Trip
+                in once a mapping is decided — doesn't guess the mapping itself. Auto-fills "Data Profile
                 Populated On/%" from existing profiling data for that source table, if any.)
                 `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql`
                 (diffs a filled-in doc's Target block against the transform's real INSERT INTO list,
