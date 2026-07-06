@@ -93,8 +93,8 @@ in once a mapping is decided.
   pre-existing issue: it references `Legacy_Id__c`, a field that doesn't
   actually exist on this org (only `MigrationID__c` was ever deployed).
 
-Not yet built: auto-mapping into this doc (source→target suggestions) —
-still a separate roadmap item, see below.
+Auto-mapping into this doc (source→target suggestions) is now built — see
+#11 below.
 
 ## 4. Solution document generator (not built, depends on #2 and #3)
 
@@ -226,6 +226,70 @@ worth migrating" call — full detail stays in `dbo.FieldProfile`/
 `FieldProfileValues` and `export-profile-excel`, not crammed into a
 console table.
 
+## 11. Auto-mapping — BUILT (`auto_mapper.py`)
+
+Suggests source→target field mappings and writes them into an existing
+mapping doc's Target block/Notes/Migrate Data columns (`python cli.py
+auto-map <Object> <mapping.xlsx> <SourceTable>`). Designed around a few
+hard requirements, not just "match names":
+
+- **Profiling is a hard prerequisite, not just a recommended order.**
+  `ensure_source_profiled()` raises a clear error if the source table has
+  no `dbo.FieldProfile` rows — auto-mapping without knowing how populated a
+  field actually is would be guessing at half the picture. A field can
+  match a target field's name perfectly and still be useless to migrate if
+  the source barely captured it.
+- **Layered matching, most-confident first**: (1) exact/normalized name
+  match, (2) a synonym thesaurus, (3) fuzzy string matching
+  (`difflib.SequenceMatcher`, threshold 0.82) as a conservative fallback —
+  deliberately tuned to leave genuinely ambiguous fields unmatched rather
+  than force a low-confidence guess. A future (4) — data-aware reasoning
+  that actually samples row values, not just metadata — is deferred until
+  real usage shows what layers 1–3 miss.
+- **Thesaurus lives in git, not SQL Server**: `reference/field_synonyms.json`
+  is the versioned, always-committed source of truth (concept keys like
+  `BillingPostalCode` mapped to aliases like `zip`/`postal`/`postcode`).
+  SQL Server (`dbo.SourceRegistry`, `dbo.AutoMapSuggestions`) is a deploy/
+  execution target for per-project results only — mirrors the same
+  git-is-truth principle `sql/transformations/*.sql` already follows.
+  Every human correction during a real mapping session is meant to become
+  a new alias here, so the thesaurus improves across migrations instead of
+  staying static.
+- **Data-quality gate overrides a clean name match.** Every suggestion —
+  matched or not — is run through the existing profiling data
+  (`PopulatedPct`, `DistinctCount`). Below 5% populated: "No". Below 20%:
+  "Review". 100% populated but only one distinct value (e.g. a constant
+  flag column): "No", with the actual value quoted in the rationale. A
+  clean thesaurus match on a field that's 2% populated still gets
+  downgraded — the name match doesn't get the final word.
+- **Every suggestion carries a rationale**, not just a yes/no — the point
+  is to make review "scan and approve," not "re-research from scratch."
+  A field with no name match but also degenerate data reports both facts
+  together (e.g. *"No confident match found... Also: Only 100.0%
+  populated, and every populated row has the same value ('X')..."*)
+  rather than just the unhelpful "no match."
+- **Never overwrites a human decision** — `apply_auto_map_suggestions()` in
+  `mapping_doc.py` skips any row where the mapping doc's Target Field API
+  is already filled in.
+
+Tested against two cases: `Account_Mock` → `Account` (trivial — that
+mock table's schema is derived directly from Account's own describe(), so
+every match is exact) and a purpose-built `LegacyCRM_Companies` test table
+with deliberately different naming (`co_name`, `zip`, `tel`,
+`yearly_revenue`, `staff_count`, `weird_flag_9`) to actually exercise the
+thesaurus and fuzzy layers. Found and fixed three real bugs during that
+testing, all confirmed via live re-test against SQL Server:
+1. The "single distinct value" rationale hardcoded "100% populated"
+   regardless of the field's real population rate.
+2. The most-common-value lookup picked up `FieldProfileValues`'s NULL
+   group instead of the actual repeated value (SQL Server's `GROUP BY`
+   treats NULL as its own group) — surfaced as the misleading literal
+   string `"None"` in a rationale until fixed by explicitly excluding NULL.
+3. Unmatched fields never ran the data-quality gate at all, so a field
+   with no name match *and* junk data (constant-value `weird_flag_9`) only
+   reported "no match," missing the more useful "no match, and also not
+   worth migrating" signal the user's original design ask called for.
+
 ---
 
 ## End-to-end project workflow (vision, not built)
@@ -239,9 +303,9 @@ lifecycle, not just a set of standalone tools. Roughly, in order:
    actually being migrated — a documented decision, not an implicit one.
    Generate RAIDD (Risks/Assumptions/Issues/Decisions/Dependencies) entries
    for anything that needs one, for a RAIDD log.
-3. **Auto-map**: attempt source → target field mapping based on the
-   mapping document (name/type similarity, describe() metadata, prior
-   mappings) as a first draft, not a final answer.
+3. **Auto-map** (BUILT, see #11): attempt source → target field mapping
+   based on the mapping document, profiling data, and the git-tracked
+   synonym thesaurus, as a first draft, not a final answer.
 4. **Generate scripts**: build the T-SQL transform for each source →
    target object pairing (following the standard workflow already in
    `CLAUDE.md`: mapping → confirm field names → build → sort → dupe-check).
@@ -255,7 +319,7 @@ lifecycle, not just a set of standalone tools. Roughly, in order:
    proactively, but doesn't load anything without that review.
 
 This ties together #2 (load order), #3 (mapping doc), #4 (solution doc),
-#5 (org metadata risk), and #7 (profiling) into one pipeline, plus two new
-pieces: RAIDD log generation and auto-mapping. Scoping any single piece of
-this into a concrete build is the next step — this section is the shape
-of where it's all going, not a spec for any one of them yet.
+#5 (org metadata risk), #7 (profiling), and #11 (auto-mapping) into one
+pipeline, plus one remaining new piece: RAIDD log generation. Scoping that
+into a concrete build is the next step — this section is the shape of
+where it's all going, not a spec for it yet.

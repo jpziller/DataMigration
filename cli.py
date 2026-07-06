@@ -18,6 +18,7 @@ Examples:
     python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts
     python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts  # same file -> adds a tab, doesn't overwrite
     python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
+    python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
 """
 import click
 import pandas as pd
@@ -36,6 +37,7 @@ import profiling as pf
 import query_tool as qt
 import mock_data as mkd
 import mapping_doc as mpd
+import auto_mapper as am
 
 
 def _ctx():
@@ -278,6 +280,28 @@ def check_mapping_balance_cmd(object_name, mapping_path, transform_sql_path, loa
             click.echo(f"  {field}")
     if not any(result.values()):
         click.echo("In balance -- mapping doc and transform agree, and every field is real.")
+
+
+@cli.command("auto-map")
+@click.argument("object_name")
+@click.argument("mapping_path")
+@click.argument("source_table")
+@click.option("--schema", default="dbo")
+def auto_map_cmd(object_name, mapping_path, source_table, schema):
+    s, sf, engine = _ctx()
+    suggestions = am.suggest_mappings(sf, engine, object_name, source_table, schema=schema)
+    result = mpd.apply_auto_map_suggestions(mapping_path, object_name, object_name, suggestions)
+
+    matched = sum(1 for s_ in suggestions if s_["target_field"])
+    yes = sum(1 for s_ in suggestions if s_["migrate_recommended"] == "Yes")
+    no = sum(1 for s_ in suggestions if s_["migrate_recommended"] == "No")
+    review = sum(1 for s_ in suggestions if s_["migrate_recommended"] == "Review")
+
+    click.echo(f"Suggested {matched} of {len(suggestions)} source field(s) on {source_table} -> {object_name}")
+    click.echo(f"  Recommended: {yes} Yes, {no} No, {review} Review")
+    click.echo(f"Applied to {mapping_path}: {result['applied']} row(s) written, "
+               f"{result['skipped_human_filled']} skipped (already had a human-filled Target field)")
+    click.echo(f"Results also in {schema}.AutoMapSuggestions / {schema}.SourceRegistry")
 
 
 if __name__ == "__main__":

@@ -138,8 +138,11 @@ whoever clones this repo:
 cli.py, config.py, sf_client.py, sql_client.py,        framework code
 replicate.py, bulkops.py, type_map.py, metadata.py,
 load_order.py, profiling.py, query_tool.py,
-mock_data.py, mapping_doc.py
+mock_data.py, mapping_doc.py, auto_mapper.py
 
+reference/field_synonyms.json                           auto-mapping synonym thesaurus
+                                                         (grows via real corrections, but the
+                                                         starting set is generic/template content)
 sql/functions/                                          reusable T-SQL library
 sql/transformations/010_account_load.sql                illustrative example (hypothetical
                                                          source table, not real data)
@@ -153,11 +156,18 @@ docs/, CLAUDE.md, README.md, ROADMAP.md                  documentation
 org's schema and every project's field mappings are different:
 ```
 metadata/*.json          dump-describe output -- one specific org's schema
-mapping/*.xlsx           generate-mapping-doc output -- one specific project's
-                         field-mapping decisions
+mapping/*.xlsx           generate-mapping-doc/auto-map output -- one specific
+                         project's field-mapping decisions
 _stage/                  CSV staging, dropped-in reference docs, scratch work
 .env                     real credentials
 ```
+
+**Also generated, but living in SQL Server rather than as files** —
+`dbo.SourceRegistry`/`dbo.AutoMapSuggestions` (per-project auto-mapping
+state written by `auto-map`). Same rule applies: these are a deploy target,
+never the source of truth. The thesaurus they're matched against
+(`reference/field_synonyms.json`) always originates in git, never in SQL
+Server.
 
 If a real engagement wants a versioned copy of its own describe snapshots or
 mapping workbook, that's a deliberate choice to make for that project — not
@@ -219,6 +229,14 @@ python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx Source
 python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts
 python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
 
+# Auto-suggest a mapping into that doc's Target block/Notes/Migrate Data
+# columns -- requires the source table to already be profiled. Matches by
+# exact/normalized name, then reference/field_synonyms.json, then fuzzy
+# string matching, and downgrades any match if the source field's profiled
+# population/distinct-value data says it isn't worth migrating. Never
+# overwrites a row a human already filled in.
+python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
+
 # Transform in T-SQL (sql/transformations/*.sql) to build *_Load tables
 
 # Load SQL -> org, with Id/Error written back into the load table
@@ -230,8 +248,8 @@ python cli.py bulkops Case delete Case_Purge --key-column LoadId
 Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/replicate`, `/build-load`, `/validate-load`, `/status`) — see "Claude Code
-operating layer" below.
+`/auto-map`, `/replicate`, `/build-load`, `/validate-load`, `/status`) — see
+"Claude Code operating layer" below.
 
 ---
 
@@ -297,6 +315,7 @@ SQL Server, **reviewed hands** for mutations.
   `/analyze-load-order <Objects...>`, `/generate-mock-data <Object>`,
   `/generate-mapping-doc <Object> <path.xlsx> <SourceTable>`,
   `/check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`,
+  `/auto-map <Object> <mapping.xlsx> <SourceTable>`,
   `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
   `/status`.
 

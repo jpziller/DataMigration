@@ -50,6 +50,15 @@ _HEADERS = [
 ]
 _TARGET_FIELD_API_COL = 15  # 1-indexed position of the Target block's "Field API" column
 
+# Named column positions for apply_auto_map_suggestions() -- see _HEADERS above.
+_COL_SOURCE_FIELD_API = 2
+_COL_SOURCE_NOTES = 8
+_COL_MIGRATE_DATA = 9
+_COL_TARGET_OBJECT = 14
+_COL_TARGET_FIELD_API = 15
+_COL_TARGET_FIELD_LABEL = 16
+_COL_TARGET_DATA_TYPE = 17
+
 
 def _safe_sheet_name(name):
     return _INVALID_SHEET_CHARS.sub("_", name)[:31]
@@ -118,6 +127,48 @@ def generate_mapping_workbook(sf, target_object, output_path, engine, source_tab
 
     wb.save(output_path)
     return output_path
+
+
+def apply_auto_map_suggestions(mapping_path, object_name, target_object, suggestions):
+    """Write auto_mapper.py's suggestions into an existing mapping doc's
+    Target block + source Notes + Migrate Data columns.
+
+    Never overwrites a row where a human has already filled in the Target
+    block's Field API -- a human decision always wins over a suggestion,
+    silently or otherwise.
+    """
+    wb = openpyxl.load_workbook(mapping_path)
+    sheet_name = _safe_sheet_name(object_name)
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"No sheet named '{sheet_name}' in {mapping_path}")
+    ws = wb[sheet_name]
+
+    suggestions_by_field = {s["source_field"]: s for s in suggestions}
+    applied, skipped_human = 0, 0
+
+    for row in ws.iter_rows(min_row=4):
+        source_field = row[_COL_SOURCE_FIELD_API - 1].value
+        if source_field not in suggestions_by_field:
+            continue
+
+        existing_target = row[_COL_TARGET_FIELD_API - 1].value
+        if existing_target is not None and str(existing_target).strip():
+            skipped_human += 1
+            continue
+
+        s = suggestions_by_field[source_field]
+        row_idx = row[0].row
+        if s["target_field"]:
+            ws.cell(row=row_idx, column=_COL_TARGET_OBJECT, value=target_object)
+            ws.cell(row=row_idx, column=_COL_TARGET_FIELD_API, value=s["target_field"])
+            ws.cell(row=row_idx, column=_COL_TARGET_FIELD_LABEL, value=s["target_label"])
+            ws.cell(row=row_idx, column=_COL_TARGET_DATA_TYPE, value=s["target_type"])
+        ws.cell(row=row_idx, column=_COL_SOURCE_NOTES, value=s["rationale"])
+        ws.cell(row=row_idx, column=_COL_MIGRATE_DATA, value=s["migrate_recommended"])
+        applied += 1
+
+    wb.save(mapping_path)
+    return {"applied": applied, "skipped_human_filled": skipped_human}
 
 
 def extract_insert_columns(sql_text, table_name=None):

@@ -63,6 +63,16 @@ venv may not be active in a fresh shell:
                 `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql`
                 (diffs a filled-in doc's Target block against the transform's real INSERT INTO list,
                 both directions, plus flags any referenced field that doesn't actually exist on the object.)
+- Auto-map:     `.venv/Scripts/python.exe cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts`
+                (requires the source table to already be profiled — raises a clear error otherwise.
+                Suggests a Target field per source field via exact/normalized name match, then a
+                git-tracked synonym thesaurus (`reference/field_synonyms.json`), then fuzzy string
+                matching as a conservative fallback. Every suggestion is passed through the existing
+                profiling data as a data-quality gate — a clean name match still gets downgraded to
+                "No"/"Review" if the source field is barely populated or has only one distinct value.
+                Writes suggestions into the mapping doc's Target block/Notes/Migrate Data columns,
+                but never overwrites a row where a human already filled in the Target field — see
+                `auto_mapper.py` for the full design rationale.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c`
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
@@ -72,7 +82,7 @@ venv may not be active in a fresh shell:
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/replicate`, `/build-load`, `/validate-load`, `/status`
+`/auto-map`, `/replicate`, `/build-load`, `/validate-load`, `/status`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -123,17 +133,26 @@ available even when there's no dedicated skill for it.
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
 don't jump straight to writing T-SQL:
-1. **Review the mapping** (source field → target field, transformation
-   notes) for the object in question. Ask for it if it hasn't been provided.
-2. **Confirm target field API names** with `describe`/`dump-describe`
+1. **Profile the source table first** (`profile-sql-table`) — auto-mapping
+   and any real mapping-quality judgment depend on knowing how populated a
+   field actually is, not just what it's named. Don't skip to mapping
+   before this exists.
+2. **Review the mapping** (source field → target field, transformation
+   notes) for the object in question — `generate-mapping-doc` to build the
+   starting structure, then `auto-map` to suggest a first pass at the
+   Target block/Notes from the profiling data plus name/thesaurus/fuzzy
+   matching. Both are a starting point for human review, not a finished
+   mapping — treat every "Review" recommendation, and any auto-map "No"
+   on a field that instinctively looks mappable, as worth a second look.
+3. **Confirm target field API names** with `describe`/`dump-describe`
    (rule 5) — never guess a field name from the mapping doc alone.
-3. **Build the transform** under `sql/transformations/`, producing the
+4. **Build the transform** under `sql/transformations/`, producing the
    `*_Load` table.
-4. **Sort it** — `AddBulkLoadSortColumn` against the object's parent key
+5. **Sort it** — `AddBulkLoadSortColumn` against the object's parent key
    (rule 6), if it has one.
-5. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
+6. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
    key (rule 7). Resolve anything it flags.
-6. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2).
+7. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2).
 
 ## Licensing
 MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,
@@ -152,13 +171,28 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
-  `mapping_doc.py` — the Data Architect toolbelt (load-order analysis,
-  profiling, ad hoc query, mock data, mapping doc).
+  `mapping_doc.py`, `auto_mapper.py` — the Data Architect toolbelt
+  (load-order analysis, profiling, ad hoc query, mock data, mapping doc,
+  auto-mapping).
+- `reference/field_synonyms.json` — git-tracked field-name synonym
+  thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
+  resolve to `BillingPostalCode`). This is template content — always
+  committed, unlike everything under `mapping/`/`metadata/`. Every human
+  correction during a real mapping session is a candidate new alias; add it
+  here rather than hardcoding it in Python, so the thesaurus improves
+  across migrations instead of staying static.
 - `sql/transformations/*.sql` — the migration logic (numbered; run in order).
 - `sql/functions/` — reusable T-SQL function library (see its own README).
 - `force-app/` — Salesforce metadata deployed via `sf project deploy`
   (custom fields, profile FLS grants).
 - `mapping/` — generated field-mapping workbooks (`generate-mapping-doc`).
+- `dbo.SourceRegistry`, `dbo.AutoMapSuggestions` (SQL Server, not files) —
+  per-project auto-mapping state written by `auto-map`: which source
+  tables have been auto-mapped against which target objects, and the
+  suggestions themselves (match method, score, migrate recommendation,
+  rationale). Deploy targets only, like every other table this framework
+  creates — never edited by hand, never the source of truth for the
+  thesaurus (that's always `reference/field_synonyms.json` in git).
 - `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
   `SOQL_QUERY_LIBRARY.md` (Tooling API queries).
 - `ROADMAP.md` — idea backlog and build status for planned tooling.

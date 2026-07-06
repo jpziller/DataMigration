@@ -1,0 +1,124 @@
+{
+  "_comment": "Field-name synonym thesaurus for auto_mapper.py. Canonical key = a concept; aliases = ways a source system might name it (normalized: lowercased, underscores/spaces stripped before comparison). Every human correction during a real mapping session is a candidate new alias -- add it here, don't hardcode it in Python.",
+
+  "Name": {
+    "label": "Primary Name",
+    "aliases": ["name", "fullname", "full_name", "companyname", "company_name", "accountname", "account_name", "orgname", "organizationname"]
+  },
+  "FirstName": {
+    "label": "First Name",
+    "aliases": ["firstname", "first_name", "fname", "givenname", "given_name"]
+  },
+  "LastName": {
+    "label": "Last Name",
+    "aliases": ["lastname", "last_name", "lname", "surname", "familyname", "family_name"]
+  },
+  "Suffix": {
+    "label": "Name Suffix",
+    "aliases": ["suffix", "namesuffix", "name_suffix", "jrsr", "generation"]
+  },
+  "Salutation": {
+    "label": "Salutation / Title Prefix",
+    "aliases": ["salutation", "title_prefix", "honorific", "prefix"]
+  },
+  "Phone": {
+    "label": "Phone Number",
+    "aliases": ["phone", "phonenumber", "phone_number", "tel", "telephone", "mainphone", "main_phone", "workphone", "work_phone", "officephone"]
+  },
+  "MobilePhone": {
+    "label": "Mobile Phone",
+    "aliases": ["mobile", "mobilephone", "mobile_phone", "cell", "cellphone", "cell_phone"]
+  },
+  "Fax": {
+    "label": "Fax Number",
+    "aliases": ["fax", "faxnumber", "fax_number"]
+  },
+  "Email": {
+    "label": "Email Address",
+    "aliases": ["email", "emailaddress", "email_address", "e_mail", "mail"]
+  },
+  "Website": {
+    "label": "Website URL",
+    "aliases": ["website", "url", "webaddress", "web_address", "homepage", "site"]
+  },
+  "BillingStreet": {
+    "label": "Billing Street",
+    "aliases": ["billingstreet", "billing_street", "billaddress", "billingaddress", "billing_address", "addr1", "address1", "address_line_1", "addressline1", "street"]
+  },
+  "BillingCity": {
+    "label": "Billing City",
+    "aliases": ["billingcity", "billing_city", "city"]
+  },
+  "BillingState": {
+    "label": "Billing State/Province",
+    "aliases": ["billingstate", "billing_state", "state", "province", "stateprovince", "state_province"]
+  },
+  "BillingPostalCode": {
+    "label": "Billing Postal/Zip Code",
+    "aliases": ["billingpostalcode", "billing_postal_code", "zip", "zipcode", "zip_code", "postal", "postalcode", "postal_code", "postcode", "post_code"]
+  },
+  "BillingCountry": {
+    "label": "Billing Country",
+    "aliases": ["billingcountry", "billing_country", "country", "nation"]
+  },
+  "ShippingStreet": {
+    "label": "Shipping Street",
+    "aliases": ["shippingstreet", "shipping_street", "shipaddress", "shippingaddress", "shipping_address", "physicaladdress", "physical_address", "physicalstreet"]
+  },
+  "ShippingCity": {
+    "label": "Shipping City",
+    "aliases": ["shippingcity", "shipping_city", "physicalcity", "physical_city"]
+  },
+  "ShippingState": {
+    "label": "Shipping State/Province",
+    "aliases": ["shippingstate", "shipping_state", "physicalstate", "physical_state"]
+  },
+  "ShippingPostalCode": {
+    "label": "Shipping Postal/Zip Code",
+    "aliases": ["shippingpostalcode", "shipping_postal_code", "physicalzip", "physical_zip", "physicalpostalcode"]
+  },
+  "ShippingCountry": {
+    "label": "Shipping Country",
+    "aliases": ["shippingcountry", "shipping_country", "physicalcountry", "physical_country"]
+  },
+  "AnnualRevenue": {
+    "label": "Annual Revenue",
+    "aliases": ["annualrevenue", "annual_revenue", "revenue", "yearlyrevenue"]
+  },
+  "NumberOfEmployees": {
+    "label": "Number of Employees",
+    "aliases": ["numberofemployees", "number_of_employees", "employees", "employeecount", "employee_count", "headcount", "staffcount"]
+  },
+  "Industry": {
+    "label": "Industry",
+    "aliases": ["industry", "vertical", "sector", "businesstype", "business_type"]
+  },
+  "Description": {
+    "label": "Description",
+    "aliases": ["description", "notes", "comments", "details", "summary"]
+  },
+  "OwnerId": {
+    "label": "Record Owner",
+    "aliases": ["ownerid", "owner_id", "owner", "assignedto", "assigned_to", "repid", "rep_id", "salesrep", "sales_rep"]
+  },
+  "RecordTypeId": {
+    "label": "Record Type",
+    "aliases": ["recordtypeid", "record_type_id", "recordtype", "record_type", "type"]
+  },
+  "Status": {
+    "label": "Status",
+    "aliases": ["status", "state_flag", "recordstatus", "record_status"]
+  },
+  "CreatedDate": {
+    "label": "Created Date",
+    "aliases": ["createddate", "created_date", "createdon", "created_on", "datecreated", "date_created"]
+  },
+  "LastModifiedDate": {
+    "label": "Last Modified Date",
+    "aliases": ["lastmodifieddate", "last_modified_date", "modifieddate", "modified_date", "updateddate", "updated_date", "dateupdated", "date_updated"]
+  },
+  "IsActive": {
+    "label": "Active Flag",
+    "aliases": ["isactive", "is_active", "active", "activeflag", "active_flag", "enabled"]
+  }
+}
