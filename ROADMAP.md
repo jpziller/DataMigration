@@ -232,6 +232,13 @@ validation-rule list (this dev org has none active to test against
 naturally) — confirmed inactive rules are excluded from the active count,
 and only the field genuinely in scope is flagged as a direct hit.
 
+**Bug found and fixed in a later repo-review pass**: `ValidationRule` rows
+in `dbo.ObjectAutomationRisk` were getting the rule's opaque Salesforce
+`Id` as `ItemName` (e.g. `03d...`), not anything human-readable — the
+original SOQL never selected a name field. Confirmed `ValidationName` is
+a real, queryable Tooling API field (verified live), added it to the
+query, and used it as `ItemName` and in the CLI's per-rule console output.
+
 **Deferred, not built**: `pandera`/`great_expectations`-style declarative
 data-quality rules ("this field must be non-null," "must match regex X")
 as a complement to `profiling.py`'s stats. Related in spirit but a

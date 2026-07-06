@@ -373,7 +373,8 @@ def analyze_org_risk_cmd(object_names, mapping_path, schema):
         for vr in r["validation_rules"]:
             if vr.get("Active"):
                 hit = "  [DIRECT HIT on a migrated field]" if vr.get("direct_hit") else ""
-                click.echo(f"    - {vr.get('ErrorMessage')}{hit}")
+                name = vr.get("ValidationName") or vr.get("Id")
+                click.echo(f"    - {name}: {vr.get('ErrorMessage')}{hit}")
         for w in r["warnings"]:
             click.echo(f"    Warning: {w}")
 

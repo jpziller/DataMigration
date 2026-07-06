@@ -78,7 +78,7 @@ def _tooling_query(sf, soql):
 
 def _validation_rules(sf, object_name):
     r = _tooling_query(sf, (
-        "SELECT Id, Active, ErrorDisplayField, ErrorMessage, Description "
+        "SELECT Id, ValidationName, Active, ErrorDisplayField, ErrorMessage, Description "
         "FROM ValidationRule "
         f"WHERE EntityDefinition.QualifiedApiName = '{object_name}'"
     ))
@@ -190,7 +190,8 @@ def write_to_sql(engine, results, schema="dbo"):
         for r in result["validation_rules"]:
             rows.append({
                 "object_name": obj, "check_type": "ValidationRule",
-                "item_name": r.get("Id") or "(unnamed)", "is_active": bool(r.get("Active")),
+                "item_name": r.get("ValidationName") or r.get("Id") or "(unnamed)",
+                "is_active": bool(r.get("Active")),
                 "direct_hit": bool(r.get("direct_hit")), "detail": r.get("ErrorMessage"),
                 "analyzed_at": analyzed_at,
             })
