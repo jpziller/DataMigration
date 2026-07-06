@@ -34,6 +34,7 @@ summarizes.
 | 19 | Data Kit / Bundle documentation | Not built, depends on #15/#16 | — |
 | 20 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — |
 | 21 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #15 | — |
+| 22 | Parquet file import | **Built** | `import-parquet` |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -717,6 +718,44 @@ actually run the "query tests" part; the CI/CD deployment side would need
 its own research into how Calculated Insight metadata is deployed
 programmatically (Metadata API component type, if one exists, vs. Setup UI
 only today).
+
+## 22. Parquet file import — BUILT (`parquet_import.py`)
+
+`python cli.py import-parquet <path.parquet> <table> [--append]`: imports
+a Parquet file into a typed SQL Server table in the mirror DB — a second
+entry point alongside `replicate.py`'s org-sourced path for getting source
+data into SQL Server, for the case where the source is a columnar file
+rather than a live org (`docs/MIGRATION_PLAYBOOK.md`'s "Data Extraction
+from Source Systems" already covers flat files/JSON generally; this adds
+Parquet specifically as its own typed path).
+
+Unlike `replicate.py`'s Salesforce path — Bulk API 2.0 always returns text
+CSV, so every value needs coercing back to a native type (see
+`type_map.py`'s `typed_value_coercers`) — Parquet is already a typed
+columnar format. `pyarrow` hands back real int/float/datetime values
+directly, so there's no coercion step here, just a schema-inference-to-
+SQL-Server-DDL step (`_arrow_type_to_sql`), mirroring `type_map.py`'s
+`sf_type_to_sql` for the Salesforce side. Reads via
+`pyarrow.parquet.ParquetFile.iter_batches()` rather than
+`pd.read_parquet()` in one call, so a large file doesn't need to fit in
+memory at once — the same chunked-append pattern `replicate.py` already
+uses. Drops/recreates the target table by default; `--append` adds rows
+to an existing, schema-compatible table instead (e.g. loading a second
+file into the same table).
+
+Tested end to end against a synthetic Parquet file covering string,
+float, int, boolean, date, and datetime columns with NULLs mixed in:
+confirmed every column landed as the correct SQL Server type (`BIGINT`
+for a 64-bit int column, `FLOAT`, `BIT`, `DATE`, `DATETIME2`, `NVARCHAR
+(MAX)`) with NULLs preserved correctly, and confirmed `--append` adds
+rows to the existing table instead of dropping it.
+
+New dependency: `pyarrow` (Parquet read support).
+
+**Not built**: the imported table still needs the same
+profiling → mapping → transform pipeline as any other source table before
+it's ready for `bulkops` — this only solves getting the file's data into
+SQL Server, not any downstream step.
 
 ---
 

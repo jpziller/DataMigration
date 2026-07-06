@@ -22,6 +22,7 @@ Examples:
     python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
     python cli.py generate-solution-doc Solution.docx Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
     python cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
+    python cli.py import-parquet ./data/accounts.parquet SourceAccounts
 """
 import click
 import pandas as pd
@@ -43,6 +44,7 @@ import mapping_doc as mpd
 import auto_mapper as am
 import solution_doc as sd
 import risk_analyzer as ra
+import parquet_import as pqi
 
 
 def _ctx():
@@ -105,6 +107,18 @@ def replicate_cmd(object_name, where, schema, raw):
     n = rep.replicate(sf, engine, object_name, s.stage_dir,
                       schema=schema, where=where, raw=raw)
     click.echo(f"Replicated {n} rows into {schema}.{object_name}")
+
+
+@cli.command("import-parquet")
+@click.argument("parquet_path")
+@click.argument("table_name")
+@click.option("--schema", default="dbo")
+@click.option("--append", is_flag=True, help="Add rows to an existing table instead of dropping/recreating it.")
+def import_parquet_cmd(parquet_path, table_name, schema, append):
+    _, _, engine = _ctx()
+    n = pqi.import_parquet(engine, parquet_path, table_name, schema=schema, append=append)
+    click.echo(f"Imported {n} row(s) into {schema}.{table_name}"
+               f"{' (appended)' if append else ' (table recreated)'}")
 
 
 @cli.command("bulkops")

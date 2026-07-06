@@ -140,7 +140,7 @@ whoever clones this repo:
 ```
 cli.py, config.py, sf_client.py, sql_client.py,        framework code
 replicate.py, bulkops.py, type_map.py, metadata.py,
-load_order.py, profiling.py, query_tool.py,
+parquet_import.py, load_order.py, profiling.py, query_tool.py,
 mock_data.py, mapping_doc.py, auto_mapper.py,
 solution_doc.py, risk_analyzer.py
 
@@ -236,6 +236,12 @@ python cli.py replicate Account
 python cli.py replicate Contact --where "CreatedDate = LAST_N_DAYS:30"
 python cli.py replicate Opportunity --raw    # all NVARCHAR(MAX); CAST in T-SQL
 
+# Import a Parquet file -> typed SQL Server table (column types inferred
+# from the file's own schema -- no coercion step, unlike Salesforce's
+# always-text Bulk API CSV extracts). Drops/recreates by default.
+python cli.py import-parquet ./data/accounts.parquet SourceAccounts
+python cli.py import-parquet ./data/accounts_part2.parquet SourceAccounts --append
+
 # Profile a field's population/min/max/distinct/value distribution --
 # either directly from Salesforce or from an already-replicated SQL table
 python cli.py profile-salesforce Account
@@ -303,8 +309,8 @@ Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
 `/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/analyze-org-risk`,
-`/replicate`, `/build-load`, `/validate-load`, `/status`) — see "Claude Code
-operating layer" below.
+`/import-parquet`, `/replicate`, `/build-load`, `/validate-load`, `/status`)
+— see "Claude Code operating layer" below.
 
 ---
 
@@ -397,6 +403,7 @@ SQL Server, **reviewed hands** for mutations.
   `/auto-map <Object> <mapping.xlsx> <SourceTable>`,
   `/generate-solution-doc <output.docx> <Objects...>`,
   `/bulkops-retry <LoadTable>`, `/analyze-org-risk <Objects...>`,
+  `/import-parquet <path.parquet> <table>`,
   `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
   `/status`.
 

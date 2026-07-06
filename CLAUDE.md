@@ -46,6 +46,13 @@ venv may not be active in a fresh shell:
 - Query:        `.venv/Scripts/python.exe cli.py query "SELECT Id, Name FROM Account LIMIT 10"`
                 `[--all]` to paginate everything, `[--csv path]`/`[--excel path]` to export.
 - Replicate:    `.venv/Scripts/python.exe cli.py replicate Account [--where "..."] [--raw]`
+- Import file:  `.venv/Scripts/python.exe cli.py import-parquet path/to/file.parquet SourceAccounts [--append]`
+                (Parquet -> typed SQL Server table, column types inferred from the file's own
+                schema via `pyarrow` — no coercion step needed since Parquet is already typed,
+                unlike Salesforce's Bulk API 2.0 CSV extracts. Drops/recreates the target table
+                by default; `--append` adds to an existing compatible table instead. A second
+                entry point into the mirror DB alongside `replicate`, for source data that starts
+                as a file rather than a live org.)
 - Profile:      `.venv/Scripts/python.exe cli.py profile-salesforce Account` (live org, aggregate SOQL)
                 `.venv/Scripts/python.exe cli.py profile-sql-table Account` (any SQL Server table)
                 `.venv/Scripts/python.exe cli.py export-profile-excel profile.xlsx`
@@ -115,7 +122,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
 `/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/analyze-org-risk`,
-`/replicate`, `/build-load`, `/validate-load`, `/status`
+`/import-parquet`, `/replicate`, `/build-load`, `/validate-load`, `/status`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -203,6 +210,8 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   auth, SQL Server connection.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping.
+- `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
+  table), the flat-file counterpart to `replicate.py`'s org-sourced path.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`, `risk_analyzer.py`
   — the Data Architect toolbelt (load-order analysis, profiling, ad hoc

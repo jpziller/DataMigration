@@ -11,6 +11,7 @@
       "Bash(.venv/Scripts/python.exe cli.py describe *)",
       "Bash(.venv/Scripts/python.exe cli.py dump-describe *)",
       "Bash(.venv/Scripts/python.exe cli.py replicate *)",
+      "Bash(.venv/Scripts/python.exe cli.py import-parquet *)",
       "Bash(.venv/Scripts/python.exe cli.py query *)",
       "Bash(.venv/Scripts/python.exe cli.py profile-salesforce *)",
       "Bash(.venv/Scripts/python.exe cli.py profile-sql-table *)",
