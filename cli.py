@@ -21,6 +21,7 @@ Examples:
     python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
     python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
     python cli.py generate-solution-doc Solution.docx Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
+    python cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
 """
 import click
 import pandas as pd
@@ -41,6 +42,7 @@ import mock_data as mkd
 import mapping_doc as mpd
 import auto_mapper as am
 import solution_doc as sd
+import risk_analyzer as ra
 
 
 def _ctx():
@@ -349,6 +351,33 @@ def generate_solution_doc_cmd(output_path, object_names, mapping_path, template_
         click.echo("Unresolved circular dependencies flagged in the document:")
         for group in context["unresolved_cycles"]:
             click.echo(f"  {', '.join(group)}")
+
+
+@cli.command("analyze-org-risk")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--mapping-path", default=None, help="Mapping workbook -- cross-references active validation rules' ErrorDisplayField against fields actually being migrated (Migrate Data == Yes).")
+@click.option("--schema", default="dbo")
+def analyze_org_risk_cmd(object_names, mapping_path, schema):
+    _, sf, engine = _ctx()
+    object_names = list(object_names)
+    fields_in_scope = ra.fields_in_scope_from_mapping(mapping_path, object_names)
+    results = ra.analyze_migration_risk(sf, object_names, fields_in_scope_by_object=fields_in_scope)
+    ra.write_to_sql(engine, results, schema=schema)
+
+    for r in results:
+        click.echo(
+            f"{r['object']}: {r['active_validation_rule_count']} active validation rule(s), "
+            f"{len(r['apex_triggers'])} Apex trigger(s), {r['active_flow_count']} active record-triggered flow(s), "
+            f"{len(r['workflow_rules'])} legacy workflow rule(s), {len(r['approval_processes'])} approval process(es)"
+        )
+        for vr in r["validation_rules"]:
+            if vr.get("Active"):
+                hit = "  [DIRECT HIT on a migrated field]" if vr.get("direct_hit") else ""
+                click.echo(f"    - {vr.get('ErrorMessage')}{hit}")
+        for w in r["warnings"]:
+            click.echo(f"    Warning: {w}")
+
+    click.echo(f"\nResults in {schema}.ObjectAutomationRisk")
 
 
 if __name__ == "__main__":

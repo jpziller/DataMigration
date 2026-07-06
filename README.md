@@ -142,7 +142,7 @@ cli.py, config.py, sf_client.py, sql_client.py,        framework code
 replicate.py, bulkops.py, type_map.py, metadata.py,
 load_order.py, profiling.py, query_tool.py,
 mock_data.py, mapping_doc.py, auto_mapper.py,
-solution_doc.py
+solution_doc.py, risk_analyzer.py
 
 reference/field_synonyms.json                           auto-mapping synonym thesaurus
                                                          (grows via real corrections, but the
@@ -274,14 +274,19 @@ python cli.py bulkops Case delete Case_Purge --key-column LoadId
 # just that table via a normal, separately-confirmed bulkops call.
 python cli.py bulkops-retry Contact_Load
 python cli.py bulkops Contact insert Contact_Load_Retry --key-column LoadId
+
+# Before a load: what automation on the target org might interfere?
+# (validation rules, Apex triggers, record-triggered Flows, workflow rules,
+# approval processes -- object-level inventory, not a formula parser)
+python cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
 ```
 
 Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/replicate`,
-`/build-load`, `/validate-load`, `/status`) — see "Claude Code operating
-layer" below.
+`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/analyze-org-risk`,
+`/replicate`, `/build-load`, `/validate-load`, `/status`) — see "Claude Code
+operating layer" below.
 
 ---
 
@@ -365,7 +370,7 @@ SQL Server, **reviewed hands** for mutations.
   `/check-mapping-balance <Object> <mapping.xlsx> <transform.sql>`,
   `/auto-map <Object> <mapping.xlsx> <SourceTable>`,
   `/generate-solution-doc <output.docx> <Objects...>`,
-  `/bulkops-retry <LoadTable>`,
+  `/bulkops-retry <LoadTable>`, `/analyze-org-risk <Objects...>`,
   `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
   `/status`.
 

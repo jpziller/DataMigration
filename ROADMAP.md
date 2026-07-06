@@ -135,23 +135,71 @@ graceful-degradation paths (no `--mapping-path` given, no profiling data
 for an object) -- both report the gap in plain language in the document
 itself rather than erroring or silently omitting the section.
 
-## 5. Org metadata risk analyzer (not built)
+## 5. Org metadata risk analyzer — BUILT (`risk_analyzer.py`)
 
-Problem: before migrating data into fields, you need to know if Flows,
-validation rules, or other automation on the target org will fire
-unexpectedly during a load (causing errors, cascading updates, or unwanted
-side effects).
+`python cli.py analyze-org-risk <Object> [<Object> ...] [--mapping-path <xlsx>]`:
+cross-references the objects a migration touches against the target org's
+*live* automation metadata — active validation rules, Apex triggers,
+record-triggered Flows, legacy Workflow Rules, and approval processes —
+before `bulkops` runs for real, instead of finding out from an unexplained
+rejection or a cascading side effect.
 
-Idea: a tool that cross-references the fields/objects a migration touches
-against the org's automation metadata (Flows, validation rules, maybe Apex
-triggers) and produces a report of "here's what might interfere with this
-load and why" before you run bulkops for real.
+**Scope, stated plainly** (the module docstring says the same thing):
+this is an **object-level automation inventory**, not a field-level
+formula parser. Reliably determining which specific fields a validation
+rule's formula or a Flow's condition logic references would need either
+brittle text-scanning of formula strings, or a much heavier Metadata API
+retrieval per Flow — deferred, the same way `auto_mapper.py` deferred its
+data-sampling "layer 4" until real usage shows it's needed. One concrete,
+honest field-level signal *is* included cheaply, though: an active
+validation rule's `ErrorDisplayField` is cross-referenced against
+whichever target fields are actually being migrated (`--mapping-path`,
+reading `Migrate Data == Yes` rows) and flagged as a **direct hit** — a
+real signal using data already queryable, without pretending to parse
+formula logic.
 
-Candidate library: `pandera` or `great_expectations` for declarative data
-quality rules ("this field must be non-null," "this must match regex X")
-as a complement to `profiling.py`'s stats — rules-as-code instead of
-eyeballing profile output, and something a non-technical reviewer could
-still read.
+**Two Salesforce API surfaces, mixed up would fail silently rather than
+error** — worth its own callout since this org runs a post-training-cutoff
+API version and CLAUDE.md says not to trust stale assumptions here.
+Verified live against a real org before shipping, not just read off old
+docs:
+- **Tooling API** (`sf.toolingexecute`): `ValidationRule`, `ApexTrigger`,
+  `WorkflowRule` — all fail with `INVALID_TYPE` if queried through the
+  standard REST API instead.
+- **Standard REST Query API** (`sf.query`): `ProcessDefinition` (approval
+  processes) and `FlowDefinitionView` — the latter is what actually makes
+  "which Flows are record-triggered on this object" answerable at all
+  (`TriggerObjectOrEventLabel`/`TriggerType` columns), which
+  `docs/SOQL_QUERY_LIBRARY.md`'s older unfiltered `Flow` query couldn't do.
+  Discovered `ProcessDefinition` is standard-API-queryable (not Tooling)
+  by testing it directly after `ValidationRule`/`ApexTrigger`/
+  `WorkflowRule` all confirmed Tooling-only — the two APIs were mixed
+  within what the roadmap idea originally described as one undifferentiated
+  "automation metadata" query surface.
+
+Each per-object check is wrapped individually so one failing metadata
+query (e.g. an API surface behaving differently on some org edition)
+surfaces as a warning in the report rather than crashing the whole
+analysis for every other object. Results also land in
+`dbo.ObjectAutomationRisk` for later reference, same DELETE-then-INSERT-
+per-object pattern as `dbo.FieldProfile`/`dbo.AutoMapSuggestions`.
+
+Tested live against a real org: `Order` correctly surfaced its one active
+record-triggered Flow (found via the org-wide `FlowDefinitionView` query
+returning 128 real flows, then confirmed the `TriggerObjectOrEventLabel`
+filter narrows correctly); `ApexTrigger`'s `EntityDefinition.QualifiedApiName`
+filter was confirmed against real installed-package triggers. The
+direct-hit cross-reference logic itself was verified with a monkeypatched
+validation-rule list (this dev org has none active to test against
+naturally) — confirmed inactive rules are excluded from the active count,
+and only the field genuinely in scope is flagged as a direct hit.
+
+**Deferred, not built**: `pandera`/`great_expectations`-style declarative
+data-quality rules ("this field must be non-null," "must match regex X")
+as a complement to `profiling.py`'s stats. Related in spirit but a
+different kind of check (data content vs. org automation) — worth
+revisiting as its own item if profiling's existing population/distinct-
+value stats prove insufficient in practice.
 
 ## 6. Mock/demo data generation — Mockaroo integration BUILT and working (`mock_data.py`)
 

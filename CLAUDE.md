@@ -95,6 +95,13 @@ venv may not be active in a fresh shell:
                 `_Result` table into a fresh `<table>_Retry` table. Does not call Salesforce itself;
                 resubmit the new table via a normal, separately-confirmed `bulkops` call once you've
                 looked at why those rows failed.)
+- Org risk check: `.venv/Scripts/python.exe cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx`
+                (object-level automation inventory before a load — active validation rules, Apex
+                triggers, record-triggered Flows, legacy workflow rules, approval processes, via
+                live Tooling API + standard Query API calls. Not a field-level formula parser; the
+                one field-level signal it does give cheaply is cross-referencing an active
+                validation rule's `ErrorDisplayField` against the mapping doc's actually-migrated
+                target fields (`Migrate Data == Yes`) as a "direct hit." See `risk_analyzer.py`.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
@@ -102,8 +109,8 @@ venv may not be active in a fresh shell:
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/replicate`,
-`/build-load`, `/validate-load`, `/status`
+`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/analyze-org-risk`,
+`/replicate`, `/build-load`, `/validate-load`, `/status`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -192,9 +199,10 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
-  `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py` — the Data Architect
-  toolbelt (load-order analysis, profiling, ad hoc query, mock data, mapping
-  doc, auto-mapping, solution document generation).
+  `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`, `risk_analyzer.py`
+  — the Data Architect toolbelt (load-order analysis, profiling, ad hoc
+  query, mock data, mapping doc, auto-mapping, solution document
+  generation, org automation risk analysis).
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always

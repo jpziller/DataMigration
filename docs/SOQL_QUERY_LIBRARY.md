@@ -12,12 +12,25 @@ python cli.py query "<SOQL>"
 Queries against Tooling API objects (`EntityParticle`, `FieldDefinition`,
 `CustomField`, `ValidationRule`, `WorkflowRule`, `ApexTrigger`, `Flow`,
 `RelationshipInfo`, etc.) require the Tooling API rather than the standard
-REST Query API — confirm `query_tool.py`/`sf.query()` is hitting the right
-endpoint for these before relying on results; some of these object types
-aren't queryable through the standard Data API at all. This is exactly the
-kind of query these functions are built for the roadmap's org metadata risk
-analyzer (roadmap #5) to eventually automate — for now, they're useful run
-by hand while scoping a migration.
+REST Query API — `query_tool.py`/`sf.query()` hits the standard REST Query
+API only, so run these particular ones by hand via `sf.toolingexecute()`
+(see `risk_analyzer.py`) rather than `python cli.py query`. Some of these
+object types aren't queryable through the standard Data API at all —
+confirmed the hard way while building `risk_analyzer.py` (roadmap #5,
+now built): `ValidationRule`/`ApexTrigger`/`WorkflowRule` are Tooling-API-
+only (`INVALID_TYPE` otherwise), while `ProcessDefinition` and
+`FlowDefinitionView` (not shown below — see `risk_analyzer.py` for the
+query, since it's what actually makes "which Flows are record-triggered on
+this object" answerable) are standard-REST-API-queryable, *not* Tooling.
+Don't assume every metadata object in this file uses the same endpoint —
+confirm per object type, the two are genuinely mixed.
+
+Most of what's below now runs automatically via `analyze-org-risk` for the
+object-level automation inventory it covers (validation rules, triggers,
+record-triggered Flows, workflow rules, approval processes) — these
+queries remain useful by hand for anything deeper: field-level formula
+text, picklist values, relationship details `risk_analyzer.py` doesn't
+surface.
 
 ---
 
