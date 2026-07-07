@@ -36,6 +36,11 @@ for you, and it'll stick for future sessions too.
   behaving unexpectedly, check developer.salesforce.com/docs or
   help.salesforce.com (WebFetch/WebSearch) rather than guessing from
   possibly-stale training data.
+- **Dogfood built commands.** Once something gets built into a real `cli.py`
+  command during a session, use *that* command to verify results and report
+  findings going forward — not the ad hoc script that helped research/build
+  it, even if that script still works fine. Retire the scratch script once
+  the real command exists; don't keep reaching for it out of habit.
 
 ## How to operate here: read-only eyes, reviewed hands
 - To **look** at SQL Server (schemas, row counts, samples, validating a load),
