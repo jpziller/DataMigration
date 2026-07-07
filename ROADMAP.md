@@ -316,11 +316,25 @@ NAME=N [--count NAME=N ...]`:
   skipped and reported, same two-pass-load gap already documented
   elsewhere in this framework.
 - **An object with more than one in-scope parent** (two lookups to
-  objects both in the requested set) gets its *primary* parent (lowest
-  load-order level, alphabetical tie-break) via real nesting/containment,
-  and any additional parent wired via Snowfakery's `random_reference` to
-  that other object's already-generated pool instead — reported back on
-  the CLI so the choice is visible, not silently picked.
+  objects both in the requested set) gets its *primary* parent chosen as
+  its **deepest** in-scope parent (highest load-order level, alphabetical
+  tie-break), nested via real containment. Confirmed live: a nested
+  `reference: <Object>` resolves up the *entire* ancestor chain, not just
+  the immediate parent — so any additional parent that's already an
+  ancestor of the chosen primary parent (the common "grandparent" case,
+  e.g. `Case` having both `Account` and `Contact` in scope, where
+  `Account` is already `Contact`'s own parent) gets an **exact** nested
+  `reference:` too, not a random guess. Verified against a real three-
+  object chain (`Account`→`Contact`→`Case`, 3/2/2 counts): all 12 Cases'
+  Account reference matched their own Contact's Account exactly, checked
+  via a live SQL join. Only a genuinely unrelated second parent (not an
+  ancestor of the chosen primary — two objects with no real hierarchical
+  relationship between them) falls back to Snowfakery's
+  `random_reference`, which samples the *whole* object pool with no way
+  to scope it to "only rows under the same primary parent" — a real,
+  disclosed limitation in that specific case, not the common one. The
+  CLI reports which kind each additional parent got (`exactly
+  references`/`randomly references`), so this is never silently picked.
 - **Auto-generates a starter YAML recipe**, written to `_stage/` for
   review or hand-editing (same "reviewable starting point" pattern as
   `generate-mapping-doc`) — not a hand-authored-recipe-only tool. Field
@@ -367,7 +381,13 @@ Accounts, 2 Contacts each) — confirmed `Account_Mock` got 5 rows,
 resolved to one of the 5 real `Account_Mock` rows (verified via a live
 `LEFT JOIN ... GROUP BY` count), and no cross-object column leakage
 after the fix above. Also confirmed the missing-`--count` validation
-raises clearly rather than silently defaulting.
+raises clearly rather than silently defaulting. A follow-up three-object
+chain test (`Account`/`Contact`/`Case`, 3/2/2 counts — `Case` has both
+`Account` and `Contact` in scope) is what surfaced the `random_reference`
+scoping gap in the first place (a Case's Account reference didn't match
+its own Contact's Account) and confirmed the ancestor-chain fix above:
+all 12 generated Cases' Account reference matched their own Contact's
+Account exactly after nesting `Case` under `Contact` instead of `Account`.
 
 `Faker` (the library Snowfakery itself wraps) is a lower-priority
 alternative worth knowing about too as a *standalone* backend — no API

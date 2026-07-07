@@ -326,15 +326,17 @@ def generate_related_mock_data_cmd(object_names, counts, schema):
         name, _, n = item.partition("=")
         count_map[name] = int(n)
 
-    recipe_path, skipped_by_object, primary_parent, secondary_parents, fields_by_object = sfd.build_recipe(
-        sf, object_names, count_map
-    )
+    (recipe_path, skipped_by_object, primary_parent, secondary_exact_parents,
+     secondary_random_parents, fields_by_object) = sfd.build_recipe(sf, object_names, count_map)
     click.echo(f"Recipe written to {recipe_path} (review/hand-edit, or re-run directly with `snowfakery {recipe_path}`)")
     for child, parent in primary_parent.items():
-        click.echo(f"  {child} nested under {parent}" + (
-            f"; also references {', '.join(secondary_parents[child])} via random_reference"
-            if secondary_parents.get(child) else ""
-        ))
+        note = ""
+        if secondary_exact_parents.get(child):
+            note += f"; also exactly references {', '.join(secondary_exact_parents[child])}"
+        if secondary_random_parents.get(child):
+            note += (f"; also randomly references {', '.join(secondary_random_parents[child])} "
+                     f"(not scoped to the same {parent} -- see roadmap #6)")
+        click.echo(f"  {child} nested under {parent}{note}")
 
     rows_written = sfd.run_recipe(engine, recipe_path, object_names, fields_by_object, schema=schema)
     for name in object_names:

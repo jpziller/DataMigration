@@ -153,10 +153,19 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
 
     counts: {object_name: int} -- required for every name in object_names.
 
-    Returns (recipe_path, skipped_by_object, primary_parent, secondary_parents,
-    fields_by_object) -- fields_by_object[name] is the list of real describe()
-    field dicts actually included for that object, needed by run_recipe() to
-    know which columns of the combined JSON output really belong to it.
+    Returns (recipe_path, skipped_by_object, primary_parent,
+    secondary_exact_parents, secondary_random_parents, fields_by_object).
+    secondary_exact_parents[name] are additional in-scope parents that are
+    already an ancestor of name's chosen primary parent -- these get an
+    exact nested `reference:` (confirmed live: it resolves up the *entire*
+    ancestor chain, not just the immediate parent), not a random one.
+    secondary_random_parents[name] are additional parents NOT reachable
+    that way -- a real, disclosed limitation, since Snowfakery's
+    `random_reference` samples the whole object pool with no way to scope
+    it to "only rows under the same primary parent." fields_by_object[name]
+    is the list of real describe() field dicts actually included for that
+    object, needed by run_recipe() to know which columns of the combined
+    JSON output really belong to it.
     Raises ValueError on unresolved circular dependencies or a missing count.
     """
     missing_counts = [n for n in object_names if n not in counts]
@@ -182,11 +191,32 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
             continue  # self-reference, handled via self_ref_fields_by_object
         parents_by_child.setdefault(edge["child"], set()).add(edge["parent"])
 
-    primary_parent, secondary_parents = {}, {}
-    for child, parents in parents_by_child.items():
-        ordered_parents = sorted(parents, key=lambda p: (level_by_object.get(p, 0), p))
-        primary_parent[child] = ordered_parents[0]
-        secondary_parents[child] = ordered_parents[1:]
+    # Choose each object's primary (nesting) parent as its DEEPEST in-scope
+    # parent, not its shallowest -- confirmed live that a nested `reference:
+    # <Object>` resolves up the *entire* ancestor chain, not just the
+    # immediate parent, so nesting under the deepest parent maximizes the
+    # chance that any *other* in-scope parent is already an ancestor of it.
+    # Any additional parent that IS already an ancestor gets a plain nested
+    # `reference:` too (exact, not random) -- `random_reference` is only a
+    # fallback for a genuinely unrelated second parent (not itself an
+    # ancestor of the chosen primary), where nothing better is possible.
+    ancestors_of = {}  # object -> set of all its ancestors, built parent-first
+    primary_parent, secondary_exact_parents, secondary_random_parents = {}, {}, {}
+    for row in result["order"]:  # parents before children, guaranteed by load_order
+        name = row["object"]
+        parents = parents_by_child.get(name)
+        if not parents:
+            ancestors_of[name] = set()
+            continue
+        ordered_parents = sorted(parents, key=lambda p: (-level_by_object.get(p, 0), p))
+        chosen = ordered_parents[0]
+        primary_parent[name] = chosen
+        chosen_ancestors = ancestors_of.get(chosen, set()) | {chosen}
+        ancestors_of[name] = chosen_ancestors
+
+        remaining = ordered_parents[1:]
+        secondary_exact_parents[name] = [p for p in remaining if p in chosen_ancestors]
+        secondary_random_parents[name] = [p for p in remaining if p not in chosen_ancestors]
 
     skipped_by_object = {}
     fields_by_object = {}
@@ -206,7 +236,13 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
 
     def build_node(name, is_child):
         fields_yaml = {field["name"]: spec for field, spec in fields_by_object[name]}
-        for secondary in secondary_parents.get(name, []):
+        for secondary in secondary_exact_parents.get(name, []):
+            # Already an ancestor of the chosen primary parent -- a plain
+            # nested reference resolves to the *correct* (not random) row.
+            fields_yaml[f"_SecondaryParentRef_{secondary}"] = {"reference": secondary}
+        for secondary in secondary_random_parents.get(name, []):
+            # Genuinely unrelated to the chosen primary parent -- no way to
+            # pick a consistent one, so this is a real, disclosed limitation.
             fields_yaml[f"_SecondaryParentRef_{secondary}"] = {"random_reference": secondary}
         if is_child:
             fields_yaml["_ParentMockRef"] = {"reference": primary_parent[name]}
@@ -221,7 +257,8 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
     with open(recipe_path, "w", encoding="utf-8") as fh:
         yaml.safe_dump(recipe, fh, sort_keys=False, default_flow_style=False)
 
-    return recipe_path, skipped_by_object, primary_parent, secondary_parents, fields_by_object
+    return (recipe_path, skipped_by_object, primary_parent, secondary_exact_parents,
+            secondary_random_parents, fields_by_object)
 
 
 def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo", stage_dir="_stage"):
