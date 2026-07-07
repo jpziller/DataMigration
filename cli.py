@@ -40,6 +40,7 @@ import load_order as lo
 import profiling as pf
 import query_tool as qt
 import mock_data as mkd
+import snowfakery_data as sfd
 import mapping_doc as mpd
 import auto_mapper as am
 import solution_doc as sd
@@ -306,6 +307,43 @@ def generate_mock_data_cmd(object_name, count, schema):
         click.echo(f"Skipped {len(skipped)} field(s) with no mock mapping (reference/multipicklist/etc.):")
         for name, typ in skipped:
             click.echo(f"  {name} ({typ})")
+
+
+@cli.command("generate-related-mock-data")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--count", "counts", multiple=True, required=True,
+              help="NAME=N, repeatable. Top-level (no in-scope parent) objects get N total rows; "
+                   "objects nested under a parent get N rows PER parent row.")
+@click.option("--schema", default="dbo")
+def generate_related_mock_data_cmd(object_names, counts, schema):
+    s, sf, engine = _ctx()
+    object_names = list(object_names)
+
+    count_map = {}
+    for item in counts:
+        if "=" not in item:
+            raise click.BadParameter(f"--count must be NAME=N, got: {item!r}")
+        name, _, n = item.partition("=")
+        count_map[name] = int(n)
+
+    recipe_path, skipped_by_object, primary_parent, secondary_parents, fields_by_object = sfd.build_recipe(
+        sf, object_names, count_map
+    )
+    click.echo(f"Recipe written to {recipe_path} (review/hand-edit, or re-run directly with `snowfakery {recipe_path}`)")
+    for child, parent in primary_parent.items():
+        click.echo(f"  {child} nested under {parent}" + (
+            f"; also references {', '.join(secondary_parents[child])} via random_reference"
+            if secondary_parents.get(child) else ""
+        ))
+
+    rows_written = sfd.run_recipe(engine, recipe_path, object_names, fields_by_object, schema=schema)
+    for name in object_names:
+        click.echo(f"Wrote {rows_written.get(name, 0)} mock row(s) to {schema}.{name}_Mock")
+        skipped = skipped_by_object.get(name, [])
+        if skipped:
+            click.echo(f"  Skipped {len(skipped)} field(s):")
+            for field_name, reason in skipped:
+                click.echo(f"    {field_name} ({reason})")
 
 
 @cli.command("generate-mapping-doc")

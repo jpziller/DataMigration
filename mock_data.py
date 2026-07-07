@@ -24,6 +24,14 @@ MOCKAROO_URL = "https://api.mockaroo.com/api/generate.json"
 # data). Reported back so the caller knows what was left out and why.
 _UNSUPPORTED_TYPES = {"reference", "multipicklist", "base64", "encryptedstring"}
 
+# Standard fields explicitly branded "Data.com" in their own describe()
+# label (Jigsaw = "Data.com Key", JigsawCompanyId, CleanStatus) -- this
+# framework doesn't migrate Data.com data, so there's nothing worth mocking
+# here, and Jigsaw specifically has a real uniqueness constraint in orgs
+# with existing Data.com-sourced records that generic mock text can collide
+# with (confirmed live: 5/100 mock inserts failed on DUPLICATE_VALUE:Jigsaw).
+_DATA_DOT_COM_FIELDS = {"Jigsaw", "JigsawCompanyId", "CleanStatus"}
+
 _NAME_HINTS = [
     (("firstname",), {"type": "First Name"}),
     (("lastname",), {"type": "Last Name"}),
@@ -50,16 +58,15 @@ def _mockaroo_field(field):
         return {"name": name, "type": "Boolean"}
     if sf_type == "int":
         return {"name": name, "type": "Number", "min": 0, "max": 1000, "decimals": 0}
-    if sf_type == "double" and name.lower().endswith("latitude"):
-        # Geolocation subfields (BillingLatitude etc.) are plain "double"
-        # fields in describe() with no semantic range of their own -- the
-        # generic precision/scale-based branch below would happily produce
-        # e.g. 603.39, which Salesforce rejects with NUMBER_OUTSIDE_VALID_RANGE
-        # since a real latitude must be between -90 and 90. Mockaroo's own
-        # "Latitude" type already respects that range.
-        return {"name": name, "type": "Latitude"}
-    if sf_type == "double" and name.lower().endswith("longitude"):
-        return {"name": name, "type": "Longitude"}
+    if sf_type == "double" and name.lower().endswith(("latitude", "longitude")):
+        # Geolocation subfields (BillingLatitude etc.) are rarely populated
+        # by clients and aren't worth mocking -- skip rather than generate
+        # (a generic precision/scale-based Number would happily produce
+        # e.g. 603.39, which Salesforce rejects with
+        # NUMBER_OUTSIDE_VALID_RANGE since a real latitude must be between
+        # -90 and 90; not worth reaching for Mockaroo's own Latitude/
+        # Longitude types just to prove a field can be filled).
+        return None
     if sf_type in ("double", "currency", "percent"):
         # Respect the field's real precision/scale -- e.g. a Latitude field
         # is often DECIMAL(18,15), leaving only 3 integer digits of headroom;
@@ -116,6 +123,9 @@ def mock_schema_for_object(sf, object_name):
         if field["type"] in _UNSUPPORTED_TYPES:
             skipped.append((field["name"], field["type"]))
             continue
+        if field["name"] in _DATA_DOT_COM_FIELDS:
+            skipped.append((field["name"], "data.com"))
+            continue
         mapped = _mockaroo_field(field)
         if mapped is None:
             skipped.append((field["name"], field["type"]))
@@ -141,6 +151,40 @@ def generate_mock_data(schema, count, api_key):
     return resp.json()
 
 
+def truncate_to_field_lengths(df, fields):
+    """Truncate string columns to each field's real describe() max length.
+
+    Neither mock-data backend (Mockaroo's generators, Faker via Snowfakery)
+    knows a target field's real max length (e.g. a URL generator producing
+    long querystring-heavy values that overflow a Website field's real
+    255-char cap) -- truncate to match, since these values need to fit a
+    real Salesforce field eventually, not just the SQL insert. Shared by
+    both `mock_data.py` and `snowfakery_data.py` rather than duplicated.
+    """
+    for f in fields:
+        max_len = f.get("length")
+        if max_len and f["name"] in df.columns:
+            df[f["name"]] = df[f["name"]].apply(
+                lambda v, n=max_len: v[:n] if isinstance(v, str) and len(v) > n else v
+            )
+    return df
+
+
+def create_mock_table(engine, schema, table_name, fields):
+    """CREATE (drop-and-recreate) [schema].[table_name] with one NULL-able
+    column per field, typed via type_map.sf_type_to_sql -- shared table-DDL
+    step both mock-data backends use for their own <Object>_Mock output."""
+    cols_sql = ",\n    ".join(
+        f'[{f["name"]}] {sf_type_to_sql(f)} NULL' for f in fields
+    )
+    with engine.begin() as cx:
+        cx.execute(text(
+            f"IF OBJECT_ID('{schema}.{table_name}', 'U') IS NOT NULL "
+            f"DROP TABLE [{schema}].[{table_name}];"
+        ))
+        cx.execute(text(f"CREATE TABLE [{schema}].[{table_name}] (\n    {cols_sql}\n);"))
+
+
 def generate_mock_object_data(sf, engine, object_name, count, api_key, schema="dbo"):
     """Derive a schema from the object's describe(), generate `count` mock
     rows via Mockaroo, and load them into [schema].[<object_name>_Mock].
@@ -155,29 +199,10 @@ def generate_mock_object_data(sf, engine, object_name, count, api_key, schema="d
     fields_by_name = {f["name"]: f for f in desc["fields"]}
     included_fields = [fields_by_name[f["name"]] for f in mockaroo_schema]
 
-    cols_sql = ",\n    ".join(
-        f'[{f["name"]}] {sf_type_to_sql(f)} NULL' for f in included_fields
-    )
-    with engine.begin() as cx:
-        cx.execute(text(
-            f"IF OBJECT_ID('{schema}.{table_name}', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[{table_name}];"
-        ))
-        cx.execute(text(f"CREATE TABLE [{schema}].[{table_name}] (\n    {cols_sql}\n);"))
+    create_mock_table(engine, schema, table_name, included_fields)
 
     df = pd.DataFrame(records)
-    # Mockaroo's generators don't know the target field's max length (e.g.
-    # its URL generator produces long querystring-heavy URLs that overflow
-    # a Website field's real 255-char cap) -- truncate to match, since these
-    # values need to fit a real Salesforce field eventually anyway, not just
-    # this SQL insert.
-    for f in included_fields:
-        max_len = f.get("length")
-        if max_len and f["name"] in df.columns:
-            df[f["name"]] = df[f["name"]].apply(
-                lambda v, n=max_len: v[:n] if isinstance(v, str) and len(v) > n else v
-            )
-
+    df = truncate_to_field_lengths(df, included_fields)
     df.to_sql(table_name, engine, schema=schema, if_exists="append", index=False)
 
     return len(df), skipped

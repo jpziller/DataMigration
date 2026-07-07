@@ -18,7 +18,7 @@ summarizes.
 | 3 | Field-mapping spreadsheet tool | **Built** | `generate-mapping-doc`, `check-mapping-balance` |
 | 4 | Solution document generator | **Built** | `generate-solution-doc` |
 | 5 | Org metadata risk analyzer | **Built** | `analyze-org-risk` |
-| 6 | Mock/demo data generation | **Built** | `generate-mock-data` |
+| 6 | Mock/demo data generation | **Built** | `generate-mock-data`, `generate-related-mock-data` |
 | 7 | Data profiling toolset | **Built** | `profile-salesforce`, `profile-sql-table`, `export-profile-excel` |
 | 8 | Ad hoc query tool | **Built** | `query` |
 | 9 | Console output polish | **Built** | (applies to `query`/`profile-*`) |
@@ -40,6 +40,9 @@ summarizes.
 | 25 | Web UI for less-technical users | Not built (future) | — |
 | 26 | SSO / multi-user access control | Not built, depends on #25 | — |
 | 27 | Open query in SSMS (stage + launch) | Not built, depends on #25 | — |
+| 28 | Pluggable integration-hub backend (e.g. MongoDB alongside SQL Server) | Not built, deliberately deferred — prototyping is SQL-Server-only for now | — |
+| 29 | Shared/VM-hosted SQL Server for multi-user access | Not built, deliberately deferred — prototyping is single-user/local for now | — |
+| 30 | Additional migration source connectors (Snowflake, MongoDB, etc.) | Not built, deliberately deferred | — |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -275,13 +278,104 @@ Mockaroo path itself.
 - Not yet wired into `bulkops` — loading `<Object>_Mock` into a sandbox org
   is a manual next step (build a `*_Load` table from it like any other
   transform), not automatic.
+- **Deliberately skipped, by explicit policy, not just missing mappings**:
+  - **Data.com-branded fields** (`Jigsaw` — labeled "Data.com Key" in
+    describe() itself, `JigsawCompanyId`, `CleanStatus`) — this framework
+    doesn't migrate Data.com data, and `Jigsaw` specifically has a real
+    uniqueness constraint that generic mock text can collide with (found
+    live during an end-to-end test: 5 of 100 mock Account inserts failed
+    on `DUPLICATE_VALUE:...:Jigsaw` against pre-existing org records).
+    Identified via each field's own describe() label, not name-guessing,
+    per hard rule 5 — other D&B/firmographic-looking fields on Account
+    (`DunsNumber`, `NaicsCode`, `Sic`, `Tradestyle`, etc.) have generic
+    labels, aren't Data.com-branded, and are still mocked normally.
+  - **Geolocation subfields** (`BillingLatitude`/`BillingLongitude`/
+    `ShippingLatitude`/`ShippingLongitude`) — rarely populated by clients
+    in practice, not worth reaching for Mockaroo's dedicated Latitude/
+    Longitude generator types just to fill them. (These were originally
+    mapped to a generic Number type, which produced values like `603.39`
+    outside the real -90..90/-180..180 range and failed every row with
+    `NUMBER_OUTSIDE_VALID_RANGE` the first time this was tested live —
+    fixed forward by skipping the fields entirely rather than chasing a
+    more "realistic" generator, per direct guidance: keep mock data to
+    the basics, not a value in every field just to prove it can be done.)
 
-Snowfakery integration (for relationship-aware multi-object fake data, e.g.
-matching Accounts/Contacts/Opportunities together rather than independently
-random rows per object) is still just an idea, not started. `Faker` is a
-lower-priority alternative worth knowing about too — no API key, no rate
-limit, works fully offline — for whenever Mockaroo's 200-requests/day free
-tier becomes the actual bottleneck rather than a theoretical one.
+**Snowfakery integration — BUILT (`snowfakery_data.py`)**: the
+relationship-aware second backend, for generating e.g. 10 mock Accounts
+each with 3 real Contacts that actually reference those specific
+Accounts, instead of independently random rows per object.
+`python cli.py generate-related-mock-data <Object> [<Object> ...] --count
+NAME=N [--count NAME=N ...]`:
+- **Reuses this framework's own load-order dependency graph**
+  (`load_order.build_dependency_edges`/`compute_load_order`) to decide
+  which object nests inside which in the generated recipe, instead of
+  re-deriving relationships from `describe()` a second time. Unresolved
+  circular dependencies among the requested objects raise a clear error
+  (same honesty `analyze-load-order` already has about cycles) rather
+  than guessing; self-referencing fields (e.g. `Account.ParentId`) are
+  skipped and reported, same two-pass-load gap already documented
+  elsewhere in this framework.
+- **An object with more than one in-scope parent** (two lookups to
+  objects both in the requested set) gets its *primary* parent (lowest
+  load-order level, alphabetical tie-break) via real nesting/containment,
+  and any additional parent wired via Snowfakery's `random_reference` to
+  that other object's already-generated pool instead — reported back on
+  the CLI so the choice is visible, not silently picked.
+- **Auto-generates a starter YAML recipe**, written to `_stage/` for
+  review or hand-editing (same "reviewable starting point" pattern as
+  `generate-mapping-doc`) — not a hand-authored-recipe-only tool. Field
+  mapping mirrors `mock_data.py`'s `_mockaroo_field` approach but targets
+  Snowfakery's `fake:`/`random_choice:` syntax, and reuses the *exact
+  same* Data.com/Latitude-Longitude skip policy `mock_data.py` established
+  (imported directly, not duplicated), so both backends agree on scope.
+- **Loads into `<Object>_Mock`** — same table-naming convention as the
+  single-object path, via pandas (Snowfakery's JSON output, not its own
+  SQL writer), reusing the same length-truncation logic (extracted into
+  `mock_data.truncate_to_field_lengths`, shared by both backends rather
+  than duplicated). A child's parent linkage is a synthetic
+  `_ParentMockRef` column (Snowfakery's own internal row id, not a real
+  Salesforce Id, since none exist yet) — building the real `*_Load`
+  transform, including assigning an actual unique migration key, is still
+  a manual next step, the same boundary the single-object backend
+  already documents.
+
+**Real syntax specifics confirmed live** (Snowfakery 4.2, not assumed
+from docs alone) that shaped the implementation: a parameterized fake
+value is `fake.RandomInt: {min: 0, max: 1000}` (dotted key), not
+`fake: {RandomInt: {...}}`, which raises `DataGenNameError`; a child
+object nested under a parent's `fields:` key causes the *parent's own*
+record in Snowfakery's flat JSON output to get a spurious field named
+after the nesting key holding just the child count (not a list) — this
+implementation always prefixes nesting keys `_children_<ChildObject>` so
+they're trivially droppable rather than mistaken for a real field.
+
+**Found and fixed one real bug during end-to-end testing**: Snowfakery's
+combined JSON output merges every requested object type's columns into
+one flat array (NaN-filled per row where irrelevant to that row's actual
+object type). The first implementation attempt filtered each object's
+columns by "does this name exist anywhere on this object's own
+describe()" — which let Account's `Name`/`Type` values leak into
+`Contact_Mock`, since those names coincidentally also exist (non-
+createable) on Contact's own describe(). Fixed by threading the exact
+field list `build_recipe()` actually generated for each object through to
+the loading step, rather than re-deriving "does this name exist on this
+object at all" a second, less precise way.
+
+Tested live end to end against a real org: `Account`/`Contact` (5
+Accounts, 2 Contacts each) — confirmed `Account_Mock` got 5 rows,
+`Contact_Mock` got 10, every `Contact_Mock` row's `_ParentMockRef`
+resolved to one of the 5 real `Account_Mock` rows (verified via a live
+`LEFT JOIN ... GROUP BY` count), and no cross-object column leakage
+after the fix above. Also confirmed the missing-`--count` validation
+raises clearly rather than silently defaulting.
+
+`Faker` (the library Snowfakery itself wraps) is a lower-priority
+alternative worth knowing about too as a *standalone* backend — no API
+key, no rate limit, works fully offline — for whenever Mockaroo's
+200-requests/day free tier becomes the actual bottleneck rather than a
+theoretical one. Not pursued now since Snowfakery already provides Faker-
+backed generation with relationships, which is the harder problem this
+item actually needed solved.
 
 ## 7. Data profiling toolset — BUILT (`profiling.py`)
 
@@ -954,6 +1048,100 @@ query tool into it, without duplicating SSMS's own execution/results UI.
 Also keeps with this framework's "reviewed hands" model (`CLAUDE.md`) —
 staging a query for a human to knowingly execute in SSMS, rather than this
 framework executing it invisibly on their behalf.
+
+## 28. Pluggable integration-hub backend, e.g. MongoDB alongside SQL Server (not built, deliberately deferred)
+
+Raised directly: don't want this framework permanently locked into one
+tool as the integration hub, even though SQL Server is the right call
+while prototyping. MongoDB is the concrete alternative named as worth
+keeping open.
+
+**Why this is a bigger ask than a driver swap.** This framework's entire
+identity is "SQL Server is the integration hub, transformation logic lives
+in versioned T-SQL" (`README.md`'s opening line, `CLAUDE.md` throughout).
+A document store like MongoDB isn't a drop-in alternative behind the same
+interface — there's no relational `JOIN`, no `sql/transformations/*.sql`
+equivalent (aggregation pipelines or Python-side transforms would have to
+fill that role), and every tool that currently emits T-SQL DDL/DML
+directly (`replicate.py`'s `to_sql`, every `_ensure_table`-style function
+in `risk_analyzer.py`/`bulkops.py`/`load_order.py`, `sql/functions/`'s
+whole reusable-function library) would need either a parallel MongoDB-
+native implementation or a genuine abstraction layer sitting in front of
+both. Scoping this honestly as "a second hub mode," not a small connector
+addition, is the point of flagging it here rather than understating it.
+
+**Security considerations, raised directly and worth tracking from the
+start of scoping, not bolted on after**: a different auth model entirely
+(SCRAM/x.509 vs. today's Windows/SQL-auth-only `sql_client.py`), different
+default network exposure (MongoDB has a well-known history of
+internet-exposed, unauthenticated instances from insecure defaults —
+`docs/SECURITY_OVERVIEW.md` would need its own section on this backend
+the moment it's real, not just an update to the credential inventory
+table it already has for SQL Server).
+
+**Deliberately not scoped further yet** — prototyping today is
+single-backend (SQL Server) on purpose; this is a "keep the door open,
+don't design yourself into a corner" marker, not a committed design.
+Revisit once there's a real reason (a client already on MongoDB, a
+concrete multi-backend requirement) rather than speculatively building
+an abstraction layer with only one real implementation behind it.
+
+## 29. Shared/VM-hosted SQL Server for multi-user access (not built, deliberately deferred)
+
+Raised directly: today's model assumes one architect on one local
+machine with a local SQL Server Developer Edition instance (`README.md`'s
+whole one-time setup section). If a team needs multiple people working
+against the *same* mirror DB concurrently — not just multiple separate
+projects/orgs, but shared state — a VM-hosted SQL Server instance becomes
+a real requirement, envisioned directly as the likely next step.
+
+Worth tracking once this becomes real, not yet scoped in detail:
+- **Connection concurrency and locking** — this framework's transforms
+  and `bulkops` loads already do real `DROP`/`CREATE`/`INSERT` against
+  shared tables (`Account_Load`, `dbo.BulkOpsLog`, etc.); two people
+  running different transforms against the *same* schema at the same
+  time is a genuinely different concurrency story than today's
+  single-user-local assumption.
+- **Credentials** — per-user SQL logins vs. a shared service account
+  (the latter needs its own audit-trail story, the same tension hard
+  rule 8's note already raises for a dedicated API-only Salesforce user).
+- **Network exposure** — VPN/private-network-only access to the VM,
+  never a publicly reachable SQL Server port; this needs its own
+  `docs/SECURITY_OVERVIEW.md` treatment once real, the same way #28 would.
+- **Backup/restore practice** for a shared instance holding multiple
+  people's in-progress work, versus today's "it's disposable, just
+  re-run `replicate`" local-instance assumption.
+
+Related in spirit to #25/#26 (Web UI + SSO) but genuinely independent of
+whether a Web UI ever ships — even today's CLI/Claude Code users could
+collide if pointed at the same shared VM database concurrently, so this
+is a database-layer question, not only a UI-layer one. **Deliberately
+deferred** — prototyping today is single-user/local on purpose; revisit
+once a real multi-user engagement actually needs it.
+
+## 30. Additional migration source connectors: Snowflake, MongoDB, etc. (not built, deliberately deferred)
+
+Raised directly, alongside #28/#29, as part of the same "don't lock
+ourselves into one tool" theme — but this is a different layer than #28.
+#28 asks whether the *integration hub* itself (today: SQL Server) could
+be something else. This item asks whether more *source* systems (where
+data originates *before* landing in that hub) could feed into it, the
+same "many sources, one hub" pattern `parquet_import.py` already
+established as a second entry point alongside `replicate.py`'s
+org-sourced path (`README.md`'s repository-structure section already
+frames this precedent explicitly).
+
+Idea, not yet scoped in detail: Snowflake (via `snowflake-connector-
+python`, itself SQLAlchemy-compatible — likely the closer-shaped addition
+to today's `sql_client.py` pattern, relational, SQL-queryable) and MongoDB
+(via `pymongo` — a genuinely different shape, since flattening documents
+into tabular rows for the SQL Server mirror DB is a real design question
+of its own, not just a new connection string) as the two named candidates,
+with the door left open for others as real engagements call for them.
+
+**Deliberately deferred** — prototyping today only needs the org and
+flat-file paths already built. Revisit once a real source system other
+than Salesforce or a flat file actually needs migrating from.
 
 ---
 

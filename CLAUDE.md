@@ -69,6 +69,18 @@ venv may not be active in a fresh shell:
 - Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
                 (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
                 get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)
+- Related mock data (Snowfakery): `.venv/Scripts/python.exe cli.py generate-related-mock-data
+                Account Contact --count Account=10 --count Contact=3`
+                (relationship-aware alternative to `generate-mock-data` — auto-builds a Snowfakery
+                YAML recipe from `describe()` + this framework's own load-order dependency graph
+                (`load_order.py`), nesting child objects under their parent so e.g. every mock
+                Contact actually references one of the mock Accounts. Recipe is written to
+                `_stage/` for review/hand-editing, not hidden. Writes to `<Object>_Mock` tables —
+                a child's parent linkage is a synthetic `_ParentMockRef` column, not a real
+                Salesforce Id, since none exist yet; building the real `*_Load` transform
+                (assigning the actual migration key) is still a manual next step. Never touches
+                Salesforce. Same skip policy as `generate-mock-data` — no Data.com fields, no
+                Latitude/Longitude subfields.)
 - Mapping doc:  `.venv/Scripts/python.exe cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts`
                 `.venv/Scripts/python.exe cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts`
                 (one workbook, one tab per object — reuse the SAME output path for every object in
