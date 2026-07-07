@@ -30,6 +30,7 @@
       "Bash(.venv/Scripts/python.exe cli.py list-calculated-insights*)",
       "Bash(.venv/Scripts/python.exe cli.py query-calculated-insight *)",
       "Bash(.venv/Scripts/python.exe cli.py data-cloud-status *)",
+      "Bash(.venv/Scripts/python.exe cli.py data-cloud-profile *)",
       "Bash(sf org list*)",
       "Bash(sf org display*)",
       "Bash(sf sobject *)",

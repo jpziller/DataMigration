@@ -67,8 +67,13 @@ venv may not be active in a fresh shell:
                 `.venv/Scripts/python.exe cli.py list-calculated-insights`
                 `.venv/Scripts/python.exe cli.py query-calculated-insight RateCount__cio`
                 `.venv/Scripts/python.exe cli.py data-cloud-status calculated-insight|data-stream|dso|identity-resolution|data-transform [Name]`
-                (all four via plain core-org SOQL, no Data Cloud tenant token needed — see
+                (all five via plain core-org SOQL, no Data Cloud tenant token needed — see
                 `ROADMAP.md` #18 for the full tested findings and required org/app setup.)
+                `.venv/Scripts/python.exe cli.py data-cloud-profile UnifiedssotIndividualIndv__dlm "[ssot__LastName__c=Smith]"`
+                (Unified Profile lookup by a required equality filter — the CLI alternative to
+                clicking through Data Cloud's own Profile Explorer; `--fields`/`--limit`/`--offset`/
+                `--orderby` optional. `filters` really is required by the API itself, not just this
+                framework — there's no "browse everyone" mode.)
 - Replicate:    `.venv/Scripts/python.exe cli.py replicate Account [--where "..."] [--raw]`
 - Import file:  `.venv/Scripts/python.exe cli.py import-parquet path/to/file.parquet SourceAccounts [--append]`
                 (Parquet -> typed SQL Server table, column types inferred from the file's own

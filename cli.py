@@ -368,6 +368,30 @@ def data_cloud_status_cmd(status_type, name, csv_path, excel_path):
     _output_query_result(records, total_size, truncated, csv_path, excel_path, 50)
 
 
+@cli.command("data-cloud-profile")
+@click.argument("data_model_name")
+@click.argument("filter_expr")
+@click.option("--fields", default=None, help="Comma-separated field list (omit for up to 10 arbitrary fields).")
+@click.option("--limit", default=None, type=int)
+@click.option("--offset", default=None, type=int)
+@click.option("--orderby", default=None, help="Field to sort by; prefix with - for descending.")
+@click.option("--csv", "csv_path", default=None, help="Write results to a CSV file instead of printing.")
+@click.option("--excel", "excel_path", default=None, help="Write results to an Excel file instead of printing.")
+@click.option("--max-print-rows", default=50, help="Console preview row cap (ignored for --csv/--excel).")
+def data_cloud_profile_cmd(data_model_name, filter_expr, fields, limit, offset, orderby,
+                          csv_path, excel_path, max_print_rows):
+    """Look up Unified Profile data by data model name (e.g.
+    UnifiedssotIndividualIndv__dlm) + a required equality filter (e.g.
+    "[ssot__LastName__c=Smith]") -- the CLI alternative to Data Cloud's own
+    Profile Explorer. Only equality/AND filters are supported (a real Data
+    Cloud API constraint, not this framework's)."""
+    _, sf, _e = _ctx()
+    records, total_size, truncated = dc.query_unified_profile(
+        sf, data_model_name, filter_expr, fields=fields, limit=limit, offset=offset, orderby=orderby
+    )
+    _output_query_result(records, total_size, truncated, csv_path, excel_path, max_print_rows)
+
+
 @cli.command("generate-mock-data")
 @click.argument("object_name")
 @click.option("--count", default=50, help="Number of mock rows to generate (free tier caps at 5000/request).")

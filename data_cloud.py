@@ -205,3 +205,46 @@ def query_calculated_insight(sf, ci_name):
     body = resp.json()
     records = _rows_from_data_cloud_response(body)
     return records, len(records), not body.get("done", True)
+
+
+def query_unified_profile(sf, data_model_name, filters, fields=None, limit=None, offset=None, orderby=None):
+    """Look up Unified Profile data via GET /api/v1/profile/{dataModelName}
+    -- finding #4, confirmed live. The CLI equivalent of Data Cloud's own
+    Profile Explorer (pick a Data Space, an entity, an attribute,
+    repeatedly) -- one shot instead.
+
+    filters is REQUIRED by the API itself (confirmed live: omitting it
+    entirely fails with a missing-parameter error regardless of
+    data_model_name) -- this is a profile *lookup* API (find a known
+    person/record), not a bulk browse endpoint. Syntax: `[Field=Value]`,
+    equality only, AND-combined by comma-separating inside the brackets
+    (`[FieldA=X,FieldB=Y]`) -- confirmed live, a second bracket group
+    (`[FieldA=X],[FieldB=Y]`) works identically.
+
+    No Data Space parameter needed in the API itself (unlike the Setup UI,
+    which makes you pick one even when "default" is the only option) --
+    confirmed live against this org, which only has one Data Space.
+
+    fields: comma-separated string or a list -- omit for up to 10
+    arbitrary fields per Salesforce's own documented default.
+    """
+    token, instance_url = get_data_cloud_session(sf)
+    params = {"filters": filters}
+    if fields:
+        params["fields"] = ",".join(fields) if isinstance(fields, (list, tuple)) else fields
+    if limit is not None:
+        params["limit"] = limit
+    if offset is not None:
+        params["offset"] = offset
+    if orderby:
+        params["orderby"] = orderby
+
+    resp = requests.get(
+        f"https://{instance_url}/api/v1/profile/{data_model_name}",
+        headers={"Authorization": f"Bearer {token}"},
+        params=params,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    records = _rows_from_data_cloud_response(body)
+    return records, len(records), not body.get("done", True)
