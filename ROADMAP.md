@@ -11,44 +11,44 @@ just to find out what's built. Update this table in the same commit as any
 future item that flips status, so it never drifts from the sections it
 summarizes.
 
-| # | Item | Status | Command / skill |
-|---|---|---|---|
-| 1 | Reusable SQL function library | Built (library, no CLI wrapper) | `sql/functions/` |
-| 2 | Load-order dependency analyzer | **Built** | `analyze-load-order` |
-| 3 | Field-mapping spreadsheet tool | **Built** | `generate-mapping-doc`, `check-mapping-balance` |
-| 4 | Solution document generator | **Built** | `generate-solution-doc` |
-| 5 | Org metadata risk analyzer | **Built** | `analyze-org-risk` |
-| 6 | Mock/demo data generation | **Built** | `generate-mock-data`, `generate-related-mock-data` |
-| 7 | Data profiling toolset | **Built** | `profile-salesforce`, `profile-sql-table`, `export-profile-excel` |
-| 8 | Ad hoc query tool | **Built** | `query` |
-| 9 | Console output polish | **Built** | (applies to `query`/`profile-*`) |
-| 10 | Auto-mapping | **Built** | `auto-map` |
-| 11 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` |
-| 12 | Parquet file import | **Built** | `import-parquet` |
-| 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 |
-| 14 | Load activity logging + analytics | Logging **Built** (opt-in); analytics not built | `enable-bulkops-logging`, `disable-bulkops-logging` |
-| 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — |
-| 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — |
-| 17 | Fuzzy matching / dedup | Deprioritized, not built | — |
-| 18 | Data Cloud (D360) query support | Not built — API surface researched, live verification blocked (no Data Cloud org available) | — |
-| 19 | Data Cloud semantic model reference | Not built, depends on #18 | — |
-| 20 | DSO refresh/error monitoring | Not built — needs API research | — |
-| 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — |
-| 22 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — |
-| 23 | Data Kit / Bundle documentation | Not built, depends on #18/#19 | — |
-| 24 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #18 | — |
-| 25 | Web UI for less-technical users | Not built (future) | — |
-| 26 | SSO / multi-user access control | Not built, depends on #25 | — |
-| 27 | Open query in SSMS (stage + launch) | Not built, depends on #25 | — |
-| 28 | Pluggable integration-hub backend (e.g. MongoDB alongside SQL Server) | Not built, deliberately deferred — prototyping is SQL-Server-only for now | — |
-| 29 | Shared/VM-hosted SQL Server for multi-user access | Not built, deliberately deferred — prototyping is single-user/local for now | — |
-| 30 | Additional migration source connectors (Snowflake, MongoDB, etc.) | Not built, deliberately deferred | — |
-| 31 | Target-count/scaled mock data generation | Not built, builds on #6 | — |
-| 32 | Bulk test-data cleanup by filter | Not built, builds on #6/#11 | — |
-| 33 | Scratch org lifecycle + auto-seeded test data | Not built, deliberately deferred | — |
-| 34 | Relationship-consistent subset replication | Not built, builds on #2 | — |
-| 35 | Relative date shifting utility | Not built | — |
-| 36 | RecordType DeveloperName resolution for cross-org migration | Not built | — |
+| # | Item | Status | Command / skill | What it means / when you'd use it |
+|---|---|---|---|---|
+| 1 | Reusable SQL function library | Built (library, no CLI wrapper) | `sql/functions/` | Common cleanup helpers (splitting a "Full Name" into first/last, validating emails/phones, stripping bad characters) written once in T-SQL instead of every migration reinventing them. **"No CLI wrapper" means there's no `cli.py` command for this** — you deploy one function at a time by running its `.sql` file directly (`sqlcmd -i sql/functions/cleansing/GetFirstName.sql`), then call it by name inside your own transform SQL (`dbo.GetFirstName(src.full_name)`). That's deliberate: which functions a migration needs varies project to project, so there's nothing to "wrap" — see the conversation above for the full reasoning on why one isn't planned. |
+| 2 | Load-order dependency analyzer | **Built** | `analyze-load-order` | Figures out the safe order to load your objects so parents always land before their children — e.g. Account before Contact — so you don't hit "no such Account" errors from loading a child first. Run this before writing any transforms for a multi-object migration. |
+| 3 | Field-mapping spreadsheet tool | **Built** | `generate-mapping-doc`, `check-mapping-balance` | Generates the spreadsheet where you record "this source field goes to that Salesforce field" — the standard document a data architect reviews with the client before any transform gets written. `check-mapping-balance` then double-checks your finished transform actually matches what the spreadsheet says. |
+| 4 | Solution document generator | **Built** | `generate-solution-doc` | Auto-writes the migration design/solution Word document (what's being migrated, in what order, field-by-field detail) from data this framework already has, instead of a human writing it from scratch. |
+| 5 | Org metadata risk analyzer | **Built** | `analyze-org-risk` | Checks the target org for things that could silently reject or interfere with your load — active validation rules, Apex triggers, Flows — *before* you run a real load, so you find out ahead of time instead of from a confusing failure mid-load. |
+| 6 | Mock/demo data generation | **Built** | `generate-mock-data`, `generate-related-mock-data` | Generates realistic fake records for testing or demos, without touching any real Salesforce data. `generate-mock-data` does one object at a time; `generate-related-mock-data` generates several objects *linked together* (e.g. Accounts that really do have Contacts pointing back at them). |
+| 7 | Data profiling toolset | **Built** | `profile-salesforce`, `profile-sql-table`, `export-profile-excel` | Tells you how populated and clean a field actually is — what % of rows have a value, how many distinct values, min/max — before you decide whether it's even worth migrating. Run this before mapping fields, not after. |
+| 8 | Ad hoc query tool | **Built** | `query` | Run a quick SOQL query from the command line for a fast lookup, without opening a separate tool like Workbench. |
+| 9 | Console output polish | **Built** | (applies to `query`/`profile-*`) | Query/profile results print as a readable table instead of a raw text dump. |
+| 10 | Auto-mapping | **Built** | `auto-map` | Suggests a first-draft field mapping automatically (matching names, a synonym list, and a data-quality check) so you're reviewing/correcting a draft instead of starting the mapping spreadsheet from a blank sheet. |
+| 11 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` | This is the actual "push data into Salesforce" step — insert/update/upsert/delete via Bulk API 2.0. The pre-flight check catches typo'd/non-writable fields *before* burning a real API call; `bulkops-retry` lets you resubmit only the rows that failed instead of the whole load again. |
+| 12 | Parquet file import | **Built** | `import-parquet` | Brings a Parquet file's data into SQL Server as typed columns — a second way to get source data in, alongside pulling directly from a Salesforce org. |
+| 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 | Forces you to actually go check Setup's Email Deliverability setting before any insert/upsert that could send real email to real people, and pass what it shows as a flag. This is a required human confirmation, not an automatic check — Salesforce has no API to read that setting. |
+| 14 | Load activity logging + analytics | Logging **Built** (opt-in); analytics not built | `enable-bulkops-logging`, `disable-bulkops-logging` | Optional, off-by-default record of every `bulkops` run (what, when, how many succeeded/failed) written to a SQL Server table, so you can look back at history instead of relying on console scrollback. Turn it on once per schema; it then logs automatically. |
+| 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — | Idea: automatically use a smaller batch size for heavily-automated objects (lots of triggers/Flows) instead of a human having to already know that and set it manually. |
+| 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — | Idea: a living record of every step (manual and scripted) taken during a real migration cutover — who did what, when, what errors came up. Waiting on a real example template before this gets designed. |
+| 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
+| 18 | Data Cloud (D360) query support | Not built — API surface researched, live verification blocked (no Data Cloud org available) | — | Idea: let this framework query Data Cloud objects (DLOs/DMOs), not just standard CRM objects. Blocked on having an actual Data Cloud-licensed org to test against, not on more reading. |
+| 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
+| 20 | DSO refresh/error monitoring | Not built — needs API research | — | Idea: check whether a Data Cloud DSO (the raw ingested layer) last refreshed successfully before trusting the data in it, instead of silently working off stale data. |
+| 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — | Idea: read (and maybe suggest) how a DSO's fields map into a DLO — the Data Cloud version of what `auto-map` (#10) already does for CRM field mapping. |
+| 22 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — | Idea: push SQL Server data into a Data Cloud DSO for local testing, the same way `bulkops` pushes into Salesforce CRM objects today. |
+| 23 | Data Kit / Bundle documentation | Not built, depends on #18/#19 | — | Idea: document what's actually in a Data Cloud Data Kit for a data architect scoping a migration — the Data Cloud version of the mapping spreadsheet (#3). |
+| 24 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #18 | — | Idea: version Data Cloud Calculated Insight definitions in git and test them like code, instead of only building them by hand in Data Cloud Setup. |
+| 25 | Web UI for less-technical users | Not built (future) | — | Idea: a browser-based front end so someone who isn't comfortable with a terminal or Claude Code could still use this framework's tools. |
+| 26 | SSO / multi-user access control | Not built, depends on #25 | — | Idea: once a Web UI exists, this is "who's allowed to log in, and as whom." Not a concern today since it's just a CLI one person runs. |
+| 27 | Open query in SSMS (stage + launch) | Not built, depends on #25 | — | Idea: write a query to a file and launch SSMS pointed at it, for someone who'd rather review/run it in SSMS's own editor than in this framework's console output. |
+| 28 | Pluggable integration-hub backend (e.g. MongoDB alongside SQL Server) | Not built, deliberately deferred — prototyping is SQL-Server-only for now | — | Idea: someday support a database other than SQL Server as the "hub" this framework is built around, so it isn't permanently locked into one tool. Not needed while still prototyping on one database. |
+| 29 | Shared/VM-hosted SQL Server for multi-user access | Not built, deliberately deferred — prototyping is single-user/local for now | — | Idea: for when more than one person needs to work against the *same* mirror database at the same time, instead of everyone having their own local SQL Server. |
+| 30 | Additional migration source connectors (Snowflake, MongoDB, etc.) | Not built, deliberately deferred | — | Idea: pull source data from more systems (Snowflake, MongoDB), the same way this framework already pulls from a Salesforce org (`replicate`) or a flat file (`import-parquet`). |
+| 31 | Target-count/scaled mock data generation | Not built, builds on #6 | — | Idea: say "keep generating mock Accounts until the org has 50,000 total" instead of a fixed count every run — useful for realistic load/performance testing. |
+| 32 | Bulk test-data cleanup by filter | Not built, builds on #6/#11 | — | Idea: a quick "delete every mock record I created for this test" command driven by a filter, instead of needing to build a delete load table first. |
+| 33 | Scratch org lifecycle + auto-seeded test data | Not built, deliberately deferred | — | Idea: let this framework spin up a disposable Salesforce scratch org and automatically fill it with mock data, instead of assuming an org already exists. |
+| 34 | Relationship-consistent subset replication | Not built, builds on #2 | — | Idea: pull a small, realistic *slice* of an org — e.g. 50 pilot Accounts and everything genuinely related to them — instead of either replicating everything or hand-coordinating a `--where` filter across every object yourself. |
+| 35 | Relative date shifting utility | Not built | — | Idea: a helper that shifts old dates forward so migrated data still makes sense relative to today — e.g. a contract end date that's already in the past wouldn't make sense to a Flow expecting a future date. |
+| 36 | RecordType DeveloperName resolution for cross-org migration | Not built | — | Idea: correctly translate a `RecordTypeId` from the source into the *right* RecordType in the target org. RecordType Ids are org-specific and never match across orgs, so this is a common, easy-to-miss real-migration mistake if not handled. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
