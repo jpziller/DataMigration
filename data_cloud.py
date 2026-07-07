@@ -70,6 +70,11 @@ STATUS_OBJECTS = {
                    "LastRefreshDate", "TotalRecords", "ExternalObjectErrorStatus",
                    "ExternalObjectErrorCode", "LastDataChangeStatusErrorCode"],
     },
+    "data-graph": {
+        "object": "DataGraph",
+        "fields": ["Id", "Name", "Status", "LastRunStatus", "RecordCount",
+                   "LastRefreshDate", "DataGraphApiName", "PrimaryDmo"],
+    },
 }
 
 
@@ -188,6 +193,47 @@ def list_calculated_insights(sf):
     )
     resp.raise_for_status()
     return resp.json().get("metadata", [])
+
+
+def list_data_graphs(sf):
+    """List every Data Graph's metadata (primary DMO, related objects,
+    fields) via GET /api/v1/dataGraph/metadata -- confirmed live (returns
+    {"metadata": []} when none are configured, same shape as Calculated
+    Insight metadata before one exists). Returns the parsed metadata list
+    as-is."""
+    token, instance_url = get_data_cloud_session(sf)
+    resp = requests.get(
+        f"https://{instance_url}/api/v1/dataGraph/metadata",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    resp.raise_for_status()
+    return resp.json().get("metadata", [])
+
+
+def query_data_graph(sf, data_graph_name, record_id=None, lookup_keys=None):
+    """Query a specific Data Graph's data -- by a record's real Id (GET
+    /api/v1/dataGraph/{name}/{id}) or by lookup key(s) on the primary/
+    participating DMO (GET /api/v1/dataGraph/{name}?lookupKeys=[...]).
+
+    NOT YET LIVE-VERIFIED (unlike every other function in this module) --
+    this org has zero Data Graphs configured, so only the shape of the
+    request could be built from docs, not confirmed against a real
+    response. Provide exactly one of record_id/lookup_keys.
+    """
+    if bool(record_id) == bool(lookup_keys):
+        raise ValueError("Provide exactly one of record_id or lookup_keys")
+    token, instance_url = get_data_cloud_session(sf)
+    if record_id:
+        url = f"https://{instance_url}/api/v1/dataGraph/{data_graph_name}/{record_id}"
+        params = None
+    else:
+        url = f"https://{instance_url}/api/v1/dataGraph/{data_graph_name}"
+        params = {"lookupKeys": lookup_keys}
+    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+    resp.raise_for_status()
+    body = resp.json()
+    records = _rows_from_data_cloud_response(body)
+    return records, len(records), not body.get("done", True)
 
 
 def query_calculated_insight(sf, ci_name):

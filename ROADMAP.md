@@ -30,7 +30,7 @@ summarizes.
 | 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — | Idea: automatically use a smaller batch size for heavily-automated objects (lots of triggers/Flows) instead of a human having to already know that and set it manually. |
 | 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — | Idea: a living record of every step (manual and scripted) taken during a real migration cutover — who did what, when, what errors came up. Waiting on a real example template before this gets designed. |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
-| 18 | Data Cloud (D360) query support | **Built** — query, Calculated Insight metadata/data, status checks, and Unified Profile lookup; Data Graphs still research-only | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status`, `data-cloud-profile` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, Unified Profile data, and check processing status for Data Streams/DSOs/Identity Resolution/Data Transforms/Calculated Insights — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
+| 18 | Data Cloud (D360) query support | **Built** — all 5 findings researched, 4.5 confirmed live (Data Graph query-by-id/lookup-key is written but unverified — no test Data Graph exists yet) | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status`, `data-cloud-profile`, `list-data-graphs` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, Unified Profile data, Data Graph metadata, and check processing status for Data Streams/DSOs/Identity Resolution/Data Transforms/Calculated Insights/Data Graphs — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
 | 20 | DSO refresh/error monitoring | **Built** — both the Data Stream (ingestion connector) and the DSO itself, confirmed as genuinely separate objects | `data-cloud-status data-stream`, `data-cloud-status dso` | Check whether a Data Cloud Data Stream or the DSO it feeds last refreshed successfully and whether either hit errors, before trusting the data behind it — confirmed live via plain SOQL, no Data Cloud tenant token needed. |
 | 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — | Idea: read (and maybe suggest) how a DSO's fields map into a DLO — the Data Cloud version of what `auto-map` (#10) already does for CRM field mapping. |
@@ -50,6 +50,7 @@ summarizes.
 | 35 | Relative date shifting utility | Not built | — | Idea: a helper that shifts old dates forward so migrated data still makes sense relative to today — e.g. a contract end date that's already in the past wouldn't make sense to a Flow expecting a future date. |
 | 36 | RecordType DeveloperName resolution for cross-org migration | Not built | — | Idea: correctly translate a `RecordTypeId` from the source into the *right* RecordType in the target org. RecordType Ids are org-specific and never match across orgs, so this is a common, easy-to-miss real-migration mistake if not handled. |
 | 37 | CLI alternative to Data Cloud's Profile Explorer | **Built** — same command as #18's Unified Profile finding | `data-cloud-profile` | Look up Unified Profile data (a specific person's attributes) via one command instead of Data Cloud Setup's own multi-click Profile Explorer (pick a Data Space, then an entity, then an attribute, repeatedly) — no Data Space parameter needed at all, confirmed live. |
+| 38 | Real-data anonymization for demos/scratch orgs | Not built | — | Idea: take a real client org's actual data and scramble the sensitive fields (names, emails, phones) into realistic-looking fakes — same relationships/volume, no real PII — for client demos or scratch-org seeding. Different from #6, which generates synthetic data from scratch rather than replacing real values. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -965,9 +966,21 @@ silently or errors outright, never partially works):
    confirmed to work identically). No Data Space parameter needed in the
    API at all, unlike the Setup UI's Profile Explorer, which makes you
    pick one even when "default" is the only option that exists.
-5. **Data Graphs** have their own distinct query endpoint plus a separate
-   metadata-discovery endpoint (what data graphs exist, what they expose)
-   — a third, independent surface from all of the above.
+5. **Data Graphs — metadata endpoint CONFIRMED LIVE, query endpoints
+   still unverified.** Metadata discovery (`GET /api/v1/dataGraph/
+   metadata`) uses the same Data Cloud tenant token as findings #2-#4 —
+   confirmed live against `D360_PLAYGROUND` (returns `{"metadata": []}`,
+   same empty-until-configured shape Calculated Insight metadata showed
+   before one existed). Query-by-id (`GET /api/v1/dataGraph/
+   {dataGraphEntityName}/{id}`) and query-by-lookup-key (`GET /api/v1/
+   dataGraph/{dataGraphEntityName}?lookupKeys=[...]`) are built in
+   `data_cloud.py` (`query_data_graph`) but **not yet live-tested** —
+   this org has zero Data Graphs configured, and building one (a primary
+   DMO + related/participating DMOs + levels) is a heavier Setup lift
+   than a Calculated Insight's SQL paste or an Identity Resolution
+   ruleset was. A third, independent surface from findings #1-#4, same
+   as originally scoped — just now partially rather than fully
+   unverified.
 
 Sources consulted (all current as of this research pass, not relied on
 from training knowledge): [Query API Reference](https://developer.salesforce.com/docs/data/data-cloud-query-guide/references/data-cloud-query-api-reference/c360a-api-queryservices-overview.html),
@@ -1028,15 +1041,21 @@ progress from `PROCESSING` to `SUCCESS` via `data-cloud-status
 calculated-insight`, then confirmed `query-calculated-insight` returned
 the real computed row once done.
 
-**Still research-only, not built**: finding #5 (Data Graphs) — a
-distinct endpoint, not yet tested live. Findings #1-#4 are all confirmed
-live now.
-
 **Built (`data_cloud.py`): `data-cloud-profile <dataModelName> <filter>
 [--fields] [--limit] [--offset] [--orderby]`** — finding #4, turned into
 a real command the same way #1-#3 were. This is also roadmap #37's
 answer (a CLI alternative to Data Cloud's own Profile Explorer) — one
 command instead of clicking Data Space → entity → attribute repeatedly.
+
+**Built (`data_cloud.py`): `list-data-graphs`** — finding #5's metadata
+endpoint, confirmed live (`{"metadata": []}`, none configured in this
+org yet). `data_cloud.query_data_graph()` (query-by-id or query-by-
+lookup-key) is written but genuinely **not yet live-verified** — the
+one piece of `data_cloud.py` still in that state, since building even a
+minimal real Data Graph needs more Setup work (primary + related DMOs,
+levels) than the other findings' test artifacts did. No CLI command
+wired up for it yet for that reason — code exists, hasn't earned "real
+command" status by this module's own dogfooding standard.
 
 ## 19. Data Cloud semantic model reference (not built, depends on #18)
 
@@ -1516,6 +1535,41 @@ identity-resolution` polling (`PUBLISHED` → `IN_PROGRESS` → `SUCCESS`)
 for this seed data). That real Unified Individual data
 (`UnifiedssotIndividualIndv__dlm`) is what `data-cloud-profile` was
 verified against.
+
+## 38. Real-data anonymization for demos/scratch orgs (not built)
+
+Raised directly: a real-migration-adjacent capability distinct from #6's
+mock data — take a *real* client org's actual data (via `replicate`,
+already built) and scramble the sensitive fields enough to look
+realistic without being real, for client demos, scratch-org seeding, or
+sales/pre-sales environments where the real volume, shape, and
+relationships of a client's data matter but the actual PII can't be
+shown. Different problem from #6: that's synthetic data from scratch;
+this is real data with sensitive values *replaced*, keeping the same
+row count, distribution, and (critically) relationships intact — the
+same Contact should scramble to the same fake name every time, not a
+different one per query, so a demo stays internally consistent.
+
+**Correcting an assumption before scoping further**: CumulusCI does
+**not** appear to have a built-in anonymization feature either (called
+out explicitly as a gap during this same review pass, #6's writeup) —
+so this isn't "adopt a CumulusCI capability," it's a genuinely new
+build, even though CumulusCI's ecosystem (Faker, Snowfakery) is exactly
+the toolkit that would do the actual value-scrambling. The reusable
+building blocks already exist in this repo: `replicate.py` for the real
+extraction, and the same describe()-driven field-type → Faker-provider
+mapping already built twice (`mock_data.py`'s `_mockaroo_field`,
+`snowfakery_data.py`'s `_snowfakery_field`) — a third variant here would
+replace an *existing* real value with a fake one of the same shape
+(name→name, email→email, phone→phone), keyed deterministically per
+source row (e.g. a hash of the real value or record Id as the Faker
+seed) so the same input always scrambles to the same output across
+re-runs, rather than generating brand-new independent rows.
+
+Ties into #33 (scratch org lifecycle) as a second seeding option once
+both exist — a scratch org auto-seeded with scrambled *real* data
+(realistic volume/shape) rather than purely synthetic mock data, for
+whichever a given demo actually needs.
 
 ---
 

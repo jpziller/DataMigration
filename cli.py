@@ -339,6 +339,17 @@ def list_calculated_insights_cmd():
                    f"last successful process: {ci.get('latestSuccessfulProcessTime', '-')})")
 
 
+@cli.command("list-data-graphs")
+def list_data_graphs_cmd():
+    _, sf, _e = _ctx()
+    graphs = dc.list_data_graphs(sf)
+    if not graphs:
+        click.echo("No Data Graphs found in this org.")
+        return
+    for g in graphs:
+        click.echo(f"{g.get('name', g)}")
+
+
 @cli.command("query-calculated-insight")
 @click.argument("ci_name")
 @click.option("--csv", "csv_path", default=None, help="Write results to a CSV file instead of printing.")
