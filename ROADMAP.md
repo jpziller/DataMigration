@@ -30,9 +30,9 @@ summarizes.
 | 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — | Idea: automatically use a smaller batch size for heavily-automated objects (lots of triggers/Flows) instead of a human having to already know that and set it manually. |
 | 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — | Idea: a living record of every step (manual and scripted) taken during a real migration cutover — who did what, when, what errors came up. Waiting on a real example template before this gets designed. |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
-| 18 | Data Cloud (D360) query support | Both core findings **confirmed live** (basic DLO/DMO querying, and the separate Data Cloud tenant token exchange for complex queries); not yet wired into `query_tool.py` as a real feature | `describe`, `query` (basic lookups, no new code); ad hoc token-exchange script (complex queries, not yet a CLI verb) | Query Data Cloud objects (DLOs/DMOs), not just standard CRM objects. Basic lookups already just work with the commands you already know. Complex cross-object Data Cloud SQL queries need a separate authentication hop (a Data Cloud tenant token) — now proven working end to end against a real org (`D360_PLAYGROUND`), just not yet built into a real CLI command. |
+| 18 | Data Cloud (D360) query support | **Built** — query, Calculated Insight metadata/data, and status checks; Unified Profile/Data Graphs still research-only | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, and check processing status for Data Streams/Identity Resolution/Data Transforms/Calculated Insights — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
-| 20 | DSO refresh/error monitoring | Not built — needs API research | — | Idea: check whether a Data Cloud DSO (the raw ingested layer) last refreshed successfully before trusting the data in it, instead of silently working off stale data. |
+| 20 | DSO refresh/error monitoring | **Built** for Data Streams; a separate DSO-specific object still unconfirmed | `data-cloud-status data-stream` | Check whether a Data Cloud Data Stream last refreshed successfully and whether it hit errors, before trusting the data behind it — confirmed live via plain SOQL, no Data Cloud tenant token needed. |
 | 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — | Idea: read (and maybe suggest) how a DSO's fields map into a DLO — the Data Cloud version of what `auto-map` (#10) already does for CRM field mapping. |
 | 22 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — | Idea: push SQL Server data into a Data Cloud DSO for local testing, the same way `bulkops` pushes into Salesforce CRM objects today. |
 | 23 | Data Kit / Bundle documentation | Not built, depends on #18/#19 | — | Idea: document what's actually in a Data Cloud Data Kit for a data architect scoping a migration — the Data Cloud version of the mapping spreadsheet (#3). |
@@ -49,6 +49,7 @@ summarizes.
 | 34 | Relationship-consistent subset replication | Not built, builds on #2 | — | Idea: pull a small, realistic *slice* of an org — e.g. 50 pilot Accounts and everything genuinely related to them — instead of either replicating everything or hand-coordinating a `--where` filter across every object yourself. |
 | 35 | Relative date shifting utility | Not built | — | Idea: a helper that shifts old dates forward so migrated data still makes sense relative to today — e.g. a contract end date that's already in the past wouldn't make sense to a Flow expecting a future date. |
 | 36 | RecordType DeveloperName resolution for cross-org migration | Not built | — | Idea: correctly translate a `RecordTypeId` from the source into the *right* RecordType in the target org. RecordType Ids are org-specific and never match across orgs, so this is a common, easy-to-miss real-migration mistake if not handled. |
+| 37 | CLI alternative to Data Cloud's Profile Explorer | Not built, depends on #18 finding #4 | — | Idea: browse Unified Profile data (a specific person/account's attributes across Data Spaces) via a command instead of Data Cloud Setup's own multi-click Profile Explorer (pick a Data Space, then an entity, then an attribute, repeatedly). Needs a real Identity Resolution ruleset run first to produce Unified Profile data to browse. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -844,7 +845,7 @@ against hand-rolled T-SQL matching before building more of the latter —
 `rapidfuzz` specifically for a fast Levenshtein-family option if T-SQL's
 `JaroWinklerDistance` turns out too slow at scale.
 
-## 18. Data Cloud (D360) query support (not built as a framework feature yet — both core findings now CONFIRMED LIVE)
+## 18. Data Cloud (D360) query support — BUILT (`data_cloud.py`)
 
 `query_tool.py` is explicitly scoped to CRM objects via the standard REST
 Query API today (see its own docstring) — Data Cloud objects (DLOs, DMOs,
@@ -965,14 +966,57 @@ from training knowledge): [Query API Reference](https://developer.salesforce.com
 [Data Cloud object suffixes](https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_concepts_data_cloud_objects.htm),
 [Data Graphs API](https://developer.salesforce.com/docs/data/data-cloud-query-guide/references/data-cloud-query-api-reference/c360a-api-data-graphs-overview.html).
 
-**Next step**: findings #1 and #2 are both verified now — remaining
-unverified findings are #3 (Calculated Insights API), #4 (Unified
-Profile API), and #5 (Data Graphs), each its own distinct endpoint. Test
-those next against `D360_PLAYGROUND`, one at a time, same incremental
-approach — and only then turn any of this into real `query_tool.py` code
-(right now every finding above was proven using this framework's
-existing, unmodified commands plus one ad hoc script for the tenant
-token exchange, not new production code).
+**Built (`data_cloud.py`), turning today's ad hoc scripts into real,
+reusable commands** — the explicit ask once findings #1-#3 were verified
+live: a different data architect picking up this repo later just runs a
+command, no need to hand-derive the token exchange or already know which
+standard object holds which status.
+
+- **`data-cloud-query "<SQL>"`** — finding #2's tenant token exchange +
+  `/api/v2/query`, for complex/cross-object Data Cloud SQL. Basic
+  single-DLO/DMO lookups still just use the existing `query` command —
+  this one is specifically for what that can't do.
+- **`list-calculated-insights`** / **`query-calculated-insight <name>`**
+  — finding #3, live: `GET /api/v1/insight/metadata` to discover what
+  exists, `GET /api/v1/insight/calculated-insights/{name}` for its actual
+  computed data.
+- **`data-cloud-status <type> [name]`** — status checks across four
+  standard core-org objects, **all confirmed to need only plain SOQL, no
+  Data Cloud tenant token at all** (a genuinely useful discovery in its
+  own right — these aren't gated behind the harder auth path): `calculated-insight`
+  (`MktCalculatedInsight`), `data-stream` (`DataStream`, covering the DSO
+  refresh/error monitoring #20 was originally scoped around), `identity-resolution`
+  (`IdentityResolution` — its *resulting* Unified DMO rows are a plain
+  DMO like any other, query those with `query`/`data-cloud-query` once
+  you know the name, not a separate feature), and `data-transform`
+  (`MktDataTransform`).
+
+**A real bug found and fixed via live testing, not assumed from docs**:
+`/api/v2/query` and the Calculated Insight data endpoint do **not** share
+one response shape. `/api/v2/query` returns `{"data": [[...]], "metadata":
+{"col": {"placeInOrder": N}}}` — a positional array needing `metadata` to
+know column order. The Calculated Insight endpoint returns `{"data":
+[{...}], "metadata": {}}` — rows are already plain dicts, metadata is
+empty. The first implementation assumed the positional shape for both,
+which silently produced empty `{}` records for Calculated Insight data
+(zipping real dict keys against an empty column list). Fixed by
+detecting which shape actually came back rather than assuming one.
+
+**Verified end to end**: built a real Calculated Insight (`RateCount__cio`,
+count of `StaticCurrencyRates_Home__dlm` rows grouped by
+`FromISOCurrencyCode__c`) via Data Cloud's SQL authoring mode — its own
+real syntax rules turned out to differ from generic ANSI SQL in three
+ways discovered live: columns must be `table.column`-qualified using the
+*real* DMO name (bare aliases aren't recognized — a bare alias like `a`
+gets misread as an attempted second DMO reference, failing with `DMO a
+is not listed in factTables`), and every output attribute (dimensions
+included) needs an explicit `AS` alias ending in `__c`. Watched it
+progress from `PROCESSING` to `SUCCESS` via `data-cloud-status
+calculated-insight`, then confirmed `query-calculated-insight` returned
+the real computed row once done.
+
+**Still research-only, not built**: findings #4 (Unified Profile API)
+and #5 (Data Graphs) — distinct endpoints, not yet tested live.
 
 ## 19. Data Cloud semantic model reference (not built, depends on #18)
 
@@ -984,7 +1028,7 @@ objects today, but for Data Cloud's own metadata layer. Needs real API
 research first (see #18's caution); likely depends on #18 existing first
 since both need the same Data Cloud API access.
 
-## 20. DSO refresh/error monitoring (not built)
+## 20. DSO refresh/error monitoring — BUILT for Data Streams (`data_cloud.py`), DSO-specific object still unconfirmed
 
 Problem: before trusting data pulled from a DSO (Data Source Object — the
 raw ingested layer, see #21), a data architect needs to know when it last
@@ -993,11 +1037,22 @@ off stale or partially-failed ingested data is a real risk specific to the
 Data Cloud pipeline (source → DSO → DLO → DMO), distinct from anything
 `profiling.py` checks about the *content* of already-landed data.
 
-Idea: a check (`analyze-org-risk`-style, or its own command) reporting
-last-refresh timestamp and ingestion error count/detail per DSO. Needs
-research into which Data Cloud metadata object actually exposes this — not
-yet confirmed which one, if any, is queryable the way `FlowDefinitionView`
-turned out to be for record-triggered Flows.
+**Built and confirmed live**: `data-cloud-status data-stream [Name]`
+queries the standard `DataStream` object via plain core-org SOQL (no
+Data Cloud tenant token needed, same discovery as #18's status checks) —
+`DataStreamStatus`, `ImportRunStatus`, `LastRefreshDate`,
+`TotalNumberOfRowsAdded`, `LastDataChangeStatusErrorCode`,
+`ExternalStreamErrorCode`. This answers the practical question this item
+was raised about ("when did this last refresh, were there errors")
+directly.
+
+**Worth stating precisely, not conflating**: a Data Stream (the ingestion
+connector/configuration feeding a DSO) and a DSO itself are related but
+distinct Data Cloud concepts — this confirms monitoring for the *Data
+Stream* side, not necessarily a separate DSO-specific status object. If
+a genuinely different DSO-level object turns out to exist and expose
+something `DataStream` doesn't, that's still open; otherwise this item's
+real-world need is satisfied.
 
 ## 21. DSO→DLO mapping: read, then auto-map (not built)
 
@@ -1405,6 +1460,30 @@ real, portable identifier) instead of a raw Id — resolved to the correct
 target Id at load time, the same "resolve to a real Id via a query
 first" pattern `_resolve_external_ids_to_sf_id` already established for
 delete-by-external-id (#11).
+
+## 37. CLI alternative to Data Cloud's Profile Explorer (not built, depends on #18 finding #4)
+
+Raised directly: Data Cloud's own Profile Explorer (Setup UI for
+browsing Unified Profile data) is genuinely annoying to click through —
+pick a Data Space (almost always just "default," but you still have to
+pick it every time), then an entity, then an attribute, one at a time,
+to see a single unified person/account's actual data.
+
+Idea: a command that takes a Data Space (defaulting to `default`) and an
+identifier, and prints that unified profile's attributes across
+entities in one shot — the CLI equivalent of what Profile Explorer shows
+after several clicks, reusing whichever mechanism finding #4 (Unified
+Profile API, `GET /api/v1/profile/{dataModelName}`) or plain SOQL against
+Unified DMOs directly (same mechanism as finding #1) turns out to be the
+better fit, once there's real data to test either against.
+
+**Blocked on the same thing finding #4 itself is blocked on**: this
+playground org (`D360_PLAYGROUND`) has no Identity Resolution ruleset
+configured yet (confirmed via `data-cloud-status identity-resolution` —
+zero rows), so there's no Unified Profile data to browse or test either
+API surface against. Building a simple Identity Resolution ruleset
+(mirroring how #18's Calculated Insight was built live to unblock finding
+#3) is the natural next step whenever this gets picked up.
 
 ---
 

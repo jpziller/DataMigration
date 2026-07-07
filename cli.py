@@ -39,6 +39,7 @@ import bulkops as bo
 import load_order as lo
 import profiling as pf
 import query_tool as qt
+import data_cloud as dc
 import mock_data as mkd
 import snowfakery_data as sfd
 import mapping_doc as mpd
@@ -293,6 +294,78 @@ def query_cmd(soql, fetch_all, csv_path, excel_path, max_print_rows):
     if truncated:
         click.echo("Not all matching records were fetched -- pass --all to retrieve everything, "
                    "or add/tighten a LIMIT.")
+
+
+def _output_query_result(records, total_size, truncated, csv_path, excel_path, max_print_rows):
+    if csv_path:
+        qt.to_csv(records, csv_path)
+        click.echo(f"Wrote {len(records)} row(s) to {csv_path}")
+    elif excel_path:
+        qt.to_excel(records, excel_path)
+        click.echo(f"Wrote {len(records)} row(s) to {excel_path}")
+    elif records:
+        _print_table(pd.DataFrame(records), max_rows=max_print_rows)
+    click.echo(f"\n{len(records)} of {total_size} total record(s) shown.")
+    if truncated:
+        click.echo("Not all matching records were fetched.")
+
+
+@cli.command("data-cloud-query")
+@click.argument("sql")
+@click.option("--csv", "csv_path", default=None, help="Write results to a CSV file instead of printing.")
+@click.option("--excel", "excel_path", default=None, help="Write results to an Excel file instead of printing.")
+@click.option("--max-print-rows", default=50, help="Console preview row cap (ignored for --csv/--excel).")
+def data_cloud_query_cmd(sql, csv_path, excel_path, max_print_rows):
+    """ANSI SQL against the Data Cloud tenant's own query API -- for
+    complex/cross-object Data Cloud queries. Basic single-DLO/DMO lookups
+    work fine through the plain `query` command already; reach for this
+    one specifically when you need the Data Cloud tenant's own SQL engine."""
+    _, sf, _e = _ctx()
+    records, total_size, truncated = dc.query_data_cloud(sf, sql)
+    _output_query_result(records, total_size, truncated, csv_path, excel_path, max_print_rows)
+
+
+@cli.command("list-calculated-insights")
+def list_calculated_insights_cmd():
+    _, sf, _e = _ctx()
+    insights = dc.list_calculated_insights(sf)
+    if not insights:
+        click.echo("No Calculated Insights found in this org.")
+        return
+    for ci in insights:
+        dims = ", ".join(d["name"] for d in ci.get("dimensions", []))
+        measures = ", ".join(m["name"] for m in ci.get("measures", []))
+        click.echo(f"{ci['name']}  (dimensions: {dims or '-'}; measures: {measures or '-'}; "
+                   f"last successful process: {ci.get('latestSuccessfulProcessTime', '-')})")
+
+
+@cli.command("query-calculated-insight")
+@click.argument("ci_name")
+@click.option("--csv", "csv_path", default=None, help="Write results to a CSV file instead of printing.")
+@click.option("--excel", "excel_path", default=None, help="Write results to an Excel file instead of printing.")
+@click.option("--max-print-rows", default=50, help="Console preview row cap (ignored for --csv/--excel).")
+def query_calculated_insight_cmd(ci_name, csv_path, excel_path, max_print_rows):
+    """Query a specific Calculated Insight's actual computed data (the
+    real object name, e.g. RateCount__cio -- see list-calculated-insights)."""
+    _, sf, _e = _ctx()
+    records, total_size, truncated = dc.query_calculated_insight(sf, ci_name)
+    _output_query_result(records, total_size, truncated, csv_path, excel_path, max_print_rows)
+    if not records:
+        click.echo("(Empty is expected if this Calculated Insight hasn't finished "
+                   "processing yet -- check with data-cloud-status calculated-insight.)")
+
+
+@cli.command("data-cloud-status")
+@click.argument("status_type", type=click.Choice(list(dc.STATUS_OBJECTS.keys())))
+@click.argument("name", required=False)
+@click.option("--csv", "csv_path", default=None, help="Write results to a CSV file instead of printing.")
+@click.option("--excel", "excel_path", default=None, help="Write results to an Excel file instead of printing.")
+def data_cloud_status_cmd(status_type, name, csv_path, excel_path):
+    """Check status for a Data Cloud monitoring object -- calculated-insight,
+    data-stream, identity-resolution, or data-transform. Omit NAME to list all."""
+    _, sf, _e = _ctx()
+    records, total_size, truncated = dc.check_status(sf, status_type, name=name)
+    _output_query_result(records, total_size, truncated, csv_path, excel_path, 50)
 
 
 @cli.command("generate-mock-data")

@@ -54,6 +54,16 @@ venv may not be active in a fresh shell:
 -               `.venv/Scripts/python.exe cli.py dump-describe Account`
 - Query:        `.venv/Scripts/python.exe cli.py query "SELECT Id, Name FROM Account LIMIT 10"`
                 `[--all]` to paginate everything, `[--csv path]`/`[--excel path]` to export.
+                (Basic DLO/DMO lookups already work here too, no separate command needed —
+                confirmed live, see `ROADMAP.md` #18.)
+- Data Cloud (D360): `.venv/Scripts/python.exe cli.py data-cloud-query "SELECT ... FROM SomeDMO"`
+                (complex/cross-object Data Cloud SQL — a separate tenant token exchange under
+                the hood, `data_cloud.py`; confirmed live against a real Data Cloud org)
+                `.venv/Scripts/python.exe cli.py list-calculated-insights`
+                `.venv/Scripts/python.exe cli.py query-calculated-insight RateCount__cio`
+                `.venv/Scripts/python.exe cli.py data-cloud-status calculated-insight|data-stream|identity-resolution|data-transform [Name]`
+                (all four via plain core-org SOQL, no Data Cloud tenant token needed — see
+                `ROADMAP.md` #18 for the full tested findings and required org/app setup.)
 - Replicate:    `.venv/Scripts/python.exe cli.py replicate Account [--where "..."] [--raw]`
 - Import file:  `.venv/Scripts/python.exe cli.py import-parquet path/to/file.parquet SourceAccounts [--append]`
                 (Parquet -> typed SQL Server table, column types inferred from the file's own
