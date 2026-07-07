@@ -32,7 +32,7 @@ summarizes.
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
 | 18 | Data Cloud (D360) query support | **Built** — query, Calculated Insight metadata/data, and status checks; Unified Profile/Data Graphs still research-only | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, and check processing status for Data Streams/Identity Resolution/Data Transforms/Calculated Insights — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
-| 20 | DSO refresh/error monitoring | **Built** for Data Streams; a separate DSO-specific object still unconfirmed | `data-cloud-status data-stream` | Check whether a Data Cloud Data Stream last refreshed successfully and whether it hit errors, before trusting the data behind it — confirmed live via plain SOQL, no Data Cloud tenant token needed. |
+| 20 | DSO refresh/error monitoring | **Built** — both the Data Stream (ingestion connector) and the DSO itself, confirmed as genuinely separate objects | `data-cloud-status data-stream`, `data-cloud-status dso` | Check whether a Data Cloud Data Stream or the DSO it feeds last refreshed successfully and whether either hit errors, before trusting the data behind it — confirmed live via plain SOQL, no Data Cloud tenant token needed. |
 | 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — | Idea: read (and maybe suggest) how a DSO's fields map into a DLO — the Data Cloud version of what `auto-map` (#10) already does for CRM field mapping. |
 | 22 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — | Idea: push SQL Server data into a Data Cloud DSO for local testing, the same way `bulkops` pushes into Salesforce CRM objects today. |
 | 23 | Data Kit / Bundle documentation | Not built, depends on #18/#19 | — | Idea: document what's actually in a Data Cloud Data Kit for a data architect scoping a migration — the Data Cloud version of the mapping spreadsheet (#3). |
@@ -1028,7 +1028,7 @@ objects today, but for Data Cloud's own metadata layer. Needs real API
 research first (see #18's caution); likely depends on #18 existing first
 since both need the same Data Cloud API access.
 
-## 20. DSO refresh/error monitoring — BUILT for Data Streams (`data_cloud.py`), DSO-specific object still unconfirmed
+## 20. DSO refresh/error monitoring — BUILT (`data_cloud.py`)
 
 Problem: before trusting data pulled from a DSO (Data Source Object — the
 raw ingested layer, see #21), a data architect needs to know when it last
@@ -1046,13 +1046,21 @@ Data Cloud tenant token needed, same discovery as #18's status checks) —
 was raised about ("when did this last refresh, were there errors")
 directly.
 
-**Worth stating precisely, not conflating**: a Data Stream (the ingestion
-connector/configuration feeding a DSO) and a DSO itself are related but
-distinct Data Cloud concepts — this confirms monitoring for the *Data
-Stream* side, not necessarily a separate DSO-specific status object. If
-a genuinely different DSO-level object turns out to exist and expose
-something `DataStream` doesn't, that's still open; otherwise this item's
-real-world need is satisfied.
+**The DSO-specific object is also confirmed, and it's genuinely distinct
+from Data Stream** — `data-cloud-status dso` queries
+`DataLakeObjectInstance` (labeled "Data Lake Object" in Setup — the
+actual DSO, the raw ingested layer), not a rename of `DataStream`. Its
+own fields: `DataLakeObjectStatus`, `SyncStatus`, `HydrationStatus`,
+`LastRefreshDate`, `TotalRecords`, `ExternalObjectErrorStatus`,
+`ExternalObjectErrorCode`. Verified live while a real Data Bundle (the
+Sales bundle) was mid-deploy against `D360_PLAYGROUND`: all 7 DSOs it
+created (`Lead_Home`, `User_Home`, `Account_Home`, `Contact_Home`,
+`Opportunity_Home`, `OpportunityContactRole_Home`, plus the earlier
+`Static Currency Rates Home`) showed `ACTIVE`/`Hydrated` with no errors —
+`TotalRecords: 0` on the CRM-sourced ones reflects this playground
+having little real Account/Contact/Opportunity data yet, not a failure.
+Both this and Data Stream monitoring are now built and confirmed
+separately — this item's real-world need (and then some) is satisfied.
 
 ## 21. DSO→DLO mapping: read, then auto-map (not built)
 

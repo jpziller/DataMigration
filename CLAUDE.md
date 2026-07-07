@@ -66,7 +66,7 @@ venv may not be active in a fresh shell:
                 the hood, `data_cloud.py`; confirmed live against a real Data Cloud org)
                 `.venv/Scripts/python.exe cli.py list-calculated-insights`
                 `.venv/Scripts/python.exe cli.py query-calculated-insight RateCount__cio`
-                `.venv/Scripts/python.exe cli.py data-cloud-status calculated-insight|data-stream|identity-resolution|data-transform [Name]`
+                `.venv/Scripts/python.exe cli.py data-cloud-status calculated-insight|data-stream|dso|identity-resolution|data-transform [Name]`
                 (all four via plain core-org SOQL, no Data Cloud tenant token needed — see
                 `ROADMAP.md` #18 for the full tested findings and required org/app setup.)
 - Replicate:    `.venv/Scripts/python.exe cli.py replicate Account [--where "..."] [--raw]`

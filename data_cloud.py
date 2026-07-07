@@ -60,6 +60,16 @@ STATUS_OBJECTS = {
         "fields": ["Id", "Name", "DataTransformStatus", "LastRunStatus", "LastRunTime",
                    "TargetObject", "LastDataChangeStatusErrorCode"],
     },
+    "dso": {
+        # DataLakeObjectInstance -- the actual DSO (raw ingested layer),
+        # genuinely distinct from "data-stream" (the ingestion connector
+        # that feeds it) -- confirmed live, both are real, separate
+        # objects, not two names for the same thing.
+        "object": "DataLakeObjectInstance",
+        "fields": ["Id", "Name", "DataLakeObjectStatus", "SyncStatus", "HydrationStatus",
+                   "LastRefreshDate", "TotalRecords", "ExternalObjectErrorStatus",
+                   "ExternalObjectErrorCode", "LastDataChangeStatusErrorCode"],
+    },
 }
 
 
