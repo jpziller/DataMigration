@@ -80,9 +80,27 @@ EMAIL DELIVERABILITY ATTESTATION (insert/upsert only):
   genuinely send real mail to real people, so it needs a deliberate
   override, not a default. The confirmed value is echoed back in the
   result dict either way, so it's visible in the load's own report.
+
+ACTIVITY LOGGING (opt-in, per schema -- roadmap #14):
+  Off by default, and never turned on implicitly. An architect enables it
+  per schema with `enable_bulkops_logging()` (CLI: `enable-bulkops-logging
+  --schema <schema>`), which creates `<schema>.BulkOpsLog`. From then on,
+  every `bulk_op()` call against that schema checks whether the table
+  exists and, if so, writes one row per call (action, object, source
+  table, record counts, job count, Email Deliverability attestation,
+  start/end/duration, OS user) -- the same "presence of a table gates
+  behavior" pattern this module already uses for the [Sort] column and
+  key_column writeback. Never logs `query_tool.py` reads, only bulkops
+  writes. A logging failure never fails the underlying load -- the real
+  Salesforce operation and its writeback have already completed by the
+  time logging runs; a failure is reported back as `logging_error`
+  instead. `disable_bulkops_logging()` drops the table (and its history)
+  for a schema.
 """
+import getpass
 import io
 import os
+from datetime import datetime, timezone
 
 import pandas as pd
 from sqlalchemy import text
@@ -96,7 +114,13 @@ def _read_result_csv(csv_text):
 
 
 def _fingerprint(df, cols):
-    return df[cols].astype(str).agg("\x1f".join, axis=1)
+    # fillna() before astype(str) -- a blank cell in the result CSV (e.g. an
+    # empty numeric field like BillingLatitude on a failed row) surfaces as a
+    # real NaN float even though _read_result_csv reads everything as dtype=
+    # str, and "\x1f".join() raises TypeError on a bare float mixed in with
+    # strings. Converting NaN to "" first guarantees every value is a string
+    # before the join, regardless of column dtype.
+    return df[cols].fillna("").astype(str).agg("\x1f".join, axis=1)
 
 
 def _resolve_external_ids_to_sf_id(sf, object_name, external_id_field, values, chunk_size=200):
@@ -180,6 +204,69 @@ def _check_email_deliverability(operation, email_deliverability, confirm_externa
     return f"{email_deliverability} -- internal-only confirmed, continuing"
 
 
+def enable_bulkops_logging(engine, schema="dbo"):
+    """Create <schema>.BulkOpsLog if it doesn't already exist -- idempotent,
+    same style as risk_analyzer.py's _ensure_table. Off by default; this is
+    the one-time, explicit opt-in this module's ACTIVITY LOGGING docstring
+    section describes. Once this table exists, bulk_op() logs automatically
+    for every call against this schema -- no per-call flag needed."""
+    with engine.begin() as cx:
+        cx.execute(text(
+            f"IF OBJECT_ID('{schema}.BulkOpsLog', 'U') IS NULL "
+            f"CREATE TABLE [{schema}].[BulkOpsLog] ("
+            "LogId INT IDENTITY(1,1) PRIMARY KEY, "
+            "Operation NVARCHAR(20) NOT NULL, "
+            "ObjectName NVARCHAR(255) NOT NULL, "
+            "SourceTable NVARCHAR(255) NOT NULL, "
+            "TargetSchema NVARCHAR(128) NOT NULL, "
+            "RecordsSubmitted INT NOT NULL, "
+            "RecordsSucceeded INT NOT NULL, "
+            "RecordsFailed INT NOT NULL, "
+            "RecordsAmbiguous INT NOT NULL, "
+            "ExternalIdNotFound INT NOT NULL, "
+            "JobCount INT NOT NULL, "
+            "EmailDeliverability NVARCHAR(255) NULL, "
+            "WrittenTo NVARCHAR(255) NOT NULL, "
+            "StartedAt DATETIME2 NOT NULL, "
+            "CompletedAt DATETIME2 NOT NULL, "
+            "DurationSeconds FLOAT NOT NULL, "
+            "RunBy NVARCHAR(128) NULL);"
+        ))
+
+
+def disable_bulkops_logging(engine, schema="dbo"):
+    """Drop <schema>.BulkOpsLog -- permanently discards that schema's log
+    history. Idempotent (no-op if logging was never enabled there)."""
+    with engine.begin() as cx:
+        cx.execute(text(
+            f"IF OBJECT_ID('{schema}.BulkOpsLog', 'U') IS NOT NULL "
+            f"DROP TABLE [{schema}].[BulkOpsLog];"
+        ))
+
+
+def _bulkops_log_table_exists(engine, schema):
+    with engine.connect() as cx:
+        return cx.execute(
+            text("SELECT OBJECT_ID(:t, 'U')"),
+            {"t": f"{schema}.BulkOpsLog"},
+        ).scalar() is not None
+
+
+def _write_bulkops_log_row(engine, schema, row):
+    with engine.begin() as cx:
+        cx.execute(text(
+            f"INSERT INTO [{schema}].[BulkOpsLog] "
+            "(Operation, ObjectName, SourceTable, TargetSchema, RecordsSubmitted, "
+            "RecordsSucceeded, RecordsFailed, RecordsAmbiguous, ExternalIdNotFound, "
+            "JobCount, EmailDeliverability, WrittenTo, StartedAt, CompletedAt, "
+            "DurationSeconds, RunBy) VALUES "
+            "(:operation, :object_name, :source_table, :target_schema, :submitted, "
+            ":succeeded, :failed, :ambiguous, :external_id_not_found, :job_count, "
+            ":email_deliverability, :written_to, :started_at, :completed_at, "
+            ":duration_seconds, :run_by)"
+        ), row)
+
+
 def bulk_op(sf, engine, object_name, operation, source_table,
             send_columns=None, external_id=None,
             key_column="LoadId", id_column="Id", error_column="Error",
@@ -188,6 +275,8 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     operation = operation.lower()
     if operation not in ("insert", "update", "upsert", "delete"):
         raise ValueError(f"Unsupported operation: {operation}")
+
+    started_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     deliverability_note = _check_email_deliverability(
         operation, email_deliverability, confirm_external_email_risk
@@ -256,6 +345,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     os.makedirs(stage_dir, exist_ok=True)
     csv_path = os.path.join(stage_dir, f"{source_table}_{operation}.csv")
 
+    job_count = 0
     if submit_df.empty:
         successes, failures = pd.DataFrame(), pd.DataFrame()
         echo_cols = []
@@ -274,6 +364,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             results = handler.upsert(csv_path, external_id)
         else:  # delete
             results = handler.delete(csv_path)
+        job_count = len(results)
 
         # Collect per-job successful + failed records.
         succ_frames, fail_frames = [], []
@@ -335,7 +426,9 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         target = _writeback_result_table(engine, schema, source_table, df,
                                           report_columns, id_column, error_column)
 
-    return {
+    completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    summary = {
         "operation": operation,
         "object": object_name,
         "submitted": len(submit_df),
@@ -347,6 +440,40 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         "preflight_warnings": preflight["required_not_sent"],
         "email_deliverability": deliverability_note,
     }
+
+    # Activity logging -- opt-in per schema, see this module's ACTIVITY
+    # LOGGING docstring section. Only runs if the architect has already
+    # created <schema>.BulkOpsLog via enable_bulkops_logging(); otherwise
+    # this is a single cheap OBJECT_ID lookup and nothing more happens.
+    summary["logged"] = False
+    if _bulkops_log_table_exists(engine, schema):
+        try:
+            _write_bulkops_log_row(engine, schema, {
+                "operation": operation,
+                "object_name": object_name,
+                "source_table": source_table,
+                "target_schema": schema,
+                "submitted": len(submit_df),
+                "succeeded": int(n_ok),
+                "failed": int(n_err),
+                "ambiguous": ambiguous,
+                "external_id_not_found": not_found_count,
+                "job_count": job_count,
+                "email_deliverability": deliverability_note,
+                "written_to": target,
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "duration_seconds": (completed_at - started_at).total_seconds(),
+                "run_by": getpass.getuser(),
+            })
+            summary["logged"] = True
+        except Exception as e:
+            # The real load and its writeback already succeeded above --
+            # a logging failure shouldn't take that result away, just
+            # surface itself rather than fail silently.
+            summary["logging_error"] = str(e)
+
+    return summary
 
 
 def _writeback_inplace(engine, schema, table, df, key_column,

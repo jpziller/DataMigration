@@ -26,7 +26,7 @@ summarizes.
 | 11 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` |
 | 12 | Parquet file import | **Built** | `import-parquet` |
 | 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 |
-| 14 | Load activity logging + analytics | Not built | — |
+| 14 | Load activity logging + analytics | Logging **Built** (opt-in); analytics not built | `enable-bulkops-logging`, `disable-bulkops-logging` |
 | 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — |
 | 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — |
@@ -39,6 +39,7 @@ summarizes.
 | 24 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #18 | — |
 | 25 | Web UI for less-technical users | Not built (future) | — |
 | 26 | SSO / multi-user access control | Not built, depends on #25 | — |
+| 27 | Open query in SSMS (stage + launch) | Not built, depends on #25 | — |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -562,25 +563,82 @@ exempt, an invalid value raises) — and confirmed live in the full
 `bulk_op()` pipeline that the check fires and raises before the function
 even attempts to read the SQL Server load table, let alone call the API.
 
-## 14. Load activity logging + analytics (not built)
+## 14. Load activity logging + analytics — logging BUILT (`bulkops.py`), analytics not built
 
 Problem: right now a `bulkops` run's outcome lives only in the console
 transcript and the load table's own `Id`/`Error` columns — there's no
 durable, queryable record of *what ran, when, and how it performed*
 across a whole project's worth of loads.
 
-Idea: a SQL Server log table capturing, per `bulkops` call: action
-(insert/update/upsert/delete), object, source table, record count,
-number of batches, average batch time, total job time, succeeded/failed/
-ambiguous counts, the Email Deliverability attestation (#13) if
-applicable, and start/end timestamps — everything `bulk_op()` already
-computes or could cheaply time, just not persisted anywhere today. Once
-this exists, build actual analytics on top of it (trends across
-sandbox/UAT/prod runs, which objects are slowest/most error-prone, batch-
-time regressions) rather than eyeballing scrollback each time — the
-"make sure we add some analytics for this data" part of the ask,
-deliberately scoped as a second step once the raw log exists, not
-speculatively built before there's real data to analyze.
+**Built, opt-in only, modeled directly on DBAmp's own logging behavior**:
+never on by default, and never a per-call flag either — an architect
+turns it on once per schema (`enable-bulkops-logging --schema <schema>`),
+which creates `<schema>.BulkOpsLog`. From then on, every `bulk_op()` call
+against that schema logs itself automatically: action
+(insert/update/upsert/delete), object, source table, record counts
+(submitted/succeeded/failed/ambiguous/external-id-not-found), job count
+(number of Bulk API 2.0 jobs the file was split into), the Email
+Deliverability attestation (#13) if applicable, start/end/duration, and
+the OS user who ran it. `disable-bulkops-logging` drops the table (and
+its history) for that schema.
+
+Two deliberate design choices, both directly requested:
+- **Per-schema, not per-database.** This framework only ever connects to
+  one physical database (`SF_Migration`, hard rule 1) but already uses
+  `--schema` to separate logical areas (source/staging/dbo, same concept
+  every other generated table in this framework already uses) — so
+  `source` and `staging` schemas can each independently have logging on
+  or off, matching the "source could have a logging table, staging could
+  have a logging table" ask without opening a second physical database
+  connection anywhere in the codebase.
+- **Presence-gated, not flag-gated.** Whether `<schema>.BulkOpsLog`
+  exists *is* the on/off switch — the same pattern `bulk_op()` already
+  uses for the `[Sort]` column and `key_column` writeback. A logging
+  failure never fails the underlying load (the real Salesforce operation
+  and its writeback have already completed by the time logging runs);
+  it's surfaced as `logging_error` in the result instead of silently
+  swallowed or allowed to undo a real result.
+
+Deliberately never logs `query_tool.py` reads — scoped strictly to
+`bulkops` writes (insert/update/upsert/delete), per the original ask.
+
+**Tested live end to end, real org**: 100 Mockaroo-generated mock Accounts
+(`generate-mock-data Account --count 100`) taken through the full standard
+workflow (profile → mapping doc → auto-map → describe-confirmed transform
+→ dupe-check) and inserted into a real target org with logging enabled.
+Found and fixed two real bugs along the way, neither specific to logging
+itself:
+1. `mock_data.py`'s generic `double` handling had no special case for
+   Geolocation subfields (`BillingLatitude`/`BillingLongitude` etc.) --
+   Mockaroo generated values like `603.39`, which Salesforce correctly
+   rejected with `NUMBER_OUTSIDE_VALID_RANGE` (real latitude range is -90
+   to 90) on all 100 rows the first time this ran. Fixed by mapping
+   fields whose name ends in `latitude`/`longitude` to Mockaroo's own
+   dedicated `Latitude`/`Longitude` generator types instead of the
+   generic precision/scale-based `Number` mapping.
+2. `bulkops.py`'s `_fingerprint()` crashed (`TypeError: sequence item ...
+   expected str instance, float found`) the first time a real failed-
+   records CSV came back with a blank cell in an echoed numeric column --
+   `_read_result_csv` reads everything as `dtype=str`, but a genuinely
+   empty cell still surfaces as a real NaN float that `.astype(str)`
+   alone didn't reliably stringify before the row-wise join. Fixed with
+   `.fillna("")` before `.astype(str)`.
+
+After both fixes, a clean re-run inserted 100 fresh mock rows: 95
+succeeded, 5 failed on a real, unrelated `DUPLICATE_VALUE` (Jigsaw/
+Data.com ID uniqueness) -- confirmed correctly written back into
+`Account_Load`'s `Id`/`Error` columns, and confirmed live in the org
+(`SELECT COUNT(Id) FROM Account WHERE MigrationID__c LIKE 'MOCKACCT-%'`
+returned 95). `dbo.BulkOpsLog` correctly captured one row for the run
+(100 submitted / 95 succeeded / 5 failed / 1 job / ~32s duration),
+confirming the opt-in logging path works against a real load, not just
+the enable/disable DDL path.
+
+**Not built**: the "build actual analytics on top of it" half (trends
+across sandbox/UAT/prod runs, which objects are slowest/most
+error-prone, batch-time regressions) — deliberately deferred as its own
+second step now that the raw log table exists to analyze, not
+speculatively built before there's real logged data to analyze.
 
 ## 15. Dynamic batch sizing from org metadata review (not built, likely builds on #5/#14)
 
@@ -873,6 +931,29 @@ broadens beyond a single trusted operator -- likely an expansion of #5
 (org metadata risk analyzer) rather than a new item, since it's the same
 "what could this touch that it shouldn't" question applied to access
 control instead of automation conflicts.
+
+## 27. Open query in SSMS (stage + launch) (not built, depends on #25)
+
+Raised directly: can this framework force SSMS open and hand it a query to
+run against the mirror DB, instead of only showing results in the console
+(#8) or a chat reply? Checked directly — **there is no SSMS command-line
+switch to auto-execute a query on open**; `Ssms.exe -S <server> -E
+<path.sql>` (or `-d <database>`, `-U`/`-P` for SQL auth) opens SSMS
+connected to the right server with a `.sql` file already loaded in a new
+query editor tab, but a human still has to hit F5 themselves. That's a
+real, if partial, capability — not nothing — but it only stages a query
+for review, it doesn't run it unattended.
+
+Given that ceiling, this fits better as a companion action to the SQL
+Server browser + query window already scoped under #25 (Web UI) than as
+its own standalone CLI verb: an "Open in SSMS" button next to a query
+result there would write the current query to a `.sql` file and shell out
+to `Ssms.exe` with the right connection args, giving a user who prefers
+SSMS's full editor/grid a one-click handoff from this framework's own
+query tool into it, without duplicating SSMS's own execution/results UI.
+Also keeps with this framework's "reviewed hands" model (`CLAUDE.md`) —
+staging a query for a human to knowingly execute in SSMS, rather than this
+framework executing it invisibly on their behalf.
 
 ---
 

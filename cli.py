@@ -162,6 +162,24 @@ def bulkops_retry_cmd(table, schema, error_column):
         click.echo(f"Review it, then resubmit: python cli.py bulkops <Object> <operation> {retry_table.split('.')[-1]} ...")
 
 
+@cli.command("enable-bulkops-logging")
+@click.option("--schema", default="dbo", help="Schema to enable logging for -- each schema is opted in independently.")
+def enable_bulkops_logging_cmd(schema):
+    _, _, engine = _ctx()
+    bo.enable_bulkops_logging(engine, schema=schema)
+    click.echo(f"Bulk load logging enabled for schema '{schema}' -- {schema}.BulkOpsLog created.")
+    click.echo("Every bulkops call against this schema will now log automatically; no per-call flag needed.")
+
+
+@cli.command("disable-bulkops-logging")
+@click.option("--schema", default="dbo", help="Schema to disable logging for.")
+def disable_bulkops_logging_cmd(schema):
+    _, _, engine = _ctx()
+    click.echo(f"This permanently drops {schema}.BulkOpsLog and all of its history.")
+    bo.disable_bulkops_logging(engine, schema=schema)
+    click.echo(f"Bulk load logging disabled for schema '{schema}'.")
+
+
 @cli.command("analyze-load-order")
 @click.argument("object_names", nargs=-1, required=True)
 @click.option("--schema", default="dbo")

@@ -50,6 +50,16 @@ def _mockaroo_field(field):
         return {"name": name, "type": "Boolean"}
     if sf_type == "int":
         return {"name": name, "type": "Number", "min": 0, "max": 1000, "decimals": 0}
+    if sf_type == "double" and name.lower().endswith("latitude"):
+        # Geolocation subfields (BillingLatitude etc.) are plain "double"
+        # fields in describe() with no semantic range of their own -- the
+        # generic precision/scale-based branch below would happily produce
+        # e.g. 603.39, which Salesforce rejects with NUMBER_OUTSIDE_VALID_RANGE
+        # since a real latitude must be between -90 and 90. Mockaroo's own
+        # "Latitude" type already respects that range.
+        return {"name": name, "type": "Latitude"}
+    if sf_type == "double" and name.lower().endswith("longitude"):
+        return {"name": name, "type": "Longitude"}
     if sf_type in ("double", "currency", "percent"):
         # Respect the field's real precision/scale -- e.g. a Latitude field
         # is often DECIMAL(18,15), leaving only 3 integer digits of headroom;

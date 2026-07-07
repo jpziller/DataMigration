@@ -121,6 +121,19 @@ venv may not be active in a fresh shell:
                 `_Result` table into a fresh `<table>_Retry` table. Does not call Salesforce itself;
                 resubmit the new table via a normal, separately-confirmed `bulkops` call once you've
                 looked at why those rows failed.)
+- Bulk load activity logging (opt-in, per schema — off by default, never
+                automatic; modeled on DBAmp's own logging):
+                `.venv/Scripts/python.exe cli.py enable-bulkops-logging --schema dbo`
+                (creates `<schema>.BulkOpsLog`. From then on, every `bulkops` call
+                against that schema logs itself automatically — action, object,
+                source table, record counts, job count, the Email Deliverability
+                attestation, start/end/duration, OS user. No per-call flag needed;
+                presence of the table is the on/off switch, same pattern as the
+                `[Sort]` column and `key_column` writeback. Never logs `query` reads.
+                Each schema (source/staging/dbo/etc.) opts in independently.)
+                `.venv/Scripts/python.exe cli.py disable-bulkops-logging --schema dbo`
+                (drops `<schema>.BulkOpsLog` — permanently discards that schema's
+                log history, so confirm before running.)
 - Org risk check: `.venv/Scripts/python.exe cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx`
                 (object-level automation inventory before a load — active validation rules, Apex
                 triggers, record-triggered Flows, legacy workflow rules, approval processes, via
@@ -276,6 +289,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   - `<LoadTable>_Result`, `<LoadTable>_Retry` — `bulkops`/`bulkops-retry`
     writeback and retry tables (only when the load table has no
     `key_column` for in-place writeback, or a retry was built).
+  - `<schema>.BulkOpsLog` — **opt-in only, never created automatically.**
+    `enable-bulkops-logging --schema <schema>` creates it; from then on
+    every `bulkops` call against that schema logs itself (action, object,
+    source table, record counts, job count, Email Deliverability
+    attestation, start/end/duration, OS user). `disable-bulkops-logging`
+    drops it and its history.
 - `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
   `SOQL_QUERY_LIBRARY.md` (Tooling API queries), `SECURITY_OVERVIEW.md`
   (credential inventory, trust boundaries, what's code-enforced vs.
