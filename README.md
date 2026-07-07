@@ -473,6 +473,32 @@ Next-level guardrail (not shipped): a `PreToolUse` hook in `.claude/settings.jso
 that vetoes `bulkops` against a production org alias, or any `DROP`/`TRUNCATE`
 against a non-`SF_Migration` database.
 
+**Scheduled wakeups for long-running jobs.** Standard Claude Code capability,
+not anything built into this framework — worth knowing about specifically
+because Data Cloud work (`data-cloud-status`, `ROADMAP.md` #18/#20) involves
+genuinely async jobs (Calculated Insight processing, Identity Resolution
+runs, DSO/Data Stream refreshes) that take real time to finish. Rather than
+sitting idle mid-conversation, Claude Code can schedule itself to wake up
+after a delay (seconds up to an hour) and re-run a check — e.g. "poll
+`data-cloud-status identity-resolution` every couple of minutes until
+`LastRunStatus` leaves `IN_PROGRESS`, then report the final result." Just
+ask directly ("keep checking until it's done," "check back in 5 minutes").
+Scoped to the current session only — it doesn't persist once the session
+ends, and it's not email/SMS/push notification (Claude Code has no built-in
+way to text or email you; a Gmail/Calendar integration can be authenticated
+separately if that's wanted, but that's a distinct capability from this).
+
+**Optional Gmail/Calendar/Drive integration.** Separately from the above,
+Claude Code can connect to a real Gmail/Google Calendar/Google Drive
+account via an authenticated MCP connector — not set up for this project,
+and not required for anything this framework does, but worth knowing it
+exists: an architect could authenticate their own (or a project) account
+and have Claude Code read/send email, check a calendar, or pull files from
+Drive as part of a session, e.g. a real notification when a long Data Cloud
+job finishes rather than only in-session polling. Nothing here does this
+today — it's a capability to reach for later if a real need shows up, not
+a recommendation to wire it in now.
+
 ## Untested paths to verify on first run
 
 1. `sf org auth show-access-token --json` result shape (cli auth mode).
