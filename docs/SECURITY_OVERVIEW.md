@@ -37,7 +37,8 @@ SQL Server "SF_Migration"        Salesforce org (via simple-salesforce /
 (local integration hub)           Bulk API 2.0 REST endpoints)
 ```
 
-Two optional external services, neither in the critical data path by default:
+Three optional external services/hops, none in the critical data path by
+default:
 
 - **Mockaroo API** (`generate-mock-data`) -- outbound HTTPS call with a field
   *schema* (names/types), never real record data. Returns synthetic rows.
@@ -48,13 +49,20 @@ Two optional external services, neither in the critical data path by default:
   team pins/vendors it first -- treat that supply-chain detail as a real
   review item if this is adopted, same as any `npx`-fetched tool. Configured
   read-only (`--readonly`) and intended to be run with a read-only SQL login.
+- **Data Cloud tenant hop** (optional, only for querying Data Cloud/D360
+  objects beyond basic SOQL -- see `ROADMAP.md` #18) -- an additional OAuth
+  exchange off an already-valid core-org session, to a genuinely separate
+  host (`*.c360a.salesforce.com`). Not wired into any `cli.py` command yet
+  (verified via an ad hoc script only); real integration would extend the
+  same Salesforce leg of the diagram above, not add a new top-level actor.
 
 ## 3. Credential inventory
 
 | Credential | Where it lives | How it's obtained | Notes |
 |---|---|---|---|
 | Salesforce session (default `cli` auth mode) | In-process memory only, for the process lifetime | `sf org auth show-access-token` (delegates to the Salesforce CLI's own token storage) | Never written to `.env`, never logged. The May 2026 CLI security update redacts it from `sf org display`, which is why `sf_client.py` calls the dedicated token command instead. |
-| Salesforce JWT cert / connected-app key | `server.key` on disk (path set in `.env`) | Provisioned once by whoever sets up the connected app | `.gitignore`'d; never read or printed by this framework outside the auth call itself. |
+| Salesforce JWT cert / connected-app key | `server.key` on disk (path set in `.env`) | Provisioned once by whoever sets up the connected app (an **External Client App** as of Spring '26 — legacy Connected App creation is disabled; see `ROADMAP.md` #18) | `.gitignore`'d (`server.crt`, the public half, is also gitignored — org/app-specific generated material, not template content); never read or printed by this framework outside the auth call itself. |
+| Data Cloud tenant token (optional, only if querying Data Cloud/D360 objects beyond basic SOQL) | In-process memory only, for the duration of a single script/session | A second OAuth hop off an already-valid core-org session (`POST {instance}/services/a360/token`, `grant_type=urn:salesforce:grant-type:external:cdp`) — see `ROADMAP.md` #18 | Not yet wired into any `cli.py` command (ad hoc script only, as of this writing); a genuinely separate host (`*.c360a.salesforce.com`) and access token from the core org's, so treat it as its own credential, not an extension of the core session. |
 | Salesforce username/password/security token (`password` mode) | `.env` | Manually configured | Documented as the "dev fallback only" mode in `README.md` -- weakest of the three, avoid in any shared/production environment. |
 | SQL Server credentials | `.env` (`SQL_UID`/`SQL_PWD`), or none at all if `SQL_TRUSTED_CONNECTION=yes` (Windows auth, the default) | Manually configured | Windows/trusted auth is the default and avoids a stored SQL password entirely. |
 | Mockaroo API key | `.env` | Manually configured | Only ever sent to Mockaroo's API; scoped to mock-data generation. |

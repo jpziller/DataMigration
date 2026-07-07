@@ -227,6 +227,15 @@ keeping it in git per-object as you build it out.)
   on your installed CLI (`sf_client.py` handles both known shapes).
 - **`jwt`** — connected-app JWT bearer flow. The right choice for CI or an
   unattended migration runner. Needs a connected app + cert (`server.key`).
+  **As of Spring '26, Salesforce disabled creating new legacy Connected
+  Apps** (confirmed live, not assumed — this framework's own JWT setup was
+  tested against a Summer '26 org) — use an **External Client App**
+  instead (Setup → External Client App Manager), with OAuth + JWT Bearer
+  Flow enabled, the certificate uploaded, and (non-obviously) the
+  `refresh_token` scope added even though JWT bearer flow doesn't use one
+  — Salesforce's login endpoint rejects the JWT assertion without it
+  regardless. See `ROADMAP.md` #18 for the full tested walkthrough,
+  including the Data-Cloud-specific `cdp_*` scopes if you need those too.
 - **`password`** — username + password + security token. Dev fallback only.
 
 ---

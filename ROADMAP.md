@@ -30,7 +30,7 @@ summarizes.
 | 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — | Idea: automatically use a smaller batch size for heavily-automated objects (lots of triggers/Flows) instead of a human having to already know that and set it manually. |
 | 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — | Idea: a living record of every step (manual and scripted) taken during a real migration cutover — who did what, when, what errors came up. Waiting on a real example template before this gets designed. |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
-| 18 | Data Cloud (D360) query support | Not built — API surface researched, live verification blocked (no Data Cloud org available) | — | Idea: let this framework query Data Cloud objects (DLOs/DMOs), not just standard CRM objects. Blocked on having an actual Data Cloud-licensed org to test against, not on more reading. |
+| 18 | Data Cloud (D360) query support | Both core findings **confirmed live** (basic DLO/DMO querying, and the separate Data Cloud tenant token exchange for complex queries); not yet wired into `query_tool.py` as a real feature | `describe`, `query` (basic lookups, no new code); ad hoc token-exchange script (complex queries, not yet a CLI verb) | Query Data Cloud objects (DLOs/DMOs), not just standard CRM objects. Basic lookups already just work with the commands you already know. Complex cross-object Data Cloud SQL queries need a separate authentication hop (a Data Cloud tenant token) — now proven working end to end against a real org (`D360_PLAYGROUND`), just not yet built into a real CLI command. |
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
 | 20 | DSO refresh/error monitoring | Not built — needs API research | — | Idea: check whether a Data Cloud DSO (the raw ingested layer) last refreshed successfully before trusting the data in it, instead of silently working off stale data. |
 | 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — | Idea: read (and maybe suggest) how a DSO's fields map into a DLO — the Data Cloud version of what `auto-map` (#10) already does for CRM field mapping. |
@@ -844,7 +844,7 @@ against hand-rolled T-SQL matching before building more of the latter —
 `rapidfuzz` specifically for a fast Levenshtein-family option if T-SQL's
 `JaroWinklerDistance` turns out too slow at scale.
 
-## 18. Data Cloud (D360) query support (not built — API surface researched, live verification blocked)
+## 18. Data Cloud (D360) query support (not built as a framework feature yet — both core findings now CONFIRMED LIVE)
 
 `query_tool.py` is explicitly scoped to CRM objects via the standard REST
 Query API today (see its own docstring) — Data Cloud objects (DLOs, DMOs,
@@ -854,48 +854,91 @@ pass) call the product **Data 360** now, not Data Cloud — same platform,
 newer name; both terms are used interchangeably in this section since
 that's what the docs themselves currently do.
 
-**Hard blocker found before any code could be written**: the org this
-framework is connected to has **zero Data Cloud objects provisioned** --
-`sf.describe()` returns no `__dlo`/`__dlm` objects at all. Every finding
-below is verified against current `developer.salesforce.com` docs, not
-against a live call — nothing here has actually been executed. Building
-or testing real integration code needs a Data Cloud-licensed org to point
-at; this item is blocked on that, not on further reading.
+**Original hard blocker, now resolved**: the org this framework was
+connected to at the time had **zero Data Cloud objects provisioned** --
+`sf.describe()` returned no `__dlo`/`__dlm` objects at all, so every
+finding below was originally verified only against current
+`developer.salesforce.com` docs, not a live call. A Data Cloud-licensed
+Trailhead Playground org (with Agentforce also enabled) is now connected
+(alias `D360_PLAYGROUND`) and does have at least one real DMO
+provisioned — unblocking live verification of both findings #1 and #2
+below.
 
 **Research finding: this splits into (at least) two genuinely different
 API surfaces, not one** — the same lesson `risk_analyzer.py`'s build
 already taught (guessing which endpoint a metadata type needs fails
 silently or errors outright, never partially works):
 
-1. **Basic DLO/DMO querying is plain SOQL, no separate auth.** DLOs
-   (`__dlo` suffix) and DMOs (`__dlm` suffix; fields use the ordinary
-   `__c` suffix) are queryable through the *same* core-org REST endpoint
-   and access token `query_tool.py` already uses (`sf.query()`) — confirmed
-   via Salesforce's own REST API Developer Guide, e.g.:
-   ```sql
-   SELECT PartyId__c FROM ContactPointEmail__dlm WHERE EmailAddress__c='jjones@email.com' LIMIT 100
+1. **Basic DLO/DMO querying is plain SOQL, no separate auth — CONFIRMED
+   LIVE.** DLOs (`__dlo` suffix) and DMOs (`__dlm` suffix; fields use the
+   ordinary `__c` suffix) are queryable through the *same* core-org REST
+   endpoint and access token `query_tool.py` already uses (`sf.query()`).
+   Originally confirmed only via Salesforce's own REST API Developer
+   Guide (e.g. `SELECT PartyId__c FROM ContactPointEmail__dlm WHERE
+   EmailAddress__c='jjones@email.com' LIMIT 100`); now verified against a
+   real org (`D360_PLAYGROUND`) using this framework's own existing
+   `describe`/`query` commands, completely unmodified — no new code was
+   even needed to prove this:
    ```
-   If this holds up against a real Data Cloud org, extending
-   `query_tool.py` for basic DLO/DMO lookups could be a small addition —
-   possibly just documentation plus a naming-convention note, not new
-   auth plumbing. This is the cheapest, highest-confidence piece to build
-   first once a test org exists.
+   python cli.py describe StaticCurrencyRates_Home__dlm
+   python cli.py query "SELECT Id, FromISOCurrencyCode__c, ToISOCurrencyCode__c, RateNumeratorNumber__c FROM StaticCurrencyRates_Home__dlm LIMIT 5"
+   ```
+   Both worked exactly like any standard CRM object — `describe()` listed
+   the DMO's real fields, and the query returned real rows (one static
+   USD→USD rate row, `RateNumeratorNumber__c`/`RateDenominatorNumber__c`
+   both `1.0`). This means basic DLO/DMO querying is **not gated on
+   building anything new** — extending `query_tool.py`'s own docstring to
+   stop saying Data Cloud objects "aren't supported yet" (it already
+   works, today, for basic lookups) is now just a documentation update,
+   not new auth plumbing or new code.
 
 2. **Complex cross-object queries (joins/aggregations/window functions
    spanning DLO+DMO+Calculated Insights together) need a separate Data
-   Cloud tenant** — a genuinely different instance URL and access token,
-   not the core org's. Token exchange: `POST
+   Cloud tenant, CONFIRMED LIVE** — a genuinely different instance URL
+   and access token, not the core org's. Token exchange: `POST
    {core-org-instance-url}/services/a360/token` with `grant_type=urn:
    salesforce:grant-type:external:cdp` and the core org's own access
    token as `subject_token` (`subject_token_type=urn:ietf:params:oauth:
-   token-type:access_token`), returning `DATA_CLOUD_ACCESS_TOKEN` +
-   `DATA_CLOUD_INSTANCE_URL`. Queries then go to that tenant's own
-   `/api/v3/query` (or the older Connect REST API's `/services/data/
-   v64.0/ssot/query-sql`) with a SQL string in the body, following an
-   async job pattern: submit → poll status → fetch rows/chunks → cancel
-   if needed. This is a materially bigger lift than CRM's Bulk API 2.0
-   pattern this framework already handles, since it's a whole second
-   authentication hop layered on top of the first.
+   token-type:access_token`), returning `access_token` + `instance_url`
+   for the Data Cloud tenant (a genuinely different host, e.g.
+   `<tenant-id>.c360a.salesforce.com`, not the core org's domain at all).
+   Queries then go to that tenant's own **`/api/v2/query`** — not `/api/
+   v3/query` as originally guessed from docs alone, a real correction
+   from live testing — as a POST with `{"sql": "<ANSI SQL string>"}` in
+   the body. Verified end to end against `D360_PLAYGROUND`: queried
+   `StaticCurrencyRates_Home__dlm` through this exact path and got back
+   real rows (`[["USD","USD","1.000000000000000000"]]`) plus a
+   `metadata` dict describing each column's real type (`VARCHAR`,
+   `DECIMAL`) by position — a proprietary array-of-arrays response shape,
+   **not** SOQL's list-of-dicts, so any real integration needs to zip
+   `data` against `metadata`'s column order to get usable field names.
+   This confirms the harder half of Data Cloud querying works too, not
+   just basic SOQL lookups (finding #1) — both tiers of the architecture
+   this research originally described are now proven, not theoretical.
+
+   **What it actually took to get here, since none of it was obvious**:
+   the `sf` CLI's own default connected app has no Data Cloud OAuth
+   scopes, so the core-org token it produces can't do this exchange at
+   all (`invalid_scope: the requested scope is not allowed`) regardless
+   of the user's own Data Cloud permissions — this is an app-scope
+   problem, not a permissions problem. Fixed by creating a dedicated
+   **External Client App** (Salesforce disabled creating new *legacy*
+   Connected Apps starting Spring '26 — confirmed live via web search,
+   not assumed from training data, since this org runs a
+   post-training-cutoff release) with OAuth + JWT Bearer Flow enabled,
+   the generated certificate uploaded, and `api` + `refresh_token` +
+   `cdp_query_api` (plus other `cdp_*` scopes for future testing)
+   selected. Two non-obvious gotchas hit live, both worth remembering:
+   - The Policies tab's "assign a permission set" picker only offered
+     locally-created permission sets — a managed/license-bundled one
+     (`GenieAdmin - Data Cloud Architect`, already on this user) never
+     showed up as assignable. Fixed with a fresh, empty custom
+     permission set created just to carry this app's assignment.
+   - Even though JWT bearer flow doesn't literally use a refresh token,
+     Salesforce's login endpoint still rejected the JWT assertion with
+     `refresh_token scope is required...` until that scope was added to
+     the app anyway — a real, slightly surprising requirement, not a
+     misconfiguration on our end.
 3. **Calculated Insights** have their own dedicated endpoint (`GET
    /api/v1/insight/calculated-insights/{ci-name}`) supporting SQL-style
    dimensions/measures/filters and pagination (limit/offset/order by,
@@ -922,10 +965,14 @@ from training knowledge): [Query API Reference](https://developer.salesforce.com
 [Data Cloud object suffixes](https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_concepts_data_cloud_objects.htm),
 [Data Graphs API](https://developer.salesforce.com/docs/data/data-cloud-query-guide/references/data-cloud-query-api-reference/c360a-api-data-graphs-overview.html).
 
-**Next step, once a Data Cloud-provisioned org is available**: verify
-finding #1 live first (lowest cost, highest confidence) before touching
-the token-exchange path at all — same incremental, verify-before-build
-approach every other tool in this framework has followed.
+**Next step**: findings #1 and #2 are both verified now — remaining
+unverified findings are #3 (Calculated Insights API), #4 (Unified
+Profile API), and #5 (Data Graphs), each its own distinct endpoint. Test
+those next against `D360_PLAYGROUND`, one at a time, same incremental
+approach — and only then turn any of this into real `query_tool.py` code
+(right now every finding above was proven using this framework's
+existing, unmodified commands plus one ad hoc script for the tenant
+token exchange, not new production code).
 
 ## 19. Data Cloud semantic model reference (not built, depends on #18)
 

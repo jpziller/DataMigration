@@ -5,9 +5,14 @@ sf.query_all), not Bulk API -- this is for quick lookups and troubleshooting
 (the Salesforce Inspector Reloaded / Workbench / DBAmp-query use case), not
 large extracts (use `replicate` for that).
 
-Data Cloud (D360) objects use a genuinely different query surface -- Data
-Model Objects via the Data Cloud Query API, not standard SOQL against
-sf.query() -- and aren't supported here yet.
+Basic Data Cloud (D360) object lookups already work here too -- DLOs
+(`__dlo`)/DMOs (`__dlm`) are queryable through this exact same sf.query()
+call, confirmed live against a real Data Cloud-provisioned org (see
+ROADMAP.md #18). What's NOT supported here yet is complex cross-object
+Data Cloud querying (joins/aggregations spanning DLO+DMO+Calculated
+Insights together) -- that needs a separate Data Cloud tenant token
+exchange and a different query endpoint entirely, still unverified (see
+ROADMAP.md #18's finding #2).
 """
 import csv as csv_module
 
