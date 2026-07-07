@@ -43,6 +43,12 @@ summarizes.
 | 28 | Pluggable integration-hub backend (e.g. MongoDB alongside SQL Server) | Not built, deliberately deferred — prototyping is SQL-Server-only for now | — |
 | 29 | Shared/VM-hosted SQL Server for multi-user access | Not built, deliberately deferred — prototyping is single-user/local for now | — |
 | 30 | Additional migration source connectors (Snowflake, MongoDB, etc.) | Not built, deliberately deferred | — |
+| 31 | Target-count/scaled mock data generation | Not built, builds on #6 | — |
+| 32 | Bulk test-data cleanup by filter | Not built, builds on #6/#11 | — |
+| 33 | Scratch org lifecycle + auto-seeded test data | Not built, deliberately deferred | — |
+| 34 | Relationship-consistent subset replication | Not built, builds on #2 | — |
+| 35 | Relative date shifting utility | Not built | — |
+| 36 | RecordType DeveloperName resolution for cross-org migration | Not built | — |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -396,6 +402,30 @@ key, no rate limit, works fully offline — for whenever Mockaroo's
 theoretical one. Not pursued now since Snowfakery already provides Faker-
 backed generation with relationships, which is the harder problem this
 item actually needed solved.
+
+**Reviewed CumulusCI's own data tooling directly**
+(cumulusci.readthedocs.io/en/stable/data.html) to check for anything
+worth adding here — CumulusCI is Snowfakery's own origin project, so
+worth a direct look, not assumed irrelevant. Its `extract_dataset`/
+`load_dataset`/mapping-YAML system solves a similar-sounding problem
+(org-to-org data movement, upsert keys, cycle-aware lookups via an
+`after` directive) but is a genuinely different architecture — YAML-
+driven mapping steps with SQL as a mostly-opaque intermediate, not this
+framework's foundational "T-SQL transforms are the reviewable source of
+truth" identity (`CLAUDE.md`). Adopting it wholesale would be the same
+kind of "second parallel mode" question already flagged for a different
+backend in #28, not an incremental improvement — not pursued for that
+reason. Two narrower ideas worth keeping on the radar without adopting
+the whole system are scoped as their own items: target-count-driven
+generation (#31, mirroring CumulusCI's `generate_and_load_from_yaml`)
+and WHERE-clause bulk test-data cleanup (#32, mirroring `delete_data`).
+CumulusCI has no Data Cloud/DSO-specific capability at all, so it doesn't
+change anything about #22's local DSO ingestion gap — Snowfakery itself
+(already built here, independent of CumulusCI) remains the natural
+mock-data source once that item's API research unblocks. Scratch-org
+lifecycle (CumulusCI's `dev_org`/`qa_org` flows auto-loading sample data)
+is scoped separately as #33, since it's a new capability area for this
+framework, not an extension of mock-data generation itself.
 
 ## 7. Data profiling toolset — BUILT (`profiling.py`)
 
@@ -954,6 +984,15 @@ system. Needs research into Data Cloud's actual ingestion API for local/
 manual uploads (as opposed to a configured Data Stream from a real
 connector) before scoping further.
 
+Both mock-data backends (#6) are natural sources for this once the
+ingestion API question is answered — `generate-mock-data` for a single
+DSO-shaped table, `generate-related-mock-data` (Snowfakery, also #6) for
+relationship-aware multi-object DSO test data — neither is CumulusCI-
+dependent (CumulusCI itself has no Data Cloud/DSO capability at all,
+confirmed directly reviewing its data docs), so nothing here changes; the
+blocker is still purely the ingestion API research, not the mock-data
+side.
+
 ## 23. Data Kit / Bundle documentation (not built, depends on #18/#19)
 
 Idea: surface what's in a Data Cloud Data Kit/Bundle that's actually
@@ -1162,6 +1201,163 @@ with the door left open for others as real engagements call for them.
 **Deliberately deferred** — prototyping today only needs the org and
 flat-file paths already built. Revisit once a real source system other
 than Salesforce or a flat file actually needs migrating from.
+
+## 31. Target-count/scaled mock data generation (not built, builds on #6)
+
+Problem: `generate-mock-data`/`generate-related-mock-data` (#6) always
+generate a fixed count specified per run — there's no way to say "keep
+generating mock Accounts until the org has 50,000 total" for realistic
+bulk-load volume/performance testing (exercising `bulkops`' batching
+behavior, making dynamic batch sizing (#15) meaningful to actually tune
+against, or stress-testing a target sandbox before a real cutover).
+
+Surfaced reviewing CumulusCI's `generate_and_load_from_yaml` task
+directly (cumulusci.readthedocs.io/en/stable/data.html) — it wraps
+exactly this: Snowfakery's own `target_number`/`--run-until-records-in-
+org` scaling, confirmed directly in Snowfakery's own Python API
+(`generate_data(..., target_number=(20, "Employee"), ...)`, already
+referenced when building #6's Snowfakery backend) — it re-runs a recipe
+as many times as needed to reach a target count for a named object, not
+just a hardcoded loop count.
+
+Idea: extend `build_recipe`/`run_recipe` in `snowfakery_data.py` to
+optionally accept a target total (e.g. `--target Account=50000` instead
+of/alongside `--count`), passing Snowfakery's own `target_number` through
+rather than reinventing repeat-until-count logic. Low implementation
+cost — Snowfakery already does the heavy lifting; the work here is
+CLI/recipe plumbing, not a new generation engine.
+
+## 32. Bulk test-data cleanup by filter (not built, builds on #6/#11)
+
+Problem: repeated migration-testing cycles (generate mock data → `bulkops`
+insert → validate → reset → repeat) currently need a load table with a
+key column to drive `bulkops <Object> delete`; there's no quick way to
+purge previously-inserted test/mock records by a WHERE-clause-style
+filter (e.g. "delete every Account where `MigrationID__c` LIKE
+'MOCKACCT-%'") without first building a delete load table from a query.
+
+Surfaced reviewing CumulusCI's `delete_data` task, which does exactly
+this: object + WHERE-clause bulk delete, with row-error tolerance and an
+optional hard-delete permission set for a full purge bypassing the
+Recycle Bin.
+
+Idea: a `bulkops <Object> delete --where "<SOQL WHERE clause>"` mode —
+resolve matching Ids via a SOQL query first (the same pattern this
+framework's own `_resolve_external_ids_to_sf_id` already established for
+delete-by-external-id in #11), then run the existing delete path against
+the resolved Ids. Mainly a test/demo-data hygiene convenience, not a
+real-migration-load feature — most useful paired with #6's mock data
+commands for cleaning up between test runs.
+
+## 33. Scratch org lifecycle + auto-seeded test data (not built, deliberately deferred)
+
+Raised directly: should this framework take on any scratch-org-related
+functionality, the way CumulusCI does (`dev_org`/`qa_org` flows that
+auto-load sample datasets into freshly created scratch orgs via
+`capture_sample_data`/`load_sample_data`)?
+
+This framework currently assumes an org already exists and is authed
+(`sf org login web`) — it has no concept of creating, deleting, or
+refreshing a scratch org itself, which is a genuinely different
+capability area, not an incremental extension of anything built so far.
+
+Idea, not yet scoped in detail: wrap `sf org create scratch`/`sf org
+delete` for a "spin up a clean, disposable test org on demand" workflow,
+then auto-load mock data (built via this framework's own
+`generate-mock-data`/`generate-related-mock-data`, #6) into it via a
+lightweight `bulkops` call — built entirely on this framework's own
+tooling, not a CumulusCI dependency. Scratch orgs are lower-risk than a
+real sandbox (ephemeral, Dev Hub-scoped, easy to throw away), but hard
+rules 2 and 9 (org/auth confirmation, Email Deliverability attestation)
+still apply the moment `bulkops` touches one — a scratch org is still a
+real org from the API's point of view, not a special case.
+
+**Deliberately deferred** — this is a new capability surface (org
+lifecycle management), not something to bolt onto the existing
+single-org-assumed model without dedicated scoping. Revisit if/when
+disposable, pre-seeded test orgs become a real recurring need rather
+than a nice-to-have.
+
+## 34. Relationship-consistent subset replication (not built, builds on #2)
+
+Problem: `replicate` pulls each object independently (optionally
+filtered by `--where`), with no way to say "pull a representative slice
+of Account and only the Contacts/Opportunities/Cases that actually
+belong to that slice." A scoped or phased migration rehearsal (e.g.
+"migrate the first 50 pilot Accounts and everything genuinely related to
+them") currently requires hand-writing consistent `--where` clauses
+across every object, with real risk of an orphaned child row if the
+filters don't line up exactly.
+
+Surfaced reviewing CumulusCI's `capture_sample_data`/
+`generate_dataset_mapping` heuristics, which do exactly this for
+scratch-org seeding — pick a representative subset while preserving
+relationship integrity across objects.
+
+Idea, and arguably the most broadly useful thing surfaced by this
+review — not just a testing convenience, genuinely useful for real
+phased/pilot migrations: reuse this framework's own
+`load_order.build_dependency_edges`/`compute_load_order` (the exact same
+dependency graph `analyze-load-order` and `snowfakery_data.py` already
+reuse) to replicate a root object's subset first (by `--where` or a
+row-count cap), then automatically constrain every child object's
+`replicate` call to `WHERE <ParentLookupField> IN (<the root subset's
+real Ids>)` — one command producing a genuinely consistent,
+relationship-intact subset across the whole object graph, instead of
+manually-coordinated per-object `--where` clauses that are easy to get
+subtly wrong.
+
+## 35. Relative date shifting utility (not built)
+
+Problem: migrated historical data can carry dates that were meaningful
+relative to *when* they were created in the source system, but become
+stale or nonsensical relative to a new go-live date in the target — an
+`Opportunity.CloseDate` from years ago, or a trial/contract end date
+that's already passed, can trip validation rules/Flows in the target org
+that assume forward-looking dates, or simply misrepresent the data's
+real-world timing once migrated.
+
+Surfaced reviewing CumulusCI's `anchor_date` concept — it keeps relative
+date spacing constant in *test* recipes regardless of when they're run.
+The pattern worth borrowing here is the same idea applied to *real*
+migrated data, not test data.
+
+Idea: a reusable T-SQL function (fits the existing utility-belt pattern
+in `sql/functions/`, alongside `AddBulkLoadSortColumn.sql`) that shifts a
+batch of date/datetime columns by a computed offset relative to a chosen
+anchor date — e.g. "shift every date in this load table so the latest
+`CreatedDate` becomes today, preserving every other date's relative
+spacing to it." An opt-in transform-time utility, not automatic — a data
+architect decides per-object/per-field whether relative-date
+preservation is actually the right call for that migration, since some
+fields genuinely should stay historically accurate.
+
+## 36. RecordType DeveloperName resolution for cross-org migration (not built)
+
+Problem: a `RecordTypeId` column carried over from a source system (or a
+different org entirely) almost never matches the *target* org's real
+RecordType Ids — RecordType Ids are org-specific and not portable, unlike
+(say) a picklist API name. Migrating a `RecordTypeId` value today means
+either hand-building a per-migration Id-mapping table in T-SQL, or —
+more commonly — it silently gets dropped or wrong without a data
+architect specifically catching it. A common, easy real-migration
+mistake, not a hypothetical one.
+
+Surfaced reviewing CumulusCI's data-mapping docs — it resolves this
+automatically by `DeveloperName` whenever `RecordTypeId` is in its
+mapping. A well-established migration pattern in general, just not yet
+built here.
+
+Idea, likely the single most broadly applicable thing surfaced by this
+review, real-migration-relevant rather than a testing convenience: a
+helper (a `resolve-record-types`-style CLI verb, or a pre-flight-check-
+adjacent step) that queries the target org's real `RecordType` object
+(`SELECT Id, DeveloperName, SobjectType FROM RecordType`) and lets a
+transform/mapping doc reference a RecordType by its `DeveloperName` (a
+real, portable identifier) instead of a raw Id — resolved to the correct
+target Id at load time, the same "resolve to a real Id via a query
+first" pattern `_resolve_external_ids_to_sf_id` already established for
+delete-by-external-id (#11).
 
 ---
 
