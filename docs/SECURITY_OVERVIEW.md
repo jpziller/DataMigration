@@ -51,15 +51,15 @@ default:
   read-only (`--readonly`) and intended to be run with a read-only SQL login.
 - **Data Cloud tenant hop** (`data_cloud.py`; `data-cloud-query`,
   `list-calculated-insights`, `query-calculated-insight`,
-  `data-cloud-profile` -- see `ROADMAP.md` #18) -- an additional OAuth
-  exchange off an already-valid core-org session, to a genuinely
-  separate host (`*.c360a.salesforce.com`). Only reached when those
-  specific commands are used; extends the same Salesforce leg of the
-  diagram above rather than adding a new top-level actor. The five
+  `data-cloud-profile`, `list-data-graphs` -- see `ROADMAP.md` #18) --
+  an additional OAuth exchange off an already-valid core-org session, to
+  a genuinely separate host (`*.c360a.salesforce.com`). Only reached when
+  those specific commands are used; extends the same Salesforce leg of
+  the diagram above rather than adding a new top-level actor. The six
   `data-cloud-status` checks (Calculated Insight/Data Stream/DSO/
-  Identity Resolution/Data Transform) do **not** use this hop at all --
-  confirmed live, they're plain core-org SOQL like everything else in
-  this list.
+  Identity Resolution/Data Transform/Data Graph) do **not** use this hop
+  at all -- confirmed live, they're plain core-org SOQL like everything
+  else in this list.
 
 ## 3. Credential inventory
 
@@ -67,7 +67,7 @@ default:
 |---|---|---|---|
 | Salesforce session (default `cli` auth mode) | In-process memory only, for the process lifetime | `sf org auth show-access-token` (delegates to the Salesforce CLI's own token storage) | Never written to `.env`, never logged. The May 2026 CLI security update redacts it from `sf org display`, which is why `sf_client.py` calls the dedicated token command instead. |
 | Salesforce JWT cert / connected-app key | `server.key` on disk (path set in `.env`) | Provisioned once by whoever sets up the connected app (an **External Client App** as of Spring '26 — legacy Connected App creation is disabled; see `ROADMAP.md` #18) | `.gitignore`'d (`server.crt`, the public half, is also gitignored — org/app-specific generated material, not template content); never read or printed by this framework outside the auth call itself. |
-| Data Cloud tenant token (`data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-profile` — `data-cloud-status`'s five checks don't need it, plain core-org SOQL) | In-process memory only, for the duration of a single CLI invocation | A second OAuth hop off an already-valid core-org session (`POST {instance}/services/a360/token`, `grant_type=urn:salesforce:grant-type:external:cdp`) — see `ROADMAP.md` #18 | `data_cloud.py`; a genuinely separate host (`*.c360a.salesforce.com`) and access token from the core org's, so treat it as its own credential, not an extension of the core session. |
+| Data Cloud tenant token (`data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-profile`, `list-data-graphs` — `data-cloud-status`'s six checks don't need it, plain core-org SOQL) | In-process memory only, for the duration of a single CLI invocation | A second OAuth hop off an already-valid core-org session (`POST {instance}/services/a360/token`, `grant_type=urn:salesforce:grant-type:external:cdp`) — see `ROADMAP.md` #18 | `data_cloud.py`; a genuinely separate host (`*.c360a.salesforce.com`) and access token from the core org's, so treat it as its own credential, not an extension of the core session. |
 | Salesforce username/password/security token (`password` mode) | `.env` | Manually configured | Documented as the "dev fallback only" mode in `README.md` -- weakest of the three, avoid in any shared/production environment. |
 | SQL Server credentials | `.env` (`SQL_UID`/`SQL_PWD`), or none at all if `SQL_TRUSTED_CONNECTION=yes` (Windows auth, the default) | Manually configured | Windows/trusted auth is the default and avoids a stored SQL password entirely. |
 | Mockaroo API key | `.env` | Manually configured | Only ever sent to Mockaroo's API; scoped to mock-data generation. |

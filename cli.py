@@ -280,23 +280,13 @@ def export_profile_excel_cmd(output_path, schema, object_or_table, source_type):
 def query_cmd(soql, fetch_all, csv_path, excel_path, max_print_rows):
     _, sf, _e = _ctx()
     records, total_size, truncated = qt.run_query(sf, soql, fetch_all=fetch_all)
-
-    if csv_path:
-        qt.to_csv(records, csv_path)
-        click.echo(f"Wrote {len(records)} row(s) to {csv_path}")
-    elif excel_path:
-        qt.to_excel(records, excel_path)
-        click.echo(f"Wrote {len(records)} row(s) to {excel_path}")
-    elif records:
-        _print_table(pd.DataFrame(records), max_rows=max_print_rows)
-
-    click.echo(f"\n{len(records)} of {total_size} total record(s) shown.")
-    if truncated:
-        click.echo("Not all matching records were fetched -- pass --all to retrieve everything, "
-                   "or add/tighten a LIMIT.")
+    _output_query_result(records, total_size, truncated, csv_path, excel_path, max_print_rows,
+                         truncated_hint="Not all matching records were fetched -- pass --all "
+                                        "to retrieve everything, or add/tighten a LIMIT.")
 
 
-def _output_query_result(records, total_size, truncated, csv_path, excel_path, max_print_rows):
+def _output_query_result(records, total_size, truncated, csv_path, excel_path, max_print_rows,
+                         truncated_hint="Not all matching records were fetched."):
     if csv_path:
         qt.to_csv(records, csv_path)
         click.echo(f"Wrote {len(records)} row(s) to {csv_path}")
@@ -307,7 +297,7 @@ def _output_query_result(records, total_size, truncated, csv_path, excel_path, m
         _print_table(pd.DataFrame(records), max_rows=max_print_rows)
     click.echo(f"\n{len(records)} of {total_size} total record(s) shown.")
     if truncated:
-        click.echo("Not all matching records were fetched.")
+        click.echo(truncated_hint)
 
 
 @cli.command("data-cloud-query")
@@ -373,7 +363,8 @@ def query_calculated_insight_cmd(ci_name, csv_path, excel_path, max_print_rows):
 @click.option("--excel", "excel_path", default=None, help="Write results to an Excel file instead of printing.")
 def data_cloud_status_cmd(status_type, name, csv_path, excel_path):
     """Check status for a Data Cloud monitoring object -- calculated-insight,
-    data-stream, identity-resolution, or data-transform. Omit NAME to list all."""
+    data-stream, dso, identity-resolution, data-transform, or data-graph.
+    Omit NAME to list all."""
     _, sf, _e = _ctx()
     records, total_size, truncated = dc.check_status(sf, status_type, name=name)
     _output_query_result(records, total_size, truncated, csv_path, excel_path, 50)

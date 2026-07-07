@@ -20,7 +20,7 @@ summarizes.
 | 5 | Org metadata risk analyzer | **Built** | `analyze-org-risk` | Checks the target org for things that could silently reject or interfere with your load — active validation rules, Apex triggers, Flows — *before* you run a real load, so you find out ahead of time instead of from a confusing failure mid-load. |
 | 6 | Mock/demo data generation | **Built** | `generate-mock-data`, `generate-related-mock-data` | Generates realistic fake records for testing or demos, without touching any real Salesforce data. `generate-mock-data` does one object at a time; `generate-related-mock-data` generates several objects *linked together* (e.g. Accounts that really do have Contacts pointing back at them). |
 | 7 | Data profiling toolset | **Built** | `profile-salesforce`, `profile-sql-table`, `export-profile-excel` | Tells you how populated and clean a field actually is — what % of rows have a value, how many distinct values, min/max — before you decide whether it's even worth migrating. Run this before mapping fields, not after. |
-| 8 | Ad hoc query tool | **Built** | `query` | Run a quick SOQL query from the command line for a fast lookup, without opening a separate tool like Workbench. |
+| 8 | Ad hoc query tool | **Built** | `query` | Run a quick SOQL query from the command line for a fast lookup, without opening a separate query tool or browser extension. |
 | 9 | Console output polish | **Built** | (applies to `query`/`profile-*`) | Query/profile results print as a readable table instead of a raw text dump. |
 | 10 | Auto-mapping | **Built** | `auto-map` | Suggests a first-draft field mapping automatically (matching names, a synonym list, and a data-quality check) so you're reviewing/correcting a draft instead of starting the mapping spreadsheet from a blank sheet. |
 | 11 | Bulk load pre-flight check + retry + delete-by-external-id | **Built** | `bulkops` (built in), `bulkops-retry` | This is the actual "push data into Salesforce" step — insert/update/upsert/delete via Bulk API 2.0. The pre-flight check catches typo'd/non-writable fields *before* burning a real API call; `bulkops-retry` lets you resubmit only the rows that failed instead of the whole load again. |
@@ -716,9 +716,11 @@ transcript and the load table's own `Id`/`Error` columns — there's no
 durable, queryable record of *what ran, when, and how it performed*
 across a whole project's worth of loads.
 
-**Built, opt-in only, modeled directly on DBAmp's own logging behavior**:
-never on by default, and never a per-call flag either — an architect
-turns it on once per schema (`enable-bulkops-logging --schema <schema>`),
+**Built, opt-in only — the same configure-once, per-database logging
+convention established commercial migration tools use** (requested in
+exactly those terms): never on by default, and never a per-call flag
+either — an architect turns it on once per schema
+(`enable-bulkops-logging --schema <schema>`),
 which creates `<schema>.BulkOpsLog`. From then on, every `bulk_op()` call
 against that schema logs itself automatically: action
 (insert/update/upsert/delete), object, source table, record counts

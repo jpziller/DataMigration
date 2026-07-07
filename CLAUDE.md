@@ -158,7 +158,8 @@ venv may not be active in a fresh shell:
                 resubmit the new table via a normal, separately-confirmed `bulkops` call once you've
                 looked at why those rows failed.)
 - Bulk load activity logging (opt-in, per schema — off by default, never
-                automatic; modeled on DBAmp's own logging):
+                automatic; the same opt-in-per-database convention established
+                commercial migration tools use):
                 `.venv/Scripts/python.exe cli.py enable-bulkops-logging --schema dbo`
                 (creates `<schema>.BulkOpsLog`. From then on, every `bulkops` call
                 against that schema logs itself automatically — action, object,
@@ -183,9 +184,12 @@ venv may not be active in a fresh shell:
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
-`/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/analyze-org-risk`,
-`/import-parquet`, `/replicate`, `/build-load`, `/validate-load`, `/status`
+`/generate-mock-data`, `/generate-related-mock-data`, `/generate-mapping-doc`,
+`/check-mapping-balance`, `/auto-map`, `/generate-solution-doc`,
+`/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
+`/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
+`/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
+`/query-calculated-insight`, `/list-data-graphs`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from

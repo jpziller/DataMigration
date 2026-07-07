@@ -324,13 +324,29 @@ python cli.py bulkops Contact insert Contact_Load_Retry --key-column LoadId
 # (validation rules, Apex triggers, record-triggered Flows, workflow rules,
 # approval processes -- object-level inventory, not a formula parser)
 python cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
+
+# Data Cloud (D360) -- all confirmed live against a real Data Cloud org.
+# Basic DLO/DMO lookups need no special command (plain `query` works on
+# __dlo/__dlm objects); these cover what that path can't do. The three
+# query commands need an External Client App with cdp_* OAuth scopes
+# (see "Auth modes" above); the status checks are plain core-org SOQL.
+python cli.py data-cloud-query "SELECT FromISOCurrencyCode__c FROM StaticCurrencyRates_Home__dlm"
+python cli.py list-calculated-insights
+python cli.py query-calculated-insight RateCount__cio
+python cli.py data-cloud-profile UnifiedssotIndividualIndv__dlm "[ssot__LastName__c=Smith]"
+python cli.py list-data-graphs
+python cli.py data-cloud-status data-stream          # or: calculated-insight, dso,
+python cli.py data-cloud-status identity-resolution  #     data-transform, data-graph
 ```
 
 Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
-`/generate-mock-data`, `/generate-mapping-doc`, `/check-mapping-balance`,
-`/auto-map`, `/generate-solution-doc`, `/bulkops-retry`, `/analyze-org-risk`,
-`/import-parquet`, `/replicate`, `/build-load`, `/validate-load`, `/status`)
+`/generate-mock-data`, `/generate-related-mock-data`, `/generate-mapping-doc`,
+`/check-mapping-balance`, `/auto-map`, `/generate-solution-doc`,
+`/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
+`/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
+`/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
+`/query-calculated-insight`, `/list-data-graphs`)
 — see "Claude Code operating layer" below.
 
 ---

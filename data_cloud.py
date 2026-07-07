@@ -11,10 +11,11 @@ silently or errors outright, the same lesson `risk_analyzer.py`'s build
 already taught for a different pair of APIs:
 
 1. **Status objects are plain core-org SOQL, same as any CRM object.**
-   `MktCalculatedInsight`, `DataStream`, `IdentityResolution`, and
-   `MktDataTransform` are all standard objects queryable through the
-   *exact* same `sf.query()` this framework already uses everywhere else
-   -- no Data Cloud tenant token needed. Confirmed live for all four.
+   `MktCalculatedInsight`, `DataStream`, `DataLakeObjectInstance` (the
+   DSO), `IdentityResolution`, `MktDataTransform`, and `DataGraph` are
+   all standard objects queryable through the *exact* same `sf.query()`
+   this framework already uses everywhere else -- no Data Cloud tenant
+   token needed. Confirmed live for all six (see STATUS_OBJECTS below).
 2. **Actual Data Cloud row-level SQL querying (DMOs/DLOs beyond basic
    SOQL, and Calculated Insight *data*) needs a separate Data Cloud
    tenant token.** `get_data_cloud_session()` does the exchange (`POST
@@ -30,12 +31,17 @@ already taught for a different pair of APIs:
 Basic DLO/DMO lookups (finding #1) don't need any of this -- they already
 work through `query_tool.py`'s existing `sf.query()` path unmodified.
 This module is specifically for what that path *can't* do: the Data
-Cloud tenant's own SQL query API, Calculated Insight metadata/data, and
-status checks across the four monitoring objects above.
+Cloud tenant's own SQL query API, Calculated Insight metadata/data,
+Unified Profile lookup, Data Graph metadata, and status checks across
+the monitoring objects above.
 """
 import requests
 
 from query_tool import run_query
+
+# requests' own default is NO timeout at all -- a hung endpoint would hang
+# the CLI forever. 30s matches mock_data.py's existing Mockaroo precedent.
+_TIMEOUT = 30
 
 STATUS_OBJECTS = {
     "calculated-insight": {
@@ -79,7 +85,7 @@ STATUS_OBJECTS = {
 
 
 def check_status(sf, status_type, name=None):
-    """Query one of the four standard Data Cloud monitoring objects above
+    """Query one of the standard Data Cloud monitoring objects above
     via plain core-org SOQL -- no Data Cloud tenant token needed. Returns
     the same (records, total_size, truncated) shape query_tool.run_query
     does, so cli.py's existing _print_table/--csv/--excel handling works
@@ -125,6 +131,7 @@ def get_data_cloud_session(sf):
             "subject_token": sf.session_id,
             "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
         },
+        timeout=_TIMEOUT,
     )
     if not resp.ok:
         body = resp.text
@@ -174,6 +181,7 @@ def query_data_cloud(sf, sql):
         f"https://{instance_url}/api/v2/query",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={"sql": sql},
+        timeout=_TIMEOUT,
     )
     resp.raise_for_status()
     body = resp.json()
@@ -190,6 +198,7 @@ def list_calculated_insights(sf):
     resp = requests.get(
         f"https://{instance_url}/api/v1/insight/metadata",
         headers={"Authorization": f"Bearer {token}"},
+        timeout=_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json().get("metadata", [])
@@ -205,6 +214,7 @@ def list_data_graphs(sf):
     resp = requests.get(
         f"https://{instance_url}/api/v1/dataGraph/metadata",
         headers={"Authorization": f"Bearer {token}"},
+        timeout=_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json().get("metadata", [])
@@ -229,7 +239,8 @@ def query_data_graph(sf, data_graph_name, record_id=None, lookup_keys=None):
     else:
         url = f"https://{instance_url}/api/v1/dataGraph/{data_graph_name}"
         params = {"lookupKeys": lookup_keys}
-    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params,
+                        timeout=_TIMEOUT)
     resp.raise_for_status()
     body = resp.json()
     records = _rows_from_data_cloud_response(body)
@@ -246,6 +257,7 @@ def query_calculated_insight(sf, ci_name):
     resp = requests.get(
         f"https://{instance_url}/api/v1/insight/calculated-insights/{ci_name}",
         headers={"Authorization": f"Bearer {token}"},
+        timeout=_TIMEOUT,
     )
     resp.raise_for_status()
     body = resp.json()
@@ -289,6 +301,7 @@ def query_unified_profile(sf, data_model_name, filters, fields=None, limit=None,
         f"https://{instance_url}/api/v1/profile/{data_model_name}",
         headers={"Authorization": f"Bearer {token}"},
         params=params,
+        timeout=_TIMEOUT,
     )
     resp.raise_for_status()
     body = resp.json()
