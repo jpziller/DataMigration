@@ -340,14 +340,14 @@ python cli.py data-cloud-status identity-resolution  #     data-transform, data-
 ```
 
 Matching slash-command skills exist for the read-only ones (`/list-objects`,
-`/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
+`/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-related-mock-data`, `/generate-mapping-doc`,
 `/check-mapping-balance`, `/auto-map`, `/generate-solution-doc`,
 `/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
-`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`)
+`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`)
 — see "Claude Code operating layer" below.
 
 ---

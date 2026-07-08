@@ -122,8 +122,9 @@ _HEADER_ROW_GIT_REPO = 4
 _HEADER_ROW_COMMIT = 5
 _HEADER_ROW_SCRIPTS_LINK = 6
 _HEADER_ROW_TICKET = 7
-_TABLE_HEADER_ROW = 9   # rows 1-7 breadcrumb + row 8 blank spacer
-_FIRST_DATA_ROW = 10
+_HEADER_ROW_LAST_SYNCED_LOG_ID = 8
+_TABLE_HEADER_ROW = 10   # rows 1-8 breadcrumb + row 9 blank spacer
+_FIRST_DATA_ROW = 11
 
 _GITHUB_HTTPS_RE = re.compile(r"^https?://github\.com/([^/]+)/(.+?)(\.git)?/?$")
 _GITHUB_SSH_RE = re.compile(r"^git@github\.com:([^/]+)/(.+?)(\.git)?$")
@@ -216,7 +217,12 @@ def _github_url(remote_url):
 
 def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, target_env=None,
                               ticket_url=None, ticket_label="JIRA"):
-    """Write the fixed-height breadcrumb block (rows 1-7)."""
+    """Write the fixed-height breadcrumb block (rows 1-8). "Last Synced Log
+    Id" (row 8) is always written blank here -- it's per-pass state
+    managed exclusively by sync_run_book_from_log(), not something this
+    function or its caller ever supplies, and (like Target Environment)
+    it deliberately never carries forward: a fresh tab or a new pass
+    hasn't had any of its own runs logged yet."""
     github_url = _github_url(git_info["remote_url"]) if git_info else None
     commit_label = f'{git_info["commit_sha"][:8]} ({git_info["branch"]})' if git_info else None
     scripts_url = (
@@ -232,10 +238,17 @@ def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, t
         (_HEADER_ROW_COMMIT, "Commit / Branch", commit_label, None),
         (_HEADER_ROW_SCRIPTS_LINK, "Scripts (as of this commit)", scripts_url, scripts_url),
         (_HEADER_ROW_TICKET, f"{ticket_label} Project", ticket_url, ticket_url),
+        (_HEADER_ROW_LAST_SYNCED_LOG_ID, "Last Synced Log Id", None, None),
     ]
     for row_idx, label, value, hyperlink in rows:
         ws.cell(row=row_idx, column=1, value=label).font = _HEADER_FONT
-        cell = ws.cell(row=row_idx, column=2, value=value)
+        # openpyxl's cell(value=None) is a no-op (indistinguishable from
+        # omitting value entirely) -- setting .value directly is required
+        # to actually clear an already-populated cell (matters here since
+        # add_migration_run_book_pass calls this on a tab copy_worksheet()
+        # already populated from the source tab).
+        cell = ws.cell(row=row_idx, column=2)
+        cell.value = value
         if hyperlink:
             cell.hyperlink = hyperlink
             cell.font = _HYPERLINK_FONT
@@ -243,8 +256,9 @@ def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, t
 
 def _read_breadcrumb_header(ws):
     """Read back the carry-forward-able breadcrumb values from an existing
-    tab -- Target Environment is deliberately excluded (see
-    add_migration_run_book_pass: Dev/UAT/PROD are different orgs, never
+    tab -- Target Environment and Last Synced Log Id are deliberately
+    excluded (see add_migration_run_book_pass: Dev/UAT/PROD are different
+    orgs and each pass's own sync history starts fresh, neither is ever
     silently reused)."""
     ticket_cell_label = ws.cell(row=_HEADER_ROW_TICKET, column=1).value or ""
     ticket_label = (
@@ -568,3 +582,170 @@ def add_migration_run_book_pass(path, from_tab, to_tab, template_path=_TEMPLATE_
 
     wb.save(path)
     return path
+
+
+def _iter_load_phase_rows(ws):
+    """Yield (row_idx, object_value) for every real data row currently
+    belonging to a phase whose name starts with "load" (case-insensitive)
+    -- the same scoping _write_phase() uses to decide which phase gets
+    load_order.py's auto-fill. A banner row (Object blank, Stage/label
+    cell set) updates which phase subsequent rows belong to; it's never
+    itself yielded."""
+    object_col = _COLUMNS.index("Object") + 1
+    current_phase = None
+    row = _FIRST_DATA_ROW
+    while row <= ws.max_row:
+        object_value = ws.cell(row=row, column=object_col).value
+        if not object_value:
+            label = ws.cell(row=row, column=1).value
+            if label:
+                current_phase = label
+            row += 1
+            continue
+        if current_phase and current_phase.lower().startswith("load"):
+            yield row, object_value
+        row += 1
+
+
+_UNRESOLVED_STATUS_VALUES = {None, "", "Not Started"}
+
+
+def _find_pending_load_row(ws, object_name):
+    """A Load-phase row whose Object mentions object_name, whose Status is
+    still unresolved (blank or the auto-fill default "Not Started" --
+    _load_order_rows() sets that explicitly, it isn't blank text), and
+    whose Total Records is blank -- an unresolved auto-fill placeholder,
+    safe to fill in. A row with a real Status (Completed/Issue/In Process/
+    N/A) or Total Records already set is either already resolved (a prior
+    sync) or a human's own in-progress entry -- never touched. Returns the
+    first match's row index, or None."""
+    status_col = _COLUMNS.index("Status") + 1
+    records_col = _COLUMNS.index("Total Records") + 1
+    for row_idx, object_value in _iter_load_phase_rows(ws):
+        if object_name.lower() not in str(object_value).lower():
+            continue
+        if ws.cell(row=row_idx, column=status_col).value not in _UNRESOLVED_STATUS_VALUES:
+            continue
+        if ws.cell(row=row_idx, column=records_col).value:
+            continue
+        return row_idx
+    return None
+
+
+def _insert_load_row(ws, object_name):
+    """Insert a brand-new row for object_name right after the Load
+    phase's last existing row (before whatever phase follows it) --
+    never overwrites anything, used when no pending placeholder matches
+    (e.g. a retry, or an object that was never pre-populated). Raises if
+    this tab has no phase named "Load..." at all -- nowhere safe to
+    insert into."""
+    object_col = _COLUMNS.index("Object") + 1
+    last_load_row = None
+    load_banner_row = None
+    current_phase = None
+    row = _FIRST_DATA_ROW
+    while row <= ws.max_row:
+        object_value = ws.cell(row=row, column=object_col).value
+        if not object_value:
+            label = ws.cell(row=row, column=1).value
+            if label:
+                current_phase = label
+                if current_phase.lower().startswith("load"):
+                    load_banner_row = row
+            row += 1
+            continue
+        if current_phase and current_phase.lower().startswith("load"):
+            last_load_row = row
+        row += 1
+
+    if last_load_row is not None:
+        insert_at = last_load_row + 1
+    elif load_banner_row is not None:
+        insert_at = load_banner_row + 1
+    else:
+        raise ValueError(
+            "No phase named 'Load...' found in this tab -- add one (e.g. via "
+            "docs/MIGRATION_RUN_BOOK_TEMPLATE.md) before syncing."
+        )
+
+    ws.insert_rows(insert_at)
+    ws.cell(row=insert_at, column=object_col, value=object_name)
+    return insert_at
+
+
+def _apply_log_result(ws, row_idx, log_row):
+    submitted = log_row["RecordsSubmitted"]
+    succeeded = log_row["RecordsSucceeded"]
+    failed = log_row["RecordsFailed"]
+
+    values = {
+        "Status": "Issue" if failed else "Completed",
+        "Person Responsible": log_row["RunBy"],
+        "Begin Time": log_row["StartedAt"],
+        "End Time": log_row["CompletedAt"],
+        "Total Records": submitted,
+        "Success Records": succeeded,
+        "Failed Records": failed,
+        "Notes": f"Auto-synced from {log_row['TargetSchema']}.BulkOpsLog #{log_row['LogId']} "
+                 f"({log_row['Operation']}, {log_row['JobCount']} job(s)).",
+    }
+    for col_name, value in values.items():
+        col_idx = _COLUMNS.index(col_name) + 1
+        ws.cell(row=row_idx, column=col_idx, value=value)
+
+    if submitted:
+        pct_idx = _COLUMNS.index("Success Percent") + 1
+        cell = ws.cell(row=row_idx, column=pct_idx, value=succeeded / submitted)
+        cell.number_format = "0.00%"
+
+
+def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
+    """Pull dbo.BulkOpsLog (#14) rows not yet reflected in this tab into
+    its Load phase: fills in a still-pending auto-fill placeholder row for
+    that object if one exists, otherwise inserts a new row (e.g. a retry)
+    -- never overwrites a row that already has real result data, and never
+    touches anything outside the Load phase. Tracks a per-tab watermark
+    (Last Synced Log Id, in the breadcrumb block) so re-running only ever
+    pulls in genuinely new log entries -- safe to call repeatedly, and
+    safe to call after a human has added their own rows by hand.
+
+    v1 limit: only pulls dbo.BulkOpsLog's own aggregate columns (record
+    counts, timing) -- per-row Error Details text would need reading the
+    separate `_Result` writeback table too, not done here."""
+    wb = openpyxl.load_workbook(path)
+    if tab_name not in wb.sheetnames:
+        raise ValueError(f"No tab named '{tab_name}' in {path}")
+    ws = wb[tab_name]
+
+    last_synced = ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2).value or 0
+
+    with engine.connect() as cx:
+        if not _table_exists(cx, schema, "BulkOpsLog"):
+            return {"synced": 0, "inserted": 0, "updated": 0,
+                    "message": f"{schema}.BulkOpsLog doesn't exist yet -- nothing to sync."}
+
+        new_rows = cx.execute(
+            text(
+                f"SELECT LogId, ObjectName, Operation, TargetSchema, RecordsSubmitted, "
+                f"RecordsSucceeded, RecordsFailed, StartedAt, CompletedAt, RunBy, JobCount "
+                f"FROM [{schema}].[BulkOpsLog] WHERE LogId > :last ORDER BY LogId"
+            ),
+            {"last": last_synced},
+        ).mappings().all()
+
+    if not new_rows:
+        return {"synced": 0, "inserted": 0, "updated": 0}
+
+    inserted, updated = 0, 0
+    for log_row in new_rows:
+        target_row = _find_pending_load_row(ws, log_row["ObjectName"])
+        if target_row is None:
+            target_row = _insert_load_row(ws, log_row["ObjectName"])
+            inserted += 1
+        else:
+            updated += 1
+        _apply_log_result(ws, target_row, log_row)
+
+    ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["LogId"])
+    wb.save(path)
+    return {"synced": len(new_rows), "inserted": inserted, "updated": updated}

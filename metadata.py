@@ -7,6 +7,8 @@ This module covers the describe/schema side the migration framework needs.
 import json
 import os
 
+import requests
+
 
 def list_objects(sf, queryable_only=True):
     objs = sf.describe()["sobjects"]
@@ -27,6 +29,36 @@ def list_fields(sf, object_name):
             f.get("externalId", False),
         ))
     return rows
+
+
+def record_counts(sf, object_names=None):
+    """GET /limits/recordCount (roadmap #41) -- one HTTP call for many
+    objects' record counts, instead of a SOQL SELECT COUNT() per object.
+    Confirmed against Salesforce's own REST API docs (API v40.0+, this
+    org runs v67.0): the count is an **approximate, cached snapshot**
+    ("may not accurately represent the number of records"), excludes
+    deleted/archived rows and associated objects (History/Feed/Share/
+    ChangeEvent), and needs the "View Setup and Configuration" permission.
+    Fast triage across many objects (e.g. "how big are these roughly,
+    before I decide what to profile deeply") -- NOT a substitute for an
+    exact SELECT COUNT() when the number actually has to be right (e.g.
+    validating a load landed every row); profile_salesforce_object()'s
+    own COUNT(Id) stays the authoritative path for that, deliberately
+    left untouched here.
+
+    object_names: list of API names, or None for every object in the org
+    (Salesforce's own default when sObjects is omitted -- can be a very
+    large response for a real org, so cli.py requires an explicit
+    --all-objects opt-in rather than making this the default).
+
+    Returns {object_name: count}."""
+    resp = requests.get(
+        f"{sf.base_url}limits/recordCount",
+        headers={"Authorization": f"Bearer {sf.session_id}"},
+        params={"sObjects": ",".join(object_names)} if object_names else None,
+    )
+    resp.raise_for_status()
+    return {row["name"]: row["count"] for row in resp.json().get("sObjects", [])}
 
 
 def dump_describe(sf, object_name, out_dir="metadata"):

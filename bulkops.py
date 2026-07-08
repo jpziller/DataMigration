@@ -106,6 +106,7 @@ import pandas as pd
 from sqlalchemy import text
 
 import batch_advisor
+import migration_run_book
 
 
 def _read_result_csv(csv_text):
@@ -288,7 +289,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             key_column="LoadId", id_column="Id", error_column="Error",
             schema="dbo", stage_dir="_stage",
             email_deliverability=None, confirm_external_email_risk=False,
-            batch_size="auto"):
+            batch_size="auto", run_book_path=None, run_book_tab=None):
     """See this module's docstring for the full design. batch_size (ROADMAP
     #15): "auto" (default) asks batch_advisor.recommend_batch_size() for a
     ladder-rung recommendation and prints its rationale before the load runs;
@@ -296,7 +297,14 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     wins and stays, same as every other established migration tool's
     hardcode-it-in-the-script norm; None/"none" submits everything as one
     unchunked job (today's original behavior, still available as an
-    explicit escape hatch)."""
+    explicit escape hatch).
+
+    run_book_path/run_book_tab (ROADMAP #16, opt-in): when both are given
+    and this call's BulkOpsLog row is written successfully, also calls
+    migration_run_book.sync_run_book_from_log() against that tab right
+    after -- the "end of the bulk job" moment the sync is meant for. Not
+    automatic by default; bulkops shouldn't silently touch a spreadsheet
+    file unless asked to."""
     operation = operation.lower()
     if operation not in ("insert", "update", "upsert", "delete"):
         raise ValueError(f"Unsupported operation: {operation}")
@@ -522,6 +530,18 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             # a logging failure shouldn't take that result away, just
             # surface itself rather than fail silently.
             summary["logging_error"] = str(e)
+
+    # Migration Run Book sync -- opt-in (ROADMAP #16), only attempted once
+    # this call's own BulkOpsLog row actually exists to sync from. Same
+    # "the real load already succeeded, don't let this take it away"
+    # precedent as logging_error above.
+    if run_book_path and run_book_tab and summary["logged"]:
+        try:
+            summary["run_book_synced"] = migration_run_book.sync_run_book_from_log(
+                engine, run_book_path, run_book_tab, schema=schema
+            )
+        except Exception as e:
+            summary["run_book_sync_error"] = str(e)
 
     return summary
 

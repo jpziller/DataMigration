@@ -101,6 +101,20 @@ def dump_describe(object_name):
     click.echo(md.dump_describe(sf, object_name))
 
 
+@cli.command("record-counts")
+@click.argument("object_names", nargs=-1)
+@click.option("--all-objects", "all_objects", is_flag=True, help="Every object in the org, not just the ones named -- can be a large response for a real org.")
+def record_counts_cmd(object_names, all_objects):
+    if not object_names and not all_objects:
+        raise click.UsageError("Pass one or more object names, or --all-objects for the whole org.")
+    _, sf, _e = _ctx()
+    counts = md.record_counts(sf, list(object_names) if object_names else None)
+    for name in sorted(counts):
+        click.echo(f"{name:40} {counts[name]:>12,}")
+    click.echo("(Approximate, cached snapshot -- Salesforce's own docs: 'may not accurately "
+               "represent the number of records'. Use profile-salesforce for an exact count.)")
+
+
 @cli.command("replicate")
 @click.argument("object_name")
 @click.option("--where", default=None, help="SOQL WHERE clause (no 'WHERE').")
@@ -141,15 +155,21 @@ def import_parquet_cmd(parquet_path, table_name, schema, append):
               help="Bulk API 2.0 records per job: 'auto' (default, recommend-batch-size's own logic), "
                    "'none' (one unchunked job), or an integer to pin a value yourself -- an explicit "
                    "number always wins and is never overridden.")
+@click.option("--run-book", "run_book_path", default=None, help="Migration Run Book workbook path -- with --run-book-tab, auto-syncs this load's BulkOpsLog row into that tab's Load phase right after it's written.")
+@click.option("--run-book-tab", default=None, help="Migration Run Book tab name to sync into -- requires --run-book.")
 def bulkops_cmd(object_name, operation, source_table, external_id, key_column, schema,
-                email_deliverability, confirm_external_email_risk, batch_size):
+                email_deliverability, confirm_external_email_risk, batch_size,
+                run_book_path, run_book_tab):
+    if bool(run_book_path) != bool(run_book_tab):
+        raise click.BadParameter("--run-book and --run-book-tab must be given together.")
     s, sf, engine = _ctx()
     summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
                          external_id=external_id, key_column=key_column,
                          schema=schema, stage_dir=s.stage_dir,
                          email_deliverability=email_deliverability,
                          confirm_external_email_risk=confirm_external_email_risk,
-                         batch_size=batch_size)
+                         batch_size=batch_size, run_book_path=run_book_path,
+                         run_book_tab=run_book_tab)
     warnings = summary.pop("preflight_warnings", [])
     rationale = summary.pop("batch_size_rationale", [])
     if rationale:
@@ -422,8 +442,11 @@ def generate_mock_data_cmd(object_name, count, schema):
 @cli.command("generate-related-mock-data")
 @click.argument("object_names", nargs=-1, required=True)
 @click.option("--count", "counts", multiple=True, required=True,
-              help="NAME=N, repeatable. Top-level (no in-scope parent) objects get N total rows; "
-                   "objects nested under a parent get N rows PER parent row.")
+              help="NAME=N or NAME=N-M, repeatable. Top-level (no in-scope parent) objects get N "
+                   "total rows; objects nested under a parent get N rows PER parent row. N-M picks "
+                   "a random count per parent in that inclusive range (e.g. 1-2 for '1 or 2 children "
+                   "each'; 0-1 for 'roughly half the parents get one') via Snowfakery's own "
+                   "random_number() -- a statistical split, not a guaranteed exact percentage.")
 @click.option("--schema", default="dbo")
 def generate_related_mock_data_cmd(object_names, counts, schema):
     s, sf, engine = _ctx()
@@ -432,9 +455,15 @@ def generate_related_mock_data_cmd(object_names, counts, schema):
     count_map = {}
     for item in counts:
         if "=" not in item:
-            raise click.BadParameter(f"--count must be NAME=N, got: {item!r}")
+            raise click.BadParameter(f"--count must be NAME=N or NAME=N-M, got: {item!r}")
         name, _, n = item.partition("=")
-        count_map[name] = int(n)
+        if "-" in n:
+            lo_n, _, hi_n = n.partition("-")
+            if not (lo_n.isdigit() and hi_n.isdigit()):
+                raise click.BadParameter(f"--count range must be NAME=N-M with integers, got: {item!r}")
+            count_map[name] = f"${{{{random_number(min={int(lo_n)},max={int(hi_n)})}}}}"
+        else:
+            count_map[name] = int(n)
 
     (recipe_path, skipped_by_object, primary_parent, secondary_exact_parents,
      secondary_random_parents, fields_by_object) = sfd.build_recipe(sf, object_names, count_map)
@@ -594,6 +623,20 @@ def add_migration_run_book_pass_cmd(path, from_tab, to_tab, project_name, source
         ticket_url=ticket_url, ticket_label=ticket_label,
     )
     click.echo(f"Copied '{from_tab}' -> '{to_tab}' in {path} (recipe carried forward, result columns blanked)")
+
+
+@cli.command("update-migration-run-book")
+@click.argument("path")
+@click.option("--tab", "tab_name", required=True, help="Migration Run Book tab to sync into.")
+@click.option("--schema", default="dbo")
+def update_migration_run_book_cmd(path, tab_name, schema):
+    _, _, engine = _ctx()
+    result = mrb.sync_run_book_from_log(engine, path, tab_name, schema=schema)
+    if result.get("message"):
+        click.echo(result["message"])
+        return
+    click.echo(f"Synced {result['synced']} new {schema}.BulkOpsLog row(s) into '{tab_name}': "
+               f"{result['updated']} filled in, {result['inserted']} inserted.")
 
 
 @cli.command("analyze-org-risk")

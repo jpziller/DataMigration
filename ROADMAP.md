@@ -18,7 +18,7 @@ summarizes.
 | 3 | Field-mapping spreadsheet tool | **Built** | `generate-mapping-doc`, `check-mapping-balance` | Generates the spreadsheet where you record "this source field goes to that Salesforce field" — the standard document a data architect reviews with the client before any transform gets written. `check-mapping-balance` then double-checks your finished transform actually matches what the spreadsheet says. |
 | 4 | Solution document generator | **Built** | `generate-solution-doc` | Auto-writes the migration design/solution Word document (what's being migrated, in what order, field-by-field detail) from data this framework already has, instead of a human writing it from scratch. |
 | 5 | Org metadata risk analyzer | **Built** | `analyze-org-risk` | Checks the target org for things that could silently reject or interfere with your load — active validation rules, Apex triggers, Flows — *before* you run a real load, so you find out ahead of time instead of from a confusing failure mid-load. |
-| 6 | Mock/demo data generation | **Built** | `generate-mock-data`, `generate-related-mock-data` | Generates realistic fake records for testing or demos, without touching any real Salesforce data. `generate-mock-data` does one object at a time; `generate-related-mock-data` generates several objects *linked together* (e.g. Accounts that really do have Contacts pointing back at them). |
+| 6 | Mock/demo data generation | **Built** | `generate-mock-data`, `generate-related-mock-data` | Generates realistic fake records for testing or demos, without touching any real Salesforce data. `generate-mock-data` does one object at a time; `generate-related-mock-data` generates several objects *linked together* (e.g. Accounts that really do have Contacts pointing back at them), with `--count NAME=N-M` for a randomized per-parent count (e.g. "1 or 2 Contacts each", "~half the Accounts get an Opportunity"). |
 | 7 | Data profiling toolset | **Built** | `profile-salesforce`, `profile-sql-table`, `export-profile-excel` | Tells you how populated and clean a field actually is — what % of rows have a value, how many distinct values, min/max — before you decide whether it's even worth migrating. Run this before mapping fields, not after. |
 | 8 | Ad hoc query tool | **Built** | `query` | Run a quick SOQL query from the command line for a fast lookup, without opening a separate query tool or browser extension. |
 | 9 | Console output polish | **Built** | (applies to `query`/`profile-*`) | Query/profile results print as a readable table instead of a raw text dump. |
@@ -28,7 +28,7 @@ summarizes.
 | 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 | Forces you to actually go check Setup's Email Deliverability setting before any insert/upsert that could send real email to real people, and pass what it shows as a flag. This is a required human confirmation, not an automatic check — Salesforce has no API to read that setting. |
 | 14 | Load activity logging + analytics | Logging **Built** (opt-in); analytics not built | `enable-bulkops-logging`, `disable-bulkops-logging` | Optional, off-by-default record of every `bulkops` run (what, when, how many succeeded/failed) written to a SQL Server table, so you can look back at history instead of relying on console scrollback. Turn it on once per schema; it then logs automatically. |
 | 15 | Dynamic batch sizing from org metadata review | **Built** — confirmed live against a real org (`D360_PLAYGROUND`): static/auto/none modes all produced the correct job counts and log entries | `recommend-batch-size`, `suggest-batch-heuristics`, `bulkops --batch-size` | Automatically start heavily-automated objects (Opportunity, CPQ/Billing, etc.) at a smaller batch size, adjusted further from this org's own automation and this project's own load history — full rationale printed, and a scripted value always overrides it. |
-| 16 | Migration Run Book (manual + programmatic step tracking) | **Built** — structure mirrors a real client migration-status tab | `generate-migration-run-book`, `add-migration-run-book-pass` | A living, per-project Excel workbook: one unified table (Stage/Object/Dependency/Status/Critical/Person Responsible/Begin-End Time/Execution Time/JIRA Ticket Link/Notes/record counts) covering every phase, phases marked by a banner row — one tab per pass (Dev/UAT/PROD), each new tab copying the recipe forward while blanking result columns (Status reset to "Not Started") for a fresh run. Status/Critical use live Excel conditional-formatting colors, not a one-time paint. Recipe structure lives in `docs/MIGRATION_RUN_BOOK_TEMPLATE.md`, git-tracked and human-editable. Every tab also gets a header with Project/Source-Target Environment, hyperlinked Git repo/commit/scripts breadcrumbs, and an optional ticket-system project link. |
+| 16 | Migration Run Book (manual + programmatic step tracking) | **Built** — structure mirrors a real client migration-status tab; `dbo.BulkOpsLog` tie-in also built | `generate-migration-run-book`, `add-migration-run-book-pass`, `update-migration-run-book` | A living, per-project Excel workbook: one unified table (Stage/Object/Dependency/Status/Critical/Person Responsible/Begin-End Time/Execution Time/JIRA Ticket Link/Notes/record counts) covering every phase, phases marked by a banner row — one tab per pass (Dev/UAT/PROD), each new tab copying the recipe forward while blanking result columns (Status reset to "Not Started") for a fresh run. Status/Critical use live Excel conditional-formatting colors, not a one-time paint. `update-migration-run-book` (or `bulkops --run-book`/`--run-book-tab` automatically) pulls new `BulkOpsLog` rows into the Load phase — fills in a pending placeholder or inserts a new row, idempotent via a per-tab watermark, never overwrites a human's own row. Recipe structure lives in `docs/MIGRATION_RUN_BOOK_TEMPLATE.md`, git-tracked and human-editable. Every tab also gets a header with Project/Source-Target Environment, hyperlinked Git repo/commit/scripts breadcrumbs, and an optional ticket-system project link. |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
 | 18 | Data Cloud (D360) query support | **Built** — all 5 findings researched, 4.5 confirmed live (Data Graph query-by-id/lookup-key is written but unverified — no test Data Graph exists yet) | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status`, `data-cloud-profile`, `list-data-graphs` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, Unified Profile data, Data Graph metadata, and check processing status for Data Streams/DSOs/Identity Resolution/Data Transforms/Calculated Insights/Data Graphs — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
@@ -53,6 +53,7 @@ summarizes.
 | 38 | Real-data anonymization for demos/scratch orgs | Not built | — | Idea: take a real client org's actual data and scramble the sensitive fields (names, emails, phones) into realistic-looking fakes — same relationships/volume, no real PII — for client demos or scratch-org seeding. Different from #6, which generates synthetic data from scratch rather than replacing real values. |
 | 39 | Ticket system (JIRA or equivalent) read/comment integration | Not built, needs API research | — | Idea: post comments to a specific JIRA (or equivalent) ticket directly (e.g. load results), and cross-reference GitHub commits/PRs tied to that ticket — deeper than the Migration Run Book header's static project link (#16). |
 | 40 | Configuration Workbook drift detection | Not built — blocked on a real template | — | Idea: read a team's existing "Configuration Workbook" (how developers document their build) and cross-check it against the actual deployed metadata — the same category of problem `check-mapping-balance` (#3) solves for mapping docs, applied to build documentation instead. Waiting on a real example template before this gets designed. |
+| 41 | Per-object record counts via the recordCount API | **Built** | `record-counts` | One HTTP call for many objects' record counts instead of a SOQL COUNT() per object — fast rough triage across many objects, confirmed live to be an approximate/cached snapshot (can lag real inserts by more than a few seconds), so not a substitute for `profile-salesforce`'s exact count when validating a load actually landed. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -315,7 +316,12 @@ relationship-aware second backend, for generating e.g. 10 mock Accounts
 each with 3 real Contacts that actually reference those specific
 Accounts, instead of independently random rows per object.
 `python cli.py generate-related-mock-data <Object> [<Object> ...] --count
-NAME=N [--count NAME=N ...]`:
+NAME=N [--count NAME=N ...]` (or `NAME=N-M` for a randomized per-parent
+count via Snowfakery's own `random_number()` — e.g. `Contact=1-2` for
+"1 or 2 Contacts per parent", `Opportunity=0-1` for "roughly half the
+parents get one"; a statistical split, not a guaranteed exact percentage
+— confirmed live generating 100 Accounts / ~157 Contacts / 79
+Opportunities):
 - **Reuses this framework's own load-order dependency graph**
   (`load_order.build_dependency_edges`/`compute_load_order`) to decide
   which object nests inside which in the generated recipe, instead of
@@ -1085,6 +1091,70 @@ row-grouping/outline levels (no evidence the real file used them,
 skipped); the real file's literal client-specific phase names (`Build
 Data Lake Data Sources`, `Install Functions`, etc.) — only the
 *mechanism* was mirrored, not that project's specific instance data.
+
+**Follow-up: `dbo.BulkOpsLog` tie-in — the "not built" item right above,
+now built.** Two things requested: an on-demand command to pull new log
+entries in, and a recommendation for making it automatic. Delivered both
+off one reusable function, `migration_run_book.sync_run_book_from_log()`:
+`update-migration-run-book` for on-demand/retroactive syncing, and an
+opt-in `bulkops --run-book`/`--run-book-tab` pair that calls the same
+function right after that load's own `BulkOpsLog` row is written (the
+natural "end of the bulk job" moment) — opt-in, not automatic by default,
+so `bulkops` doesn't silently touch a spreadsheet file on every run
+against a real org.
+
+Two hard requirements, both solved by the same mechanism:
+- **Never reprocess already-synced log entries** — a per-tab "Last
+  Synced Log Id" watermark (row 8 of the breadcrumb block, extending it
+  from 7 rows to 8) tracks the highest `LogId` already pulled in.
+  Deliberately **not** carried forward by `add_migration_run_book_pass()`
+  (same treatment, and the same reason, as Target Environment) — a fresh
+  pass hasn't had any of its own runs logged yet.
+- **Never overwrite a row a human is using** — a new log entry only ever
+  fills in an existing Load-phase row if it's still a genuinely
+  unresolved auto-fill placeholder (`Object` matches, `Status` is blank
+  or the auto-fill default `"Not Started"`, `Total Records` is blank).
+  Otherwise (already resolved from an earlier run — e.g. a retry — or
+  never pre-populated) it inserts a brand-new row via `ws.insert_rows()`
+  right after the Load phase's last existing row, never touching
+  anything outside that phase's own range. Existing conditional-
+  formatting/data-validation ranges are already absolute (`D11:D1000`-
+  style), so an inserted row is automatically covered without
+  re-applying anything.
+
+**Two real bugs found via live testing** (100 mock Accounts generated
+with Snowfakery, inserted into `D360_PLAYGROUND`, twice — the second an
+intentional retry that Salesforce's own duplicate detection rejected
+outright, a genuine "Issue" result to verify against):
+1. The pending-placeholder check treated `Status == "Not Started"` as
+   "already resolved" (only truly blank was accepted), because
+   `_load_order_rows()` had been changed earlier to set that value
+   explicitly rather than leave it blank — so every sync update fell
+   through to "insert a new row" instead of filling in the real
+   placeholder. Fixed by treating blank *and* `"Not Started"` as
+   unresolved.
+2. The same `openpyxl` `cell(value=None)` no-op gotcha found twice
+   already this session — writing `None` to the new watermark row via
+   `ws.cell(..., value=None)` silently failed to clear it when
+   `copy_worksheet` had already populated it from the source tab, so
+   `add_migration_run_book_pass()` was carrying the watermark forward
+   despite the code saying otherwise. Fixed by setting `.value` directly.
+   Worth remembering as a standing gotcha for this codebase, not just a
+   one-off: `cell(value=None)` never clears an already-populated cell.
+
+**A small, genuinely reusable side addition**: `generate-related-mock-data
+--count` now accepts a `NAME=N-M` range (e.g. `Contact=1-2`,
+`Opportunity=0-1`), translated to a Snowfakery `random_number()` count
+expression — a statistical split per parent row, not a guaranteed exact
+percentage, but real enough for realistic test data (confirmed live:
+100 Accounts, ~1.57 Contacts/Account average, ~50% Opportunity coverage
+weighted toward multi-Contact Accounts). Snowfakery's own `count` field
+already accepted a template-expression string; this was just exposing it
+through `--count`'s existing flat-integer syntax rather than requiring a
+hand-edited recipe.
+
+**Not built**: per-row `Error Details` text (would need reading the
+separate `_Result` writeback table alongside `BulkOpsLog`, not done here).
 
 ## 17. Fuzzy matching / dedup (deprioritized, not built)
 
@@ -1867,6 +1937,43 @@ book before its template was described directly: drop a real Configuration
 Workbook into `_stage/`, reviewed for structure/format only (column names,
 what it tracks), never content, before designing the comparison logic.
 Don't scope this further until that template exists to react to.
+
+## 41. Per-object record counts via the recordCount API — BUILT (`metadata.py`)
+
+Raised directly: Salesforce's `/limits/recordCount` REST resource returns
+every requested object's record count in a single HTTP call, instead of a
+SOQL `SELECT COUNT()` per object — confirmed against Salesforce's own REST
+API docs (not assumed, per this repo's post-training-cutoff rule): GET
+`{base_url}limits/recordCount?sObjects=Account,Contact,...` (omit
+`sObjects` for every object in the org), API v40.0+ (this org runs v67.0),
+needs "View Setup and Configuration."
+
+`record_counts(sf, object_names=None)` in `metadata.py` wraps it directly
+via `requests` (the same raw-REST pattern `data_cloud.py` already
+established) — no new dependency. `record-counts <Objects...>`/
+`--all-objects` is the CLI command; `--all-objects` is opt-in rather than
+the default (an unfiltered response can be huge for a real org — confirmed
+live: ~90 objects back for a fresh Trailhead Playground with essentially
+no custom data yet).
+
+**The critical caveat, confirmed live, not just quoted from docs**:
+Salesforce's own documentation calls this "a cached snapshot in time that
+may not accurately represent the number of records," and testing this
+directly proved it, concretely: inserted 3 real Accounts, confirmed via
+`SELECT COUNT(Id) FROM Account` that they genuinely existed (returned 3),
+then called `record-counts Account` immediately after — it came back
+completely empty (the API appears to omit zero-and-stale-cached objects
+from the response rather than returning `count: 0`). **This means the
+API is unsuitable for the specific "validate a load I just ran actually
+landed its rows" use case** raised alongside this request — that already
+has an authoritative path (`profile_salesforce_object()`'s own
+`COUNT(Id)`, deliberately left untouched, or a direct `query` COUNT()),
+and this roadmap item doesn't replace it. What this genuinely is good
+for: a fast, cheap **rough triage** across many objects at once (e.g.
+"how big are these 50 objects, roughly, before deciding what to profile
+deeply") where a several-minutes-stale cache doesn't matter. Also excludes
+deleted/archived records and associated objects (`History`/`Feed`/`Share`/
+`ChangeEvent`).
 
 ---
 

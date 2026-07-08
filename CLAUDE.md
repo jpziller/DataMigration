@@ -73,6 +73,13 @@ venv may not be active in a fresh shell:
 - Inspect org:  `.venv/Scripts/python.exe cli.py list-objects`
 -               `.venv/Scripts/python.exe cli.py describe Account`
 -               `.venv/Scripts/python.exe cli.py dump-describe Account`
+-               `.venv/Scripts/python.exe cli.py record-counts Account Contact [--all-objects]`
+                (one HTTP call for many objects' record counts via `/limits/recordCount` —
+                much cheaper than a SOQL `COUNT()` per object, but an **approximate, cached**
+                snapshot, confirmed live to lag real inserts noticeably and to omit 0-record
+                objects entirely rather than showing 0. Fast rough triage across many objects,
+                **not** a substitute for `profile-salesforce`'s exact count when validating a
+                load actually landed every row. See `ROADMAP.md` #41.)
 - Query:        `.venv/Scripts/python.exe cli.py query "SELECT Id, Name FROM Account LIMIT 10"`
                 `[--all]` to paginate everything, `[--csv path]`/`[--excel path]` to export.
                 (Basic DLO/DMO lookups already work here too, no separate command needed —
@@ -120,7 +127,9 @@ venv may not be active in a fresh shell:
                 Salesforce Id, since none exist yet; building the real `*_Load` transform
                 (assigning the actual migration key) is still a manual next step. Never touches
                 Salesforce. Same skip policy as `generate-mock-data` — no Data.com fields, no
-                Latitude/Longitude subfields.)
+                Latitude/Longitude subfields. `--count NAME=N-M` (e.g. `Contact=1-2`) randomizes
+                the per-parent count via Snowfakery's own `random_number()` instead of a flat N —
+                a statistical split, not a guaranteed exact percentage.)
 - Mapping doc:  `.venv/Scripts/python.exe cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts`
                 `.venv/Scripts/python.exe cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts`
                 (one workbook, one tab per object — reuse the SAME output path for every object in
@@ -175,6 +184,11 @@ venv may not be active in a fresh shell:
                 unchunked job (Bulk API 2.0's own default without this framework's involvement); any
                 integer pins that exact value verbatim and is never second-guessed — a scripted value
                 always wins, same as every established migration tool's hardcode-it norm.)
+                `--run-book <path.xlsx> --run-book-tab <name>` (opt-in, both required together —
+                right after this load's own `BulkOpsLog` row is written, automatically calls the same
+                sync `update-migration-run-book` uses against that tab's Load phase. Not automatic by
+                default; `bulkops` shouldn't silently touch a spreadsheet file unless asked to. See
+                `ROADMAP.md` #16.)
 - Retry a failed load:
                 `.venv/Scripts/python.exe cli.py bulkops-retry Contact_Load`
                 (copies only the failed rows — where `Error` is populated — from a load table or its
@@ -246,19 +260,30 @@ venv may not be active in a fresh shell:
                 CPQ automation, so every phase's result columns always need a human filling Person
                 Responsible/Begin-End Time; this is the framework's "bigger picture" document
                 spanning both manual and scripted steps.)
+                `.venv/Scripts/python.exe cli.py update-migration-run-book migration_run_book.xlsx --tab Dev1`
+                (pulls new `dbo.BulkOpsLog` rows into that tab's Load phase since the last sync —
+                fills in a still-pending auto-fill placeholder for that object if one exists,
+                otherwise inserts a new row (e.g. a retry) — never overwrites an already-resolved
+                row or anything a human typed in by hand. Tracks a per-tab "Last Synced Log Id"
+                watermark in the header block (never carried forward on a new pass) so re-running
+                is idempotent. Only `BulkOpsLog`'s own aggregate columns get pulled in — per-row
+                `Error Details` text isn't populated (would need the separate `_Result` writeback
+                table too). Also available as an opt-in automatic step on `bulkops` itself via
+                `--run-book`/`--run-book-tab` (same underlying sync, called right after that load's
+                own `BulkOpsLog` row is written) instead of running this separately.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
-`/describe`, `/dump-describe`, `/query`, `/profile`, `/analyze-load-order`,
+`/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,
 `/generate-mock-data`, `/generate-related-mock-data`, `/generate-mapping-doc`,
 `/check-mapping-balance`, `/auto-map`, `/generate-solution-doc`,
 `/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
-`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`
+`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from

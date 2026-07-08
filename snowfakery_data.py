@@ -151,7 +151,11 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
     framework's own load-order dependency graph, and write it to
     _stage/<objects>_recipe.yml.
 
-    counts: {object_name: int} -- required for every name in object_names.
+    counts: {object_name: int | str} -- required for every name in object_names.
+    A str value is passed through verbatim as a Snowfakery count expression
+    (e.g. "${{random_number(min=1,max=2)}}", built by cli.py from a
+    --count NAME=N-M range) for a random per-parent count instead of a
+    fixed one.
 
     Returns (recipe_path, skipped_by_object, primary_parent,
     secondary_exact_parents, secondary_random_parents, fields_by_object).
