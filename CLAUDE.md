@@ -41,6 +41,13 @@ for you, and it'll stick for future sessions too.
   findings going forward — not the ad hoc script that helped research/build
   it, even if that script still works fine. Retire the scratch script once
   the real command exists; don't keep reaching for it out of habit.
+- **Every requested review includes a security pass.** When asked to review
+  the repo (or any part of it), always check for security issues as part of
+  it — never-committed-secrets in git history, credential patterns in code/
+  docs, personal/org-identifying content that shouldn't ship, and drift in
+  `docs/SECURITY_OVERVIEW.md` — not just correctness and doc consistency.
+  This repo is meant to be opened up to others; it stays clean continuously,
+  not just before a visibility change.
 
 ## How to operate here: read-only eyes, reviewed hands
 - To **look** at SQL Server (schemas, row counts, samples, validating a load),
