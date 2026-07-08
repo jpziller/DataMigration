@@ -346,7 +346,8 @@ Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
-`/query-calculated-insight`, `/list-data-graphs`)
+`/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
+`/suggest-batch-heuristics`)
 — see "Claude Code operating layer" below.
 
 ---

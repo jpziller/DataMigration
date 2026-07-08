@@ -1,0 +1,120 @@
+{
+  "_comment": [
+    "Batch-size knowledge base for bulkops' dynamic sizing (ROADMAP #15).",
+    "Git-tracked and human-curated, like field_synonyms.json: this file is",
+    "the cross-project source of truth; per-project observations live in",
+    "dbo.BulkOpsLog and never overwrite this file automatically. When a",
+    "real migration converges on a better number for an object, run",
+    "`suggest-batch-heuristics` and commit the change here deliberately,",
+    "so the next project starts from what the last one learned.",
+    "",
+    "All sizing moves along `ladder` -- a small set of standard rungs, so",
+    "every recommendation is a comparable, memorable value instead of an",
+    "arbitrary computed one. Adjustments are expressed in whole rungs.",
+    "Why per-object seeds at all: Bulk API 2.0 has no server-side",
+    "adaptivity -- it never inspects an org's automation to size batches,",
+    "so any 'common sense' about notoriously automation-heavy objects has",
+    "to live client-side, here."
+  ],
+  "ladder": [50, 100, 200, 500, 1000, 2000, 5000, 10000],
+  "default_batch_size": 2000,
+  "risk_adjustments": {
+    "_comment": "Rungs DOWN the ladder per signal from dbo.ObjectAutomationRisk (analyze-org-risk, ROADMAP #5). Applied cumulatively.",
+    "any_active_apex_trigger_rungs_down": 1,
+    "record_triggered_flows_threshold": 3,
+    "record_triggered_flows_rungs_down": 1,
+    "active_validation_rules_threshold": 10,
+    "active_validation_rules_rungs_down": 1
+  },
+  "history_rules": {
+    "_comment": "Reactions to this org's own dbo.BulkOpsLog history (ROADMAP #14). Lock errors are UNABLE_TO_LOCK_ROW rows written back by a prior run.",
+    "runs_considered": 5,
+    "lock_errors_rungs_down": 2,
+    "clean_runs_to_increase": 2,
+    "clean_runs_rungs_up": 1
+  },
+  "object_seeds": {
+    "Opportunity": {
+      "start": 200,
+      "why": "OOTB heavy: forecasting recalculation, Account rollup pressure, and almost every real org piles triggers/Flows onto it"
+    },
+    "OpportunityLineItem": {
+      "start": 200,
+      "why": "Every row locks its parent Opportunity and recalculates Amount/Quantity rollups -- classic UNABLE_TO_LOCK_ROW source"
+    },
+    "OpportunityContactRole": {
+      "start": 500,
+      "why": "Locks the parent Opportunity, lighter automation than line items"
+    },
+    "Case": {
+      "start": 500,
+      "why": "Assignment rules, escalation rules, entitlements/milestones commonly fire on insert"
+    },
+    "CaseComment": {
+      "start": 500,
+      "why": "Locks the parent Case"
+    },
+    "Order": {
+      "start": 200,
+      "why": "Status-driven locking; frequently CPQ/Billing-adjacent with heavy automation"
+    },
+    "OrderItem": {
+      "start": 200,
+      "why": "Locks the parent Order; rollup pressure like OpportunityLineItem"
+    },
+    "Contract": {
+      "start": 500,
+      "why": "Approval/activation automation is common"
+    },
+    "CampaignMember": {
+      "start": 500,
+      "why": "Each row locks both its Campaign and its Lead/Contact -- two-sided lock contention"
+    },
+    "PricebookEntry": {
+      "start": 500,
+      "why": "Locks the parent Pricebook2 and Product2"
+    },
+    "Task": {
+      "start": 500,
+      "why": "WhoId/WhatId lock the related Lead/Contact/Account/Opportunity"
+    },
+    "Event": {
+      "start": 500,
+      "why": "Same WhoId/WhatId parent locking as Task"
+    },
+    "User": {
+      "start": 50,
+      "why": "Role/territory changes trigger org-wide sharing recalculation -- keep user loads tiny and expect them to be slow"
+    },
+    "Group": {
+      "start": 50,
+      "why": "Sharing recalculation on group changes"
+    },
+    "GroupMember": {
+      "start": 50,
+      "why": "Sharing recalculation per membership change"
+    },
+    "AccountContactRelation": {
+      "start": 500,
+      "why": "Locks both the Account and the Contact"
+    }
+  },
+  "prefix_seeds": {
+    "SBQQ__": {
+      "start": 50,
+      "why": "CPQ-grade automation: quote/line calculations cascade across objects (see docs/MIGRATION_PLAYBOOK.md batching guidance)"
+    },
+    "blng__": {
+      "start": 50,
+      "why": "Billing-grade automation: invoice/usage rollups cascade"
+    },
+    "vlocity_cmt__": {
+      "start": 50,
+      "why": "Industries (Vlocity) objects carry heavy managed automation"
+    },
+    "npsp__": {
+      "start": 200,
+      "why": "Nonprofit Success Pack rollup triggers fire broadly"
+    }
+  }
+}

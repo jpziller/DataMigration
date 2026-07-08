@@ -36,6 +36,7 @@ from sql_client import make_engine
 import metadata as md
 import replicate as rep
 import bulkops as bo
+import batch_advisor as ba
 import load_order as lo
 import profiling as pf
 import query_tool as qt
@@ -135,15 +136,24 @@ def import_parquet_cmd(parquet_path, table_name, schema, append):
               help="Required for insert/upsert -- what Setup > Email Administration > Deliverability is currently set to (no API can read this; check manually first).")
 @click.option("--confirm-external-email-risk", is_flag=True,
               help="Required in addition to --email-deliverability all-email, since that setting can send real outbound email to external contacts.")
+@click.option("--batch-size", default="auto",
+              help="Bulk API 2.0 records per job: 'auto' (default, recommend-batch-size's own logic), "
+                   "'none' (one unchunked job), or an integer to pin a value yourself -- an explicit "
+                   "number always wins and is never overridden.")
 def bulkops_cmd(object_name, operation, source_table, external_id, key_column, schema,
-                email_deliverability, confirm_external_email_risk):
+                email_deliverability, confirm_external_email_risk, batch_size):
     s, sf, engine = _ctx()
     summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
                          external_id=external_id, key_column=key_column,
                          schema=schema, stage_dir=s.stage_dir,
                          email_deliverability=email_deliverability,
-                         confirm_external_email_risk=confirm_external_email_risk)
+                         confirm_external_email_risk=confirm_external_email_risk,
+                         batch_size=batch_size)
     warnings = summary.pop("preflight_warnings", [])
+    rationale = summary.pop("batch_size_rationale", [])
+    if rationale:
+        for line in rationale:
+            click.echo(f"[batch-size] {line}")
     for k, v in summary.items():
         click.echo(f"{k:12}: {v}")
     if warnings:
@@ -558,6 +568,40 @@ def analyze_org_risk_cmd(object_names, mapping_path, schema):
             click.echo(f"    Warning: {w}")
 
     click.echo(f"\nResults in {schema}.ObjectAutomationRisk")
+
+
+@cli.command("recommend-batch-size")
+@click.argument("object_name")
+@click.option("--schema", default="dbo")
+def recommend_batch_size_cmd(object_name, schema):
+    """Print bulkops' batch-size recommendation for an object, with full
+    rationale, without loading anything -- read-only, no Salesforce call."""
+    _, _, engine = _ctx()
+    size, rationale = ba.recommend_batch_size(engine, object_name, schema=schema)
+    for line in rationale:
+        click.echo(line)
+
+
+@cli.command("suggest-batch-heuristics")
+@click.option("--schema", default="dbo")
+def suggest_batch_heuristics_cmd(schema):
+    """Print candidate reference/batch_size_heuristics.json edits based on
+    this project's own converged load history (dbo.BulkOpsLog) -- never
+    writes the file; review and commit changes yourself, same as adding a
+    new alias to the field-synonym thesaurus."""
+    _, _, engine = _ctx()
+    suggestions = ba.suggest_heuristic_updates(engine, schema=schema)
+    if not suggestions:
+        click.echo("No converged batch sizes to suggest yet -- needs several consecutive "
+                   "clean runs at the same size for an object (see reference/batch_size_heuristics.json's "
+                   "history_rules.clean_runs_to_increase).")
+        return
+    for s in suggestions:
+        current = s["current_seed"] if s["current_seed"] is not None else "(no existing seed)"
+        click.echo(f"{s['object']}: converged on {s['converged_size']} over {s['runs']} clean run(s) "
+                   f"-- current seed: {current}")
+    click.echo("\nReview and edit reference/batch_size_heuristics.json's object_seeds "
+              "yourself, then commit deliberately -- this command never writes the file.")
 
 
 if __name__ == "__main__":

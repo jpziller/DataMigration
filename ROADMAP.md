@@ -27,7 +27,7 @@ summarizes.
 | 12 | Parquet file import | **Built** | `import-parquet` | Brings a Parquet file's data into SQL Server as typed columns — a second way to get source data in, alongside pulling directly from a Salesforce org. |
 | 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 | Forces you to actually go check Setup's Email Deliverability setting before any insert/upsert that could send real email to real people, and pass what it shows as a flag. This is a required human confirmation, not an automatic check — Salesforce has no API to read that setting. |
 | 14 | Load activity logging + analytics | Logging **Built** (opt-in); analytics not built | `enable-bulkops-logging`, `disable-bulkops-logging` | Optional, off-by-default record of every `bulkops` run (what, when, how many succeeded/failed) written to a SQL Server table, so you can look back at history instead of relying on console scrollback. Turn it on once per schema; it then logs automatically. |
-| 15 | Dynamic batch sizing from org metadata review | Not built, builds on #5/#14 | — | Idea: automatically use a smaller batch size for heavily-automated objects (lots of triggers/Flows) instead of a human having to already know that and set it manually. |
+| 15 | Dynamic batch sizing from org metadata review | **Built** | `recommend-batch-size`, `suggest-batch-heuristics`, `bulkops --batch-size` | Automatically start heavily-automated objects (Opportunity, CPQ/Billing, etc.) at a smaller batch size, adjusted further from this org's own automation and this project's own load history — full rationale printed, and a scripted value always overrides it. |
 | 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — | Idea: a living record of every step (manual and scripted) taken during a real migration cutover — who did what, when, what errors came up. Waiting on a real example template before this gets designed. |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
 | 18 | Data Cloud (D360) query support | **Built** — all 5 findings researched, 4.5 confirmed live (Data Graph query-by-id/lookup-key is written but unverified — no test Data Graph exists yet) | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status`, `data-cloud-profile`, `list-data-graphs` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, Unified Profile data, Data Graph metadata, and check processing status for Data Streams/DSOs/Identity Resolution/Data Transforms/Calculated Insights/Data Graphs — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
@@ -788,26 +788,93 @@ error-prone, batch-time regressions) — deliberately deferred as its own
 second step now that the raw log table exists to analyze, not
 speculatively built before there's real logged data to analyze.
 
-## 15. Dynamic batch sizing from org metadata review (not built, likely builds on #5/#14)
+## 15. Dynamic batch sizing from org metadata review — BUILT (`batch_advisor.py`)
 
-Problem raised directly: heavily-automated objects (per
-`docs/MIGRATION_PLAYBOOK.md`'s row-lock/batching guidance — CPQ/Billing-
-style objects often need batch sizes as small as 50 to let triggers/Flows
-keep up) currently need a human to know that ahead of time and pass the
-right batch size manually. Idea: use what `analyze-org-risk` (#5) already
-knows about an object's automation (validation rule count, Apex triggers,
-active record-triggered Flows) to automatically dial down `bulkops`'
-batch size for objects likely to hit lock contention or Bulk API limits,
-instead of always using the same default.
+Problem raised directly: Bulk API 2.0 has **zero server-side adaptivity**
+— confirmed against the installed `simple-salesforce` source (1.12.9,
+matching this repo's own requirements floor) directly, not assumed: it
+mechanically splits submitted data and never inspects org automation to
+size anything. So the "start heavily-automated objects smaller" common
+sense every established migration tool's users eventually learn through
+trial and error has to live entirely client-side. What we confirmed
+actually exists to build on: `simple_salesforce`'s bulk2 handler exposes
+a real `batch_size` parameter on insert/update/upsert/delete (splits the
+submitted CSV into that many records per ingest job) and a `concurrency`
+parameter defaulting to 1 (serial submission — left untouched here;
+exposing parallelism was an explicit non-goal).
 
-Not yet scoped: `bulk_op()` doesn't currently expose a batch-size
-parameter to the Bulk API call at all (`simple_salesforce`'s `bulk2`
-handler picks its own default chunking) — first needs confirming whether
-`simple_salesforce` exposes batch size control at all, and if not, what
-the actual Bulk API 2.0 parameter for it is, before any "dial it down
-automatically" logic can be built on top. Depends on #5 already existing
-for the automation signal (built) and #14 for the timing data that would
-let this be tuned from real observed performance rather than a guess.
+**Three layers, in order, each named in the printed rationale rather
+than hidden behind a bare number** — the explicit ask was to pass
+knowledge to a new data architect, not just compute a value:
+1. **Seed knowledge** (`reference/batch_size_heuristics.json`, git-
+   tracked and human-curated like `field_synonyms.json`) — exact-name
+   seeds for OOTB-heavy objects (`Opportunity`, `OpportunityLineItem`,
+   `Case`, `Order`, `CampaignMember`, ...) and managed-package prefix
+   seeds (`SBQQ__`, `blng__`, `vlocity_cmt__`, `npsp__`), each with a
+   `why` string. The CPQ/Billing "≈50" guidance already in
+   `docs/MIGRATION_PLAYBOOK.md`'s batching section became the seed for
+   those two prefixes directly — confirmed that guidance's exact wording
+   before citing it, not assumed.
+2. **This org's own automation** (`dbo.ObjectAutomationRisk`, written by
+   `analyze-org-risk` — #5) — active Apex triggers, record-triggered
+   Flows, and validation rule counts each step the recommendation down a
+   rung past a threshold. If the object was never scanned, the rationale
+   says so and suggests running `analyze-org-risk` rather than silently
+   skipping the signal.
+3. **This project's own load history** (`dbo.BulkOpsLog` — #14, which
+   gained `BatchSize`/`BatchSizeSource`/`LockErrorCount` columns for
+   this) — a prior run's `UNABLE_TO_LOCK_ROW` errors step the size down;
+   consecutive clean runs step it up cautiously. This is the trial-and-
+   error feedback loop, automated and remembered instead of re-discovered
+   by hand on every project.
+
+All recommendations snap to a **fixed ladder** of 8 sizes (50, 100, 200,
+500, 1000, 2000, 5000, 10000) rather than an arbitrary computed number —
+directly requested, so a recommendation is always one of a small,
+memorable set of comparable values, not something like "743."
+
+**The override/toggle, exactly as requested**: `bulkops --batch-size`
+defaults to `auto` (the three-layer recommendation above, rationale
+printed before the load runs). An explicit integer is honored verbatim
+forever and never second-guessed — a scripted value always wins and
+stays, the same hardcode-it-in-the-script norm every established
+migration tool's users already follow, just with a smarter starting
+point than a blank page. `none` submits one unchunked job (today's
+original, pre-#15 behavior) as an explicit escape hatch.
+
+**`suggest-batch-heuristics`** reads this project's own converged load
+history and prints candidate `object_seeds` edits for
+`reference/batch_size_heuristics.json` — it never writes the file
+itself; a human reviews and commits deliberately, the exact same
+git-is-truth principle `auto_mapper.py`'s thesaurus workflow already
+established. This is the cross-project persistence the user asked for:
+what one migration's trial-and-error converges on becomes the next
+migration's starting seed, once someone commits it.
+
+**A real bug found via live testing, not assumed**: the first
+implementation of the history layer queried `BatchSize`/`LockErrorCount`
+unconditionally and crashed with "Invalid column name" against this
+project's own pre-existing `dbo.BulkOpsLog` (created before these
+columns existed). Fixed by checking column existence first and telling
+the architect to re-run `enable-bulkops-logging` to upgrade the table in
+place (history preserved) — the same idempotent-upgrade pattern
+`enable_bulkops_logging()` itself already uses for its own schema
+changes.
+
+**Verified live against a real mirror DB**: seed lookup (`Opportunity` →
+200, `SBQQ__Quote__c` → 50 via prefix match, `Account` → the 2000
+default with no seed), the automation-risk step-down (synthetic active
+Apex trigger + 3 record-triggered Flows: 2000 → 500), the lock-error
+step-down (synthetic `UNABLE_TO_LOCK_ROW` history: 500 → 100), the
+clean-run step-up (two synthetic clean runs: 500 → 1000), and
+`suggest-batch-heuristics` correctly surfacing the converged test
+object. All synthetic rows cleaned up afterward.
+
+**Not built (explicit v1 non-goals, not gaps)**: no mid-run adaptive
+backoff between chunks of the *same* load (a phase-2 idea, worth its own
+future item if this proves insufficient); no exposure of Bulk API 2.0's
+`concurrency`/parallelism knob; `suggest-batch-heuristics` never writes
+the seed file automatically, by design.
 
 ## 16. Run book (manual + programmatic step tracking) — blocked on a template
 

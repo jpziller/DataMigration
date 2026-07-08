@@ -105,6 +105,8 @@ from datetime import datetime, timezone
 import pandas as pd
 from sqlalchemy import text
 
+import batch_advisor
+
 
 def _read_result_csv(csv_text):
     if not csv_text or not csv_text.strip():
@@ -209,7 +211,12 @@ def enable_bulkops_logging(engine, schema="dbo"):
     same style as risk_analyzer.py's _ensure_table. Off by default; this is
     the one-time, explicit opt-in this module's ACTIVITY LOGGING docstring
     section describes. Once this table exists, bulk_op() logs automatically
-    for every call against this schema -- no per-call flag needed."""
+    for every call against this schema -- no per-call flag needed.
+
+    Also idempotently adds the batch-size columns (ROADMAP #15) if this is
+    an existing table from before they were introduced -- re-running enable
+    on an already-enabled schema upgrades it in place rather than requiring
+    disable+re-enable (which would discard log history)."""
     with engine.begin() as cx:
         cx.execute(text(
             f"IF OBJECT_ID('{schema}.BulkOpsLog', 'U') IS NULL "
@@ -230,8 +237,17 @@ def enable_bulkops_logging(engine, schema="dbo"):
             "StartedAt DATETIME2 NOT NULL, "
             "CompletedAt DATETIME2 NOT NULL, "
             "DurationSeconds FLOAT NOT NULL, "
-            "RunBy NVARCHAR(128) NULL);"
+            "RunBy NVARCHAR(128) NULL, "
+            "BatchSize INT NULL, "
+            "BatchSizeSource NVARCHAR(20) NULL, "
+            "LockErrorCount INT NULL);"
         ))
+        for col, coltype in (("BatchSize", "INT"), ("BatchSizeSource", "NVARCHAR(20)"),
+                             ("LockErrorCount", "INT")):
+            cx.execute(text(
+                f"IF COL_LENGTH('{schema}.BulkOpsLog', '{col}') IS NULL "
+                f"ALTER TABLE [{schema}].[BulkOpsLog] ADD [{col}] {coltype} NULL;"
+            ))
 
 
 def disable_bulkops_logging(engine, schema="dbo"):
@@ -259,11 +275,11 @@ def _write_bulkops_log_row(engine, schema, row):
             "(Operation, ObjectName, SourceTable, TargetSchema, RecordsSubmitted, "
             "RecordsSucceeded, RecordsFailed, RecordsAmbiguous, ExternalIdNotFound, "
             "JobCount, EmailDeliverability, WrittenTo, StartedAt, CompletedAt, "
-            "DurationSeconds, RunBy) VALUES "
+            "DurationSeconds, RunBy, BatchSize, BatchSizeSource, LockErrorCount) VALUES "
             "(:operation, :object_name, :source_table, :target_schema, :submitted, "
             ":succeeded, :failed, :ambiguous, :external_id_not_found, :job_count, "
             ":email_deliverability, :written_to, :started_at, :completed_at, "
-            ":duration_seconds, :run_by)"
+            ":duration_seconds, :run_by, :batch_size, :batch_size_source, :lock_error_count)"
         ), row)
 
 
@@ -271,7 +287,16 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             send_columns=None, external_id=None,
             key_column="LoadId", id_column="Id", error_column="Error",
             schema="dbo", stage_dir="_stage",
-            email_deliverability=None, confirm_external_email_risk=False):
+            email_deliverability=None, confirm_external_email_risk=False,
+            batch_size="auto"):
+    """See this module's docstring for the full design. batch_size (ROADMAP
+    #15): "auto" (default) asks batch_advisor.recommend_batch_size() for a
+    ladder-rung recommendation and prints its rationale before the load runs;
+    an int is honored verbatim (source "static") -- a scripted value always
+    wins and stays, same as every other established migration tool's
+    hardcode-it-in-the-script norm; None/"none" submits everything as one
+    unchunked job (today's original behavior, still available as an
+    explicit escape hatch)."""
     operation = operation.lower()
     if operation not in ("insert", "update", "upsert", "delete"):
         raise ValueError(f"Unsupported operation: {operation}")
@@ -281,6 +306,19 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     deliverability_note = _check_email_deliverability(
         operation, email_deliverability, confirm_external_email_risk
     )
+
+    batch_rationale = []
+    if isinstance(batch_size, str) and batch_size.lower() == "auto":
+        resolved_batch_size, batch_rationale = batch_advisor.recommend_batch_size(
+            engine, object_name, schema=schema
+        )
+        batch_size_source = "auto"
+    elif batch_size is None or (isinstance(batch_size, str) and batch_size.lower() == "none"):
+        resolved_batch_size = None
+        batch_size_source = "none"
+    else:
+        resolved_batch_size = int(batch_size)
+        batch_size_source = "static"
 
     # If the load table carries a [Sort] column (see
     # sql/functions/utilities/AddBulkLoadSortColumn.sql), submit rows in that
@@ -355,15 +393,15 @@ def bulk_op(sf, engine, object_name, operation, source_table,
 
         handler = getattr(sf.bulk2, object_name)
         if operation == "insert":
-            results = handler.insert(csv_path)
+            results = handler.insert(csv_path, batch_size=resolved_batch_size)
         elif operation == "update":
-            results = handler.update(csv_path)
+            results = handler.update(csv_path, batch_size=resolved_batch_size)
         elif operation == "upsert":
             if not external_id:
                 raise ValueError("upsert requires external_id")
-            results = handler.upsert(csv_path, external_id)
+            results = handler.upsert(csv_path, external_id, batch_size=resolved_batch_size)
         else:  # delete
-            results = handler.delete(csv_path)
+            results = handler.delete(csv_path, batch_size=resolved_batch_size)
         job_count = len(results)
 
         # Collect per-job successful + failed records.
@@ -408,6 +446,11 @@ def bulk_op(sf, engine, object_name, operation, source_table,
 
     n_ok = df["_result_id"].notna().sum()
     n_err = df["_result_error"].notna().sum()
+    # Row-lock contention (ROADMAP #15's history feedback loop reads this
+    # back on future runs) -- Salesforce's own error string for it.
+    lock_error_count = int(
+        df["_result_error"].fillna("").str.contains("UNABLE_TO_LOCK_ROW").sum()
+    )
 
     # Write results back. For delete-by-external-id, the result table should
     # still show the external id value a row was submitted for, even though
@@ -439,6 +482,10 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         "written_to": target,
         "preflight_warnings": preflight["required_not_sent"],
         "email_deliverability": deliverability_note,
+        "batch_size": resolved_batch_size if resolved_batch_size is not None else "none (unchunked)",
+        "batch_size_source": batch_size_source,
+        "batch_size_rationale": batch_rationale,
+        "lock_errors": lock_error_count,
     }
 
     # Activity logging -- opt-in per schema, see this module's ACTIVITY
@@ -465,6 +512,9 @@ def bulk_op(sf, engine, object_name, operation, source_table,
                 "completed_at": completed_at,
                 "duration_seconds": (completed_at - started_at).total_seconds(),
                 "run_by": getpass.getuser(),
+                "batch_size": resolved_batch_size,
+                "batch_size_source": batch_size_source,
+                "lock_error_count": lock_error_count,
             })
             summary["logged"] = True
         except Exception as e:

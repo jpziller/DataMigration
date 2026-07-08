@@ -158,6 +158,14 @@ venv may not be active in a fresh shell:
                 resolves external id values to real Ids via a query first, then deletes the resolved
                 rows. A value with no matching org record never reaches the API; it gets a clear
                 local "no matching record found" error written back like any other failure.)
+                `--batch-size auto|none|<N>` (default `auto` — dynamic recommendation printed as
+                rationale before the load runs, layering seed knowledge for OOTB-heavy objects
+                (`reference/batch_size_heuristics.json`), this org's own automation (`analyze-org-risk`'s
+                `ObjectAutomationRisk` table), and this project's own load history (`BulkOpsLog`'s
+                `LockErrorCount`) — see `batch_advisor.py` and `ROADMAP.md` #15. `none` submits one
+                unchunked job (Bulk API 2.0's own default without this framework's involvement); any
+                integer pins that exact value verbatim and is never second-guessed — a scripted value
+                always wins, same as every established migration tool's hardcode-it norm.)
 - Retry a failed load:
                 `.venv/Scripts/python.exe cli.py bulkops-retry Contact_Load`
                 (copies only the failed rows — where `Error` is populated — from a load table or its
@@ -185,6 +193,14 @@ venv may not be active in a fresh shell:
                 one field-level signal it does give cheaply is cross-referencing an active
                 validation rule's `ErrorDisplayField` against the mapping doc's actually-migrated
                 target fields (`Migrate Data == Yes`) as a "direct hit." See `risk_analyzer.py`.)
+- Batch-size recommendation (read-only, no Salesforce write — same rationale `bulkops` prints
+                automatically when `--batch-size` is left at `auto`):
+                `.venv/Scripts/python.exe cli.py recommend-batch-size Opportunity`
+                `.venv/Scripts/python.exe cli.py suggest-batch-heuristics`
+                (the second one reads this project's own converged load history and prints candidate
+                `reference/batch_size_heuristics.json` edits — never writes the file itself; a human
+                reviews and commits deliberately, same as adding a new alias to the field-synonym
+                thesaurus. See `batch_advisor.py` and `ROADMAP.md` #15.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
@@ -196,7 +212,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
-`/query-calculated-insight`, `/list-data-graphs`
+`/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
+`/suggest-batch-heuristics`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -280,6 +297,12 @@ don't jump straight to writing T-SQL:
    key (rule 7). Resolve anything it flags.
 7. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2)
    and, for insert/upsert, Email Deliverability checked and passed (rule 9).
+   Leave `--batch-size` at its `auto` default unless you already know a
+   pinned value from a prior run of this same project — a scripted
+   integer always wins over the recommendation and stays exactly as
+   written, the same "hardcode it in the load script" norm every
+   established migration tool uses, just with a smarter starting point
+   (see `ROADMAP.md` #15).
 
 ## Licensing
 MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,
@@ -300,10 +323,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
-  `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`, `risk_analyzer.py`
+  `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
+  `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`
   — the Data Architect toolbelt (load-order analysis, profiling, ad hoc
-  query, mock data, mapping doc, auto-mapping, solution document
-  generation, org automation risk analysis).
+  query, single-object and relationship-aware mock data, mapping doc,
+  auto-mapping, solution document generation, org automation risk analysis,
+  Data Cloud/D360 query and status tooling, dynamic batch-size recommendations).
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always
@@ -311,6 +336,13 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   correction during a real mapping session is a candidate new alias; add it
   here rather than hardcoding it in Python, so the thesaurus improves
   across migrations instead of staying static.
+- `reference/batch_size_heuristics.json` — git-tracked batch-size knowledge
+  base used by `batch_advisor.py`: the fixed sizing ladder, per-object and
+  managed-package-prefix seeds for OOTB-heavy objects, and the rules for
+  adjusting off org automation/load history. Same "git is truth, human
+  reviews and commits deliberately" principle as the field synonym
+  thesaurus — `suggest-batch-heuristics` only ever prints candidate edits,
+  never writes the file itself.
 - `sql/transformations/*.sql` — the migration logic (numbered; run in order).
 - `sql/functions/` — reusable T-SQL function library (see its own README).
 - `force-app/` — Salesforce metadata deployed via `sf project deploy`
@@ -340,8 +372,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
     `enable-bulkops-logging --schema <schema>` creates it; from then on
     every `bulkops` call against that schema logs itself (action, object,
     source table, record counts, job count, Email Deliverability
-    attestation, start/end/duration, OS user). `disable-bulkops-logging`
-    drops it and its history.
+    attestation, start/end/duration, OS user, batch size + source +
+    row-lock error count for `batch_advisor.py`'s history layer).
+    Re-running `enable-bulkops-logging` on an existing table upgrades it
+    in place if it predates the batch-size columns — history is
+    preserved, not discarded. `disable-bulkops-logging` drops it and its
+    history entirely.
 - `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
   `SOQL_QUERY_LIBRARY.md` (Tooling API queries), `SECURITY_OVERVIEW.md`
   (credential inventory, trust boundaries, what's code-enforced vs.
