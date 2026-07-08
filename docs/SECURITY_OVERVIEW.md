@@ -9,6 +9,11 @@ aspirational target state. It should be updated whenever a change alters a
 trust boundary (a new credential type, a new network listener, a UI, SSO,
 etc.), not just when someone remembers to.
 
+To report a vulnerability in this framework itself, see
+[`SECURITY.md`](../SECURITY.md) (private reporting via GitHub Security
+Advisories) -- this document is the architecture overview, not the
+reporting channel.
+
 ---
 
 ## 1. What this is, in one paragraph
@@ -34,8 +39,19 @@ cli.py (Python, runs locally, under the operator's own OS-level permissions)
    |                                   |
    v                                   v
 SQL Server "SF_Migration"        Salesforce org (via simple-salesforce /
-(local integration hub)           Bulk API 2.0 REST endpoints)
+(local integration hub)           Bulk API 2.0 REST endpoints; also the
+                                  /limits/recordCount REST resource for
+                                  `record-counts` -- same core-org token,
+                                  same host, no new boundary)
 ```
+
+Two purely local surfaces worth naming for completeness (no network
+involvement beyond what's above): the Migration Run Book
+(`migration_run_book.py`) shells out to the local `git` binary
+(`remote get-url` / `rev-parse`, fixed argument lists, no shell
+interpolation) to stamp commit breadcrumbs into generated workbooks, and
+reads/writes local `.xlsx` files -- see §5 for what those workbooks can
+contain.
 
 Three optional external services/hops, none in the critical data path by
 default:
@@ -71,6 +87,13 @@ default:
 | Salesforce username/password/security token (`password` mode) | `.env` | Manually configured | Documented as the "dev fallback only" mode in `README.md` -- weakest of the three, avoid in any shared/production environment. |
 | SQL Server credentials | `.env` (`SQL_UID`/`SQL_PWD`), or none at all if `SQL_TRUSTED_CONNECTION=yes` (Windows auth, the default) | Manually configured | Windows/trusted auth is the default and avoids a stored SQL password entirely. |
 | Mockaroo API key | `.env` | Manually configured | Only ever sent to Mockaroo's API; scoped to mock-data generation. |
+
+Explicitly **not** credentials, listed to preempt the question:
+`TICKET_SYSTEM_URL`/`TICKET_SYSTEM_LABEL` in `.env` are a plain display
+URL and label written into Migration Run Book headers -- no token, no
+authentication, never sent anywhere. If the ticket-system *integration*
+idea (`ROADMAP.md` #39) is ever built, its API token would be a genuinely
+new credential type and this table must gain a row for it.
 
 `.env`, `server.key`, and `.mcp.json` are all `.gitignore`'d (verified: never
 present in this repo's git history). `CLAUDE.md` hard rule 3 additionally
@@ -135,6 +158,13 @@ operator at a terminal" and would need to change if that assumption changes
   exactly this reason (see `README.md`'s "Repository structure") -- treat
   committing any of them as a deliberate per-project decision, not a
   default.
+- **Migration Run Book workbooks** (`generate-migration-run-book` output)
+  deserve their own line in that list: beyond business context, they embed
+  the **operator's OS username** (`BulkOpsLog`'s `RunBy`, synced into
+  Person Responsible by `update-migration-run-book`), the target **org
+  alias**, and the Git remote/commit breadcrumbs. Same rule -- committing
+  one is a deliberate decision, and one to sanitize first if the repo is
+  public.
 
 ## 6. AI-operator considerations (specific to this being Claude-Code-driven)
 
@@ -168,7 +198,7 @@ mode whose data-handling terms the org has already reviewed.
 
 ## 8. Forward-looking: what changes if the roadmap's UI/SSO item is built
 
-`ROADMAP.md` #12 (a web UI) and #13 (SSO / multi-user access) are explicitly
+`ROADMAP.md` #25 (a web UI) and #26 (SSO / multi-user access) are explicitly
 **not built** as of this document. If/when they are, §4 and §7 above stop
 being true in an important way: a listening web process introduces session
 management, an actual authentication boundary (today there isn't one -- the
@@ -182,7 +212,8 @@ just the feature surface.
 
 All dependencies (`requirements.txt`) are established, widely-used open
 source packages (`simple-salesforce`, `SQLAlchemy`, `pyodbc`, `pandas`,
-`click`, `openpyxl`, `requests`, `rich`, `docxtpl`, `python-dotenv`),
+`click`, `openpyxl`, `requests`, `rich`, `docxtpl`, `python-docx`,
+`python-dotenv`, `pyarrow`, `snowfakery`, `PyYAML`),
 version-pinned with a minimum floor, no vendored/copied third-party source
 beyond what's explicitly disclosed: `sql/functions/`'s provenance notes
 document that two functions were deliberately rewritten from scratch rather
@@ -214,6 +245,7 @@ for adoption.
 
 ---
 
-*Last reviewed against the codebase as of this document's creation. Update
-alongside any change that adds a credential type, a network listener, or an
-authentication boundary.*
+*Last reviewed against the codebase during the 2026-07-09 full repo review
+(covering the Migration Run Book, `record-counts`, and `SECURITY.md`/
+`CONTRIBUTING.md` additions). Update alongside any change that adds a
+credential type, a network listener, or an authentication boundary.*

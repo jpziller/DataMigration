@@ -168,6 +168,15 @@ def _parse_template(md_path):
             continue
         if _is_separator_row(cells):
             continue
+        # Same drift protection as the header check above -- a data row
+        # with the wrong cell count would otherwise be silently truncated/
+        # misaligned by _write_data_row's zip() (found live: an extra
+        # trailing empty cell on every starter row went unnoticed).
+        if len(cells) != len(_COLUMNS):
+            raise ValueError(
+                f"{md_path} phase '{current['name']}' has a data row with "
+                f"{len(cells)} cell(s), expected {len(_COLUMNS)}: {cells[:3]}..."
+            )
         current["rows"].append(cells)
 
     return phases
@@ -175,6 +184,20 @@ def _parse_template(md_path):
 
 def _table_exists(cx, schema, table):
     return cx.execute(text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.{table}"}).scalar() is not None
+
+
+def _save_workbook(wb, path):
+    """Save with a clear message when the file is locked -- on Windows an
+    open-in-Excel workbook raises a bare PermissionError, and 'close the
+    file' is a much better answer than a traceback (a run book is exactly
+    the kind of file someone has open while working)."""
+    try:
+        wb.save(path)
+    except PermissionError as e:
+        raise ValueError(
+            f"Can't write {path} -- it's locked, most likely open in Excel. "
+            "Close it there and re-run."
+        ) from e
 
 
 def _git_info():
@@ -305,12 +328,14 @@ def _write_data_row(ws, row_idx, row_data):
 def _apply_conditional_formatting(ws):
     """Real Excel conditional-formatting rules for Status/Critical (colors
     update live if a human changes the value later -- not a one-time
-    paint), plus the Status dropdown. Idempotent: clears any existing
-    rules/validations on this sheet first so re-running (e.g. after
-    copy_worksheet) never stacks duplicate rules."""
-    ws.conditional_formatting._cf_rules = {}
-    ws._data_validations = []
-
+    paint), plus the Status dropdown. No clearing step is needed before
+    re-applying on a copied tab: confirmed against the installed openpyxl
+    (3.1.5), copy_worksheet() does not carry conditional formatting or
+    data validations to the copy at all -- which is exactly why
+    add_migration_run_book_pass() must call this on every new pass. (An
+    earlier version "cleared" via ws._data_validations = [], an attribute
+    that doesn't exist -- a silent no-op, removed rather than kept as
+    false reassurance.)"""
     status_col = _COLUMNS.index("Status") + 1
     critical_col = _COLUMNS.index("Critical") + 1
     status_letter = get_column_letter(status_col)
@@ -504,7 +529,7 @@ def generate_migration_run_book(output_path, tab_name, template_path=_TEMPLATE_P
     out_dir = os.path.dirname(output_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    wb.save(output_path)
+    _save_workbook(wb, output_path)
     return output_path
 
 
@@ -580,7 +605,7 @@ def add_migration_run_book_pass(path, from_tab, to_tab, template_path=_TEMPLATE_
     _blank_result_columns_and_refresh(dst, git_info)
     _apply_conditional_formatting(dst)
 
-    wb.save(path)
+    _save_workbook(wb, path)
     return path
 
 
@@ -610,26 +635,52 @@ def _iter_load_phase_rows(ws):
 _UNRESOLVED_STATUS_VALUES = {None, "", "Not Started"}
 
 
+def _object_matches(object_name, object_value):
+    """Does a row's Object cell refer to this Salesforce object? Exact
+    (case-insensitive) match, or the object name appearing as a whole
+    delimited token -- so "Account" matches "010_account_load.sql" but
+    "Order" does NOT match "030_orderitem_load.sql" (a naive substring
+    check did, found in review: an Order log row would have filled the
+    OrderItem placeholder, and Order/OrderItem is exactly the pairing this
+    framework's own batch heuristics expect together). Underscore counts
+    as a delimiter (required for the filename convention to match at all),
+    which leaves one disclosed residual edge: "Quote" would still match
+    inside "sbqq__quote__c_load.sql" since custom-object suffixes are
+    underscore-delimited too."""
+    value = str(object_value)
+    if object_name.lower() == value.strip().lower():
+        return True
+    return re.search(
+        rf"(?<![A-Za-z0-9]){re.escape(object_name)}(?![A-Za-z0-9])",
+        value, re.IGNORECASE,
+    ) is not None
+
+
 def _find_pending_load_row(ws, object_name):
-    """A Load-phase row whose Object mentions object_name, whose Status is
-    still unresolved (blank or the auto-fill default "Not Started" --
-    _load_order_rows() sets that explicitly, it isn't blank text), and
-    whose Total Records is blank -- an unresolved auto-fill placeholder,
-    safe to fill in. A row with a real Status (Completed/Issue/In Process/
-    N/A) or Total Records already set is either already resolved (a prior
-    sync) or a human's own in-progress entry -- never touched. Returns the
-    first match's row index, or None."""
+    """A Load-phase row whose Object refers to object_name (see
+    _object_matches), whose Status is still unresolved (blank or the
+    auto-fill default "Not Started" -- _load_order_rows() sets that
+    explicitly, it isn't blank text), and whose Total Records is blank --
+    an unresolved auto-fill placeholder, safe to fill in. A row with a
+    real Status (Completed/Issue/In Process/N/A) or Total Records already
+    set is either already resolved (a prior sync) or a human's own
+    in-progress entry -- never touched. An exact-name match is preferred
+    over a token match when both exist. Returns the row index, or None."""
     status_col = _COLUMNS.index("Status") + 1
     records_col = _COLUMNS.index("Total Records") + 1
+    token_match = None
     for row_idx, object_value in _iter_load_phase_rows(ws):
-        if object_name.lower() not in str(object_value).lower():
+        if not _object_matches(object_name, object_value):
             continue
         if ws.cell(row=row_idx, column=status_col).value not in _UNRESOLVED_STATUS_VALUES:
             continue
         if ws.cell(row=row_idx, column=records_col).value:
             continue
-        return row_idx
-    return None
+        if object_name.lower() == str(object_value).strip().lower():
+            return row_idx
+        if token_match is None:
+            token_match = row_idx
+    return token_match
 
 
 def _insert_load_row(ws, object_name):
@@ -747,5 +798,5 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
         _apply_log_result(ws, target_row, log_row)
 
     ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["LogId"])
-    wb.save(path)
+    _save_workbook(wb, path)
     return {"synced": len(new_rows), "inserted": inserted, "updated": updated}

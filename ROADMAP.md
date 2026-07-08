@@ -54,6 +54,7 @@ summarizes.
 | 39 | Ticket system (JIRA or equivalent) read/comment integration | Not built, needs API research | — | Idea: post comments to a specific JIRA (or equivalent) ticket directly (e.g. load results), and cross-reference GitHub commits/PRs tied to that ticket — deeper than the Migration Run Book header's static project link (#16). |
 | 40 | Configuration Workbook drift detection | Not built — blocked on a real template | — | Idea: read a team's existing "Configuration Workbook" (how developers document their build) and cross-check it against the actual deployed metadata — the same category of problem `check-mapping-balance` (#3) solves for mapping docs, applied to build documentation instead. Waiting on a real example template before this gets designed. |
 | 41 | Per-object record counts via the recordCount API | **Built** | `record-counts` | One HTTP call for many objects' record counts instead of a SOQL COUNT() per object — fast rough triage across many objects, confirmed live to be an approximate/cached snapshot (can lag real inserts by more than a few seconds), so not a substitute for `profile-salesforce`'s exact count when validating a load actually landed. |
+| 42 | Unit tests + CI for the pure-logic modules | Not built | — | Idea from the 2026-07-09 repo review: pytest coverage for the no-org-required logic (batch-size ladder math, load-order toposort, run-book template parsing/matching, mapping regex) plus a GitHub Action running it on push — the review found real bugs a test suite would have caught mechanically. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -1156,6 +1157,43 @@ hand-edited recipe.
 **Not built**: per-row `Error Details` text (would need reading the
 separate `_Result` writeback table alongside `BulkOpsLog`, not done here).
 
+**Review follow-up (2026-07-09 full repo review) — four fixes**:
+1. **Sync matching false positive (real correctness bug)**: the
+   log-row-to-placeholder match was a naive substring check, so an
+   `Order` log entry matched an `OrderItem` placeholder (`"order"` is
+   inside `"030_orderitem_load.sql"`) and would have written Order's
+   results onto OrderItem's row — and Order/OrderItem is exactly the
+   pairing this framework's own batch heuristics expect together.
+   Replaced with `_object_matches()`: exact cell match preferred, else
+   the object name as a whole delimited token (underscore counts as a
+   delimiter, required for the filename convention to match at all —
+   which leaves one disclosed residual edge: standard `Quote` still
+   matches inside `sbqq__quote__c_load.sql`). Ten-case matrix verified
+   including the original bug case.
+2. **Dead "safety" code removed**: `_apply_conditional_formatting()`
+   "cleared" prior data validations via `ws._data_validations = []` — an
+   attribute that doesn't exist in openpyxl 3.1.5, so a silent no-op
+   masquerading as idempotency. Harmless in practice only because
+   `copy_worksheet()` was separately confirmed to not carry conditional
+   formatting or data validations at all (which is why re-applying on
+   every new pass is required, not optional).
+3. **Template row-width drift**: every starter row in
+   `docs/MIGRATION_RUN_BOOK_TEMPLATE.md` carried an extra 17th empty cell
+   against the 16-column schema, silently truncated by `zip()` — correct
+   output by luck. Fixed the rows and taught `_parse_template()` to
+   validate data-row width the same way it already validated the header,
+   so this errors loudly instead of misaligning silently.
+4. **Locked-file UX**: saving any run-book workbook that's open in Excel
+   raised a bare `PermissionError` traceback; now a clear "close it in
+   Excel and re-run" error (`_save_workbook()`), since a run book is
+   exactly the kind of file someone has open while working.
+
+Also from the same review: the committed demo workbook had been generated
+from real test runs and embedded the operator's OS username (via
+`BulkOpsLog.RunBy` → Person Responsible) and real org alias — regenerated
+as a sanitized example, and `docs/SECURITY_OVERVIEW.md` §5 now calls out
+run-book workbooks as PII-bearing generated artifacts explicitly.
+
 ## 17. Fuzzy matching / dedup (deprioritized, not built)
 
 Explicitly lower priority than everything else in this "not yet started"
@@ -1956,6 +1994,12 @@ the default (an unfiltered response can be huge for a real org — confirmed
 live: ~90 objects back for a fresh Trailhead Playground with essentially
 no custom data yet).
 
+**Review follow-up (2026-07-09 full repo review)**: the initial
+implementation shipped without a `timeout=` on its `requests.get` -- a
+regression against this repo's own no-timeoutless-HTTP standard (every
+call in `data_cloud.py`/`mock_data.py` has one, added in an earlier review
+pass precisely because `requests`' default is to wait forever). Fixed.
+
 **The critical caveat, confirmed live, not just quoted from docs**:
 Salesforce's own documentation calls this "a cached snapshot in time that
 may not accurately represent the number of records," and testing this
@@ -1974,6 +2018,33 @@ for: a fast, cheap **rough triage** across many objects at once (e.g.
 deeply") where a several-minutes-stale cache doesn't matter. Also excludes
 deleted/archived records and associated objects (`History`/`Feed`/`Share`/
 `ChangeEvent`).
+
+## 42. Unit tests + CI for the pure-logic modules (not built)
+
+Raised by the 2026-07-09 full repo review: every verification in this
+project is live and manual — thorough and well-documented in this file's
+own BUILT write-ups, but unrepeatable, and nothing protects a future
+collaborator (or a future refactor) from silently breaking logic that was
+only ever verified once by hand. The same review found bugs that a small
+test suite would have caught mechanically: the run-book sync's
+Order-vs-OrderItem substring false-positive, the template's 17-cells-vs-
+16-columns drift, and the openpyxl `cell(value=None)` no-op (bitten
+*three separate times* this project — it's this codebase's single most
+repeated gotcha).
+
+Scope when picked up: the pure-logic, no-org-required surfaces first —
+`batch_advisor`'s ladder math and rung adjustments, `load_order`'s
+topological sort/cycle detection, `migration_run_book`'s template parser
+and `_object_matches()` (the ten-case matrix from the review is already
+effectively a test fixture, currently living only in a chat transcript),
+`mapping_doc`'s INSERT-INTO regex, `auto_mapper`'s name normalization.
+Plus a minimal GitHub Actions workflow running them on push — the repo
+already has GitHub community files (SECURITY.md/CONTRIBUTING.md), and CI
+is the natural next piece of that same "meant to be opened to others"
+posture. Live end-to-end verification against a real org stays the
+standard for the org-touching paths (that's a genuine strength of this
+project's process, not something tests replace) — this item is about the
+logic underneath it.
 
 ---
 

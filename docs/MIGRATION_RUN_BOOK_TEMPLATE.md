@@ -34,12 +34,12 @@ invent a ticket reference (see `CLAUDE.md` hard rule 10).
 
 | Stage | Object | Dependency | Status | Critical | Person Responsible | Begin Time | End Time | Execution Time | JIRA Ticket Link | Notes | Total Records | Success Records | Failed Records | Success Percent | Error Details |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Salesforce Config Changes | Confirm Email Deliverability setting (Setup > Email Administration > Deliverability) | None | Not Started | Yes | | | | | | | | | | | | |
-| Salesforce Config Changes | Disable CPQ/Billing automation (or other managed-package automation) on target objects | None | Not Started | Yes | | | | | | | | | | | | |
-| Salesforce Config Changes | Disable outbound automation that could email real contacts (workflow/Flow email alerts, approval processes) | None | Not Started | Yes | | | | | | | | | | | | |
-| Pre Migration | Confirm target org/alias and auth mode for this pass | None | Not Started | Yes | | | | | | | | | | | | |
-| Pre Migration | Run analyze-org-risk against in-scope objects | None | Not Started | No | | | | | | | | | | | | |
-| Pre Migration | Take a backup/export of any target data being overwritten | None | Not Started | No | | | | | | | | | | | | |
+| Salesforce Config Changes | Confirm Email Deliverability setting (Setup > Email Administration > Deliverability) | None | Not Started | Yes |  |  |  |  |  |  |  |  |  |  |  |
+| Salesforce Config Changes | Disable CPQ/Billing automation (or other managed-package automation) on target objects | None | Not Started | Yes |  |  |  |  |  |  |  |  |  |  |  |
+| Salesforce Config Changes | Disable outbound automation that could email real contacts (workflow/Flow email alerts, approval processes) | None | Not Started | Yes |  |  |  |  |  |  |  |  |  |  |  |
+| Pre Migration | Confirm target org/alias and auth mode for this pass | None | Not Started | Yes |  |  |  |  |  |  |  |  |  |  |  |
+| Pre Migration | Run analyze-org-risk against in-scope objects | None | Not Started | No |  |  |  |  |  |  |  |  |  |  |  |
+| Pre Migration | Take a backup/export of any target data being overwritten | None | Not Started | No |  |  |  |  |  |  |  |  |  |  |  |
 
 ## Source Download and Load Steps
 
@@ -55,8 +55,8 @@ invent a ticket reference (see `CLAUDE.md` hard rule 10).
 
 | Stage | Object | Dependency | Status | Critical | Person Responsible | Begin Time | End Time | Execution Time | JIRA Ticket Link | Notes | Total Records | Success Records | Failed Records | Success Percent | Error Details |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Salesforce Config Changes | Re-enable Email Deliverability to its normal setting | None | Not Started | Yes | | | | | | | | | | | | |
-| Salesforce Config Changes | Re-enable CPQ/Billing automation (or other managed-package automation) | None | Not Started | Yes | | | | | | | | | | | | |
-| Salesforce Config Changes | Re-enable outbound automation disabled during Pre-Migration | None | Not Started | Yes | | | | | | | | | | | | |
-| Post Migration | Spot-check row counts against source | None | Not Started | No | | | | | | | | | | | | |
-| Post Migration | Notify stakeholders the load is complete | None | Not Started | No | | | | | | | | | | | | |
+| Salesforce Config Changes | Re-enable Email Deliverability to its normal setting | None | Not Started | Yes |  |  |  |  |  |  |  |  |  |  |  |
+| Salesforce Config Changes | Re-enable CPQ/Billing automation (or other managed-package automation) | None | Not Started | Yes |  |  |  |  |  |  |  |  |  |  |  |
+| Salesforce Config Changes | Re-enable outbound automation disabled during Pre-Migration | None | Not Started | Yes |  |  |  |  |  |  |  |  |  |  |  |
+| Post Migration | Spot-check row counts against source | None | Not Started | No |  |  |  |  |  |  |  |  |  |  |  |
+| Post Migration | Notify stakeholders the load is complete | None | Not Started | No |  |  |  |  |  |  |  |  |  |  |  |

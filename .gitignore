@@ -1,4 +1,5 @@
 .env
+.venv/
 _stage/
 __pycache__/
 *.pyc

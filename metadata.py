@@ -56,6 +56,7 @@ def record_counts(sf, object_names=None):
         f"{sf.base_url}limits/recordCount",
         headers={"Authorization": f"Bearer {sf.session_id}"},
         params={"sObjects": ",".join(object_names)} if object_names else None,
+        timeout=60,  # requests' own default is no timeout at all -- same standard as data_cloud.py/mock_data.py
     )
     resp.raise_for_status()
     return {row["name"]: row["count"] for row in resp.json().get("sObjects", [])}
