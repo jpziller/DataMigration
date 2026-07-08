@@ -27,8 +27,8 @@ summarizes.
 | 12 | Parquet file import | **Built** | `import-parquet` | Brings a Parquet file's data into SQL Server as typed columns — a second way to get source data in, alongside pulling directly from a Salesforce org. |
 | 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 | Forces you to actually go check Setup's Email Deliverability setting before any insert/upsert that could send real email to real people, and pass what it shows as a flag. This is a required human confirmation, not an automatic check — Salesforce has no API to read that setting. |
 | 14 | Load activity logging + analytics | Logging **Built** (opt-in); analytics not built | `enable-bulkops-logging`, `disable-bulkops-logging` | Optional, off-by-default record of every `bulkops` run (what, when, how many succeeded/failed) written to a SQL Server table, so you can look back at history instead of relying on console scrollback. Turn it on once per schema; it then logs automatically. |
-| 15 | Dynamic batch sizing from org metadata review | **Built** | `recommend-batch-size`, `suggest-batch-heuristics`, `bulkops --batch-size` | Automatically start heavily-automated objects (Opportunity, CPQ/Billing, etc.) at a smaller batch size, adjusted further from this org's own automation and this project's own load history — full rationale printed, and a scripted value always overrides it. |
-| 16 | Run book (manual + programmatic step tracking) | Not built — blocked on user's template | — | Idea: a living record of every step (manual and scripted) taken during a real migration cutover — who did what, when, what errors came up. Waiting on a real example template before this gets designed. |
+| 15 | Dynamic batch sizing from org metadata review | **Built** — confirmed live against a real org (`D360_PLAYGROUND`): static/auto/none modes all produced the correct job counts and log entries | `recommend-batch-size`, `suggest-batch-heuristics`, `bulkops --batch-size` | Automatically start heavily-automated objects (Opportunity, CPQ/Billing, etc.) at a smaller batch size, adjusted further from this org's own automation and this project's own load history — full rationale printed, and a scripted value always overrides it. |
+| 16 | Run book (manual + programmatic step tracking) | **Built** | `generate-run-book`, `add-run-book-pass` | A living, per-project Excel workbook spanning Pre-Migration, Script/Transformations, and Post-Migration — one tab per pass (Dev/UAT/PROD), each new tab copying the recipe (items, script names, dependencies, Critical flags) forward while blanking who/when/errors/row-counts for a fresh run. Recipe structure lives in `docs/RUN_BOOK_TEMPLATE.md`, git-tracked and human-editable. |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
 | 18 | Data Cloud (D360) query support | **Built** — all 5 findings researched, 4.5 confirmed live (Data Graph query-by-id/lookup-key is written but unverified — no test Data Graph exists yet) | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status`, `data-cloud-profile`, `list-data-graphs` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, Unified Profile data, Data Graph metadata, and check processing status for Data Streams/DSOs/Identity Resolution/Data Transforms/Calculated Insights/Data Graphs — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
@@ -870,36 +870,103 @@ clean-run step-up (two synthetic clean runs: 500 → 1000), and
 `suggest-batch-heuristics` correctly surfacing the converged test
 object. All synthetic rows cleaned up afterward.
 
+**Verified live end-to-end against a real org** (`D360_PLAYGROUND`,
+mock Account inserts): `--batch-size 3` against 10 rows produced exactly
+4 Bulk API jobs (`ceil(10/3)`) and logged `BatchSize=3`/
+`BatchSizeSource=static`; the default `auto` mode printed its full
+rationale, resolved to 2000, and logged `BatchSizeSource=auto`; a second
+clean run correctly stepped the recommendation 2000 → 5000 per the
+history rule; `--batch-size none` submitted a single unchunked job.
+`dbo.BulkOpsLog`'s `JobCount` column confirmed each mode's actual
+chunking behavior, not just the recorded setting. Test Accounts deleted
+afterward.
+
 **Not built (explicit v1 non-goals, not gaps)**: no mid-run adaptive
 backoff between chunks of the *same* load (a phase-2 idea, worth its own
 future item if this proves insufficient); no exposure of Bulk API 2.0's
 `concurrency`/parallelism knob; `suggest-batch-heuristics` never writes
 the seed file automatically, by design.
 
-## 16. Run book (manual + programmatic step tracking) — blocked on a template
+## 16. Run book (manual + programmatic step tracking) — BUILT (`run_book.py`)
 
 Problem raised directly: today, nothing tracks the *human* side of a
 migration — every manual and programmatic step taken during a full load
 (sandbox, UAT, prod), who did it, start/end/elapsed time, errors hit,
 retries done — the actual "recipe" of a migration, not just what a script
-did. This is explicitly framed as high-stakes ("this is what can make or
-break a migration") and as something to track per main full load, not per
-script.
+did. Explicitly framed as high-stakes ("this is what can make or break a
+migration") and as something to track per main full load, not per script.
+Unblocked when the user described their real run-book template directly
+(Item/Notes/Person Responsible/Start/End/Total Time for Pre-/Post-Migration;
+Script #-Name/Dependency/row counts/errors for Script/Transformations;
+critical steps like Email Deliverability colored red) instead of dropping a
+file into `_stage/`.
 
-**Blocked on the user sharing a real run-book template** — same pattern
-already established for `mapping_doc.py`/`docs/MIGRATION_PLAYBOOK.md`:
-drop a real example into `_stage/`, reviewed for structure/format only
-(column names, section layout), never content, before designing anything.
-Don't scope this further until that template exists to react to.
+**The recipe structure lives in `docs/RUN_BOOK_TEMPLATE.md`**, git-tracked
+and human-editable directly — deliberately Markdown rather than a
+`reference/*.json` tuning file, since a data architect needs to *read* this
+structure as much as `run_book.py` needs to parse it (contrast
+`mapping_doc.py`'s `_HEADERS`, which are hardcoded Python, not sourced from
+a checked-in template). One `## Heading` + one Markdown pipe-table per
+section (Pre-Migration, Script / Transformations, Post-Migration); editing
+the file changes what every new project's first run-book tab starts with.
 
-Once scoped, the ambition stated directly is worth preserving here rather
-than softening: not just a template to fill in by hand, but a spreadsheet
-this framework keeps automatically up to date and in line with the actual
-load order and steps taken — closer to a generated artifact fed by #14's
-log data (and this framework's own load-order analysis, #2) than a
-document a human maintains manually. "Practices on scripts" (i.e. dev/test
-runs) are explicitly **not** in scope for tracking — only real full loads
-against sandbox/UAT/prod count.
+**One continuous worksheet holds one full end-to-end pass** — confirmed
+directly against the initial "separate tab per section" idea: "One sheet
+should hold everything for a full end to end data load." Multiple **tabs in
+the same workbook** track the project's life across passes instead (a
+couple of Dev test tabs, then UAT/mock-go-live, then PROD). A new pass is
+created by *copying the previous tab's recipe forward* — `add-run-book-pass`
+duplicates Item/Script name/Dependency/Critical-flag columns verbatim
+(including anything a human added by hand since generation) while blanking
+every execution-result column (who, when, errors, row counts) for the fresh
+run — "the copy is the recipe, the blank values are the who/when/errors/
+rows," in the user's own words.
+
+**Recipe vs. result columns**, the split that drives what copies forward vs.
+blanks: Pre-/Post-Migration recipe = `Item`, `Critical`; result = `Notes`,
+`Person Responsible`, `Start`, `End`, `Total Time`. Script/Transformation
+recipe = `Script # / Name`, `Dependency`; result = everything else. Both
+`generate-run-book` and `add-run-book-pass` **refuse to overwrite an
+existing tab name** — unlike `mapping_doc.py`'s regenerate-in-place
+convention, a run-book tab holds live, manually-entered operational history
+that must never be silently clobbered.
+
+**Auto-fills what's already known, doesn't guess**: `generate-run-book
+--objects` populates the Script/Transformation section from `load_order.py`'s
+(#2) `dbo.ObjectLoadOrder`/`dbo.ObjectDependency` — load order, and a
+`Dependency` cell naming real parent objects or "parallel with" siblings at
+the same load level, with self-referencing fields (e.g. `Account.ParentId`)
+correctly excluded from that (a real bug found live: an early version
+double-counted self-references as bogus duplicate parents of themselves,
+e.g. "After: Account, Account" for `Account` itself — fixed by filtering
+`child == parent` edges and deduping with a set). Best-effort matches an
+existing `sql/transformations/*.sql` filename containing the object name to
+prefill `Script # / Name`.
+
+**Explicit scope boundary, from the user's own follow-up message**:
+`dbo.BulkOpsLog` (#14) can never see manual steps (there's no API trace of
+someone unchecking a Setup toggle) — Pre-/Post-Migration result columns will
+*always* need a human filling Person/Start/End/Notes, this isn't a gap to
+fix. Tying `BulkOpsLog` data into the Script/Transformation section's result
+columns automatically is the explicit next phase, not built now — the
+spreadsheet, not the log table, is the enduring single "bigger picture"
+across the whole migration.
+
+**A second real bug found via live testing**: the first implementation of
+`add_run_book_pass()`'s result-column blanking silently did nothing —
+`openpyxl`'s `cell(value=None)` is a no-op indistinguishable from omitting
+`value` entirely, so populated Person/Start/End/row-count cells survived
+the copy unchanged. Confirmed by populating a tab with real values, copying
+it, and finding the values still present; fixed by setting `.value`
+directly instead. A related labeling bug (Pre-Migration and Post-Migration
+share an identical column list, so section-matching by columns alone always
+labeled both "Pre-Migration") was also fixed, using the bold title row
+directly above each header row as the reliable section name instead.
+
+**Not built (explicit v1 non-goals)**: no automatic `dbo.BulkOpsLog`
+tie-in yet (the stated next phase); "practices on scripts" (dev/test runs
+short of a real pass) are deliberately out of scope — only real full loads
+against sandbox/UAT/prod get a tab.
 
 ## 17. Fuzzy matching / dedup (deprioritized, not built)
 

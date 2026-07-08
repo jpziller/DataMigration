@@ -48,6 +48,7 @@ import auto_mapper as am
 import solution_doc as sd
 import risk_analyzer as ra
 import parquet_import as pqi
+import run_book as rb
 
 
 def _ctx():
@@ -540,6 +541,35 @@ def generate_solution_doc_cmd(output_path, object_names, mapping_path, template_
         click.echo("Unresolved circular dependencies flagged in the document:")
         for group in context["unresolved_cycles"]:
             click.echo(f"  {', '.join(group)}")
+
+
+@cli.command("generate-run-book")
+@click.argument("output_path")
+@click.option("--tab", "tab_name", required=True, help="New tab name (e.g. Dev1, UAT, PROD) -- refuses to overwrite an existing tab.")
+@click.option("--objects", "object_names", multiple=True, help="Auto-fills the Script/Transformation section from analyze-load-order's results. Omit for a blank section to fill in by hand.")
+@click.option("--schema", default="dbo")
+@click.option("--template", "template_path", default=None, help="Custom run-book template -- falls back to docs/RUN_BOOK_TEMPLATE.md if omitted.")
+def generate_run_book_cmd(output_path, tab_name, object_names, schema, template_path):
+    _, _, engine = _ctx()
+    kwargs = {"schema": schema}
+    if template_path:
+        kwargs["template_path"] = template_path
+    if object_names:
+        kwargs["engine"] = engine
+        kwargs["object_names"] = list(object_names)
+    path = rb.generate_run_book(output_path, tab_name, **kwargs)
+    click.echo(f"Wrote {path} (tab '{tab_name}')")
+    if object_names:
+        click.echo(f"Script/Transformation section auto-filled from {schema}.ObjectLoadOrder for: {', '.join(object_names)}")
+
+
+@cli.command("add-run-book-pass")
+@click.argument("path")
+@click.option("--from-tab", required=True, help="Existing tab to copy the recipe from (e.g. Dev1).")
+@click.option("--to-tab", required=True, help="New tab name for the fresh pass (e.g. UAT) -- refuses to overwrite an existing tab.")
+def add_run_book_pass_cmd(path, from_tab, to_tab):
+    rb.add_run_book_pass(path, from_tab, to_tab)
+    click.echo(f"Copied '{from_tab}' -> '{to_tab}' in {path} (recipe carried forward, result columns blanked)")
 
 
 @cli.command("analyze-org-risk")

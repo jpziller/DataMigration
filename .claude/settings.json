@@ -34,6 +34,8 @@
       "Bash(.venv/Scripts/python.exe cli.py list-data-graphs*)",
       "Bash(.venv/Scripts/python.exe cli.py recommend-batch-size *)",
       "Bash(.venv/Scripts/python.exe cli.py suggest-batch-heuristics*)",
+      "Bash(.venv/Scripts/python.exe cli.py generate-run-book *)",
+      "Bash(.venv/Scripts/python.exe cli.py add-run-book-pass *)",
       "Bash(sf org list*)",
       "Bash(sf org display*)",
       "Bash(sf sobject *)",
