@@ -39,6 +39,13 @@ class Settings:
     # Mockaroo (mock/demo data generation)
     mockaroo_api_key: str = _get("MOCKAROO_API_KEY", "")
 
+    # Migration Run Book (roadmap #16) -- ticket-system project link shown in the
+    # header block. Not a credential (no token, just a base URL/label) --
+    # a per-project generate-migration-run-book/add-migration-run-book-pass CLI flag overrides
+    # either of these.
+    ticket_system_label: str = _get("TICKET_SYSTEM_LABEL", "JIRA")
+    ticket_system_url: str = _get("TICKET_SYSTEM_URL", "")
+
 
 def get_settings() -> Settings:
     s = Settings()

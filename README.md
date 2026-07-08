@@ -347,7 +347,7 @@ Matching slash-command skills exist for the read-only ones (`/list-objects`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
-`/suggest-batch-heuristics`, `/generate-run-book`, `/add-run-book-pass`)
+`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`)
 — see "Claude Code operating layer" below.
 
 ---
@@ -458,8 +458,8 @@ SQL Server, **reviewed hands** for mutations.
   `/import-parquet <path.parquet> <table>`,
   `/replicate <Object>`, `/build-load <path.sql>`, `/validate-load <LoadTable>`,
   `/recommend-batch-size <Object>`, `/suggest-batch-heuristics`,
-  `/generate-run-book <path.xlsx> --tab <name>`,
-  `/add-run-book-pass <path.xlsx> --from-tab <name> --to-tab <name>`,
+  `/generate-migration-run-book <path.xlsx> --tab <name>`,
+  `/add-migration-run-book-pass <path.xlsx> --from-tab <name> --to-tab <name>`,
   `/status`.
 
 **Install Claude Code (Windows, native — no WSL needed):**

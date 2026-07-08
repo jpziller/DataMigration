@@ -48,15 +48,15 @@ for you, and it'll stick for future sessions too.
   `docs/SECURITY_OVERVIEW.md` — not just correctness and doc consistency.
   This repo is meant to be opened up to others; it stays clean continuously,
   not just before a visibility change.
-- **Make sure a run book exists once a real migration project starts.**
+- **Make sure a Migration Run Book exists once a real migration project starts.**
   After the first `analyze-load-order` for a new project, check whether a
-  run-book workbook exists yet and offer `generate-run-book` if not — this
+  Migration Run Book workbook exists yet and offer `generate-migration-run-book` if not — this
   is the project's "bigger picture" document (manual steps + scripted
   steps, Pre-Migration through Post-Migration) and shouldn't be an
   afterthought. Before each new environment pass (Dev → UAT → PROD), offer
-  `add-run-book-pass` rather than a fresh `generate-run-book`, so the
+  `add-migration-run-book-pass` rather than a fresh `generate-migration-run-book`, so the
   recipe (Items/Script names/dependencies/Critical flags) carries forward
-  instead of being retyped. See `ROADMAP.md` #16 and `run_book.py`.
+  instead of being retyped. See `ROADMAP.md` #16 and `migration_run_book.py`.
 
 ## How to operate here: read-only eyes, reviewed hands
 - To **look** at SQL Server (schemas, row counts, samples, validating a load),
@@ -210,20 +210,42 @@ venv may not be active in a fresh shell:
                 `reference/batch_size_heuristics.json` edits — never writes the file itself; a human
                 reviews and commits deliberately, same as adding a new alias to the field-synonym
                 thesaurus. See `batch_advisor.py` and `ROADMAP.md` #15.)
-- Run book:     `.venv/Scripts/python.exe cli.py generate-run-book run_book.xlsx --tab Dev1 --objects Account Contact`
+- Migration Run Book:     `.venv/Scripts/python.exe cli.py generate-migration-run-book migration_run_book.xlsx --tab Dev1 --objects Account Contact`
                 (first tab for a new project, or any brand-new tab built straight from
-                `docs/RUN_BOOK_TEMPLATE.md` rather than copied forward. `--objects` auto-fills the
-                Script/Transformation section from `analyze-load-order`'s results — omit it for a
-                blank section to fill in by hand. Refuses to overwrite an existing `--tab` name;
-                a run-book tab holds live, manually-entered operational history.)
-                `.venv/Scripts/python.exe cli.py add-run-book-pass run_book.xlsx --from-tab Dev1 --to-tab UAT`
+                `docs/MIGRATION_RUN_BOOK_TEMPLATE.md` rather than copied forward. Structure is a
+                direct mirror — reviewed for column names/layout only, never content — of a real
+                client's in-production migration-status tab: **one unified table** (Stage, Object,
+                Dependency, Status, Critical, Person Responsible, Begin Time, End Time, Execution
+                Time, JIRA Ticket Link, Notes, Total/Success/Failed Records, Success Percent, Error
+                Details) used for every phase, with phases marked by a single dark-navy banner row
+                rather than a repeated header. `--objects` auto-fills the Load phase from
+                `analyze-load-order`'s results — omit it for a blank Load phase to fill in by hand.
+                `Status` is a real dropdown (Not Started/N/A/In Process/Completed/Issue) driven by
+                live conditional-formatting colors (yellow/light green/dark green/red) that update
+                if a human changes the value later — same mechanism for `Critical = Yes` (a
+                different signal: ahead-of-time risk, not "something already went wrong"). Refuses
+                to overwrite an existing `--tab` name; a Migration Run Book tab holds live,
+                manually-entered operational history. Every tab also gets a fixed header block —
+                Project, Source/Target Environment, a Git Repository link, the exact commit/branch
+                and a link to the scripts at that commit, and (if configured) a link to the ticket
+                system's project — `--project`/`--source-env`/`--target-env`/`--ticket-url`/
+                `--ticket-label` override the auto-filled defaults (`SQL_DATABASE`/`SF_ORG_ALIAS`/
+                `TICKET_SYSTEM_URL`/`TICKET_SYSTEM_LABEL`). A matched Load-phase `Object` cell gets
+                a real hyperlink to that script at the pinned commit, when this repo has a GitHub
+                remote.)
+                `.venv/Scripts/python.exe cli.py add-migration-run-book-pass migration_run_book.xlsx --from-tab Dev1 --to-tab UAT --target-env UAT_ORG_ALIAS`
                 (a new pass over the same project — Dev → UAT → PROD — copies the source tab's
-                recipe columns forward (Item/Script name/Dependency/Critical flag) and blanks every
-                execution-result column for the fresh run. Also refuses to overwrite an existing
-                `--to-tab`. See `run_book.py` and `ROADMAP.md` #16 — `dbo.BulkOpsLog` (#14) can
-                never see manual steps like disabling CPQ automation, so the run book's Pre-/
-                Post-Migration sections always need a human filling Person/Start/End; this is the
-                framework's "bigger picture" document spanning both manual and scripted steps.)
+                recipe columns forward (Stage/Object/Dependency/Critical/JIRA Ticket Link) and
+                blanks every result column (Status reset to "Not Started", not left empty) for the
+                fresh run. Also refuses to overwrite an existing `--to-tab`. Header carry-forward:
+                Project/Source Environment/ticket link carry forward from the source tab unless
+                overridden; Commit/Branch and the Scripts link always refresh to the *current* Git
+                state; Target Environment is never silently carried forward — Dev/UAT/PROD are
+                different orgs — pass `--target-env` explicitly. See `migration_run_book.py` and
+                `ROADMAP.md` #16 — `dbo.BulkOpsLog` (#14) can never see manual steps like disabling
+                CPQ automation, so every phase's result columns always need a human filling Person
+                Responsible/Begin-End Time; this is the framework's "bigger picture" document
+                spanning both manual and scripted steps.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
@@ -236,7 +258,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
-`/suggest-batch-heuristics`, `/generate-run-book`, `/add-run-book-pass`
+`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -295,6 +317,14 @@ available even when there's no dedicated skill for it.
    needs `--confirm-external-email-risk`, since that's the one state that
    can send real mail to real external contacts — don't pass it
    speculatively "to get past the check."
+10. Every new file under `sql/transformations/` must have its ticket
+    reference (JIRA story/bug key, or whichever ticketing system this
+    project actually uses) hardcoded in a comment near the top when the
+    script is first built. Never invent a ticket number — if one hasn't
+    been given for the work at hand, ask for it before writing the header
+    comment, or state explicitly that this project isn't using a ticket
+    system. This is a consistency/traceability rule (not a safety-critical
+    one like 1-9), but still every project, every script.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
@@ -313,7 +343,8 @@ don't jump straight to writing T-SQL:
 3. **Confirm target field API names** with `describe`/`dump-describe`
    (rule 5) — never guess a field name from the mapping doc alone.
 4. **Build the transform** under `sql/transformations/`, producing the
-   `*_Load` table.
+   `*_Load` table. Include the ticket reference in a header comment
+   (rule 10) — ask for it if it hasn't been given.
 5. **Sort it** — `AddBulkLoadSortColumn` against the object's parent key
    (rule 6), if it has one.
 6. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
@@ -347,12 +378,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
-  `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `run_book.py`
+  `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`
   — the Data Architect toolbelt (load-order analysis, profiling, ad hoc
   query, single-object and relationship-aware mock data, mapping doc,
   auto-mapping, solution document generation, org automation risk analysis,
   Data Cloud/D360 query and status tooling, dynamic batch-size recommendations,
-  the migration run book).
+  the Migration Run Book).
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always
@@ -367,11 +398,11 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   reviews and commits deliberately" principle as the field synonym
   thesaurus — `suggest-batch-heuristics` only ever prints candidate edits,
   never writes the file itself.
-- `docs/RUN_BOOK_TEMPLATE.md` — git-tracked recipe template used by
-  `run_book.py`'s `generate_run_book()`: section names, column headers, and
+- `docs/MIGRATION_RUN_BOOK_TEMPLATE.md` — git-tracked recipe template used by
+  `migration_run_book.py`'s `generate_migration_run_book()`: section names, column headers, and
   starter Pre-/Post-Migration items (Email Deliverability, CPQ automation,
   etc.), parsed directly from this file's Markdown tables. Edit this file
-  to change what every new project's first run-book tab starts with — same
+  to change what every new project's first Migration Run Book tab starts with — same
   "git is truth" principle as the field-synonym thesaurus and batch-size
   heuristics, but Markdown here since the structure itself is meant to be
   read directly, not hidden behind Python constants.
@@ -421,7 +452,7 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   Gitignored by default (every org's schema/mappings differ, so these
   aren't template content) — commit your own deliberately if a real
   engagement wants a versioned copy.
-- A project's run-book workbook (`generate-run-book`/`add-run-book-pass`
+- A project's Migration Run Book workbook (`generate-migration-run-book`/`add-migration-run-book-pass`
   output — path is up to the caller, same as `generate-solution-doc`) is
   likewise project-specific, real operational history — not gitignored by
   a fixed pattern since there's no fixed output folder, but treat it the

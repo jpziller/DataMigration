@@ -48,7 +48,7 @@ import auto_mapper as am
 import solution_doc as sd
 import risk_analyzer as ra
 import parquet_import as pqi
-import run_book as rb
+import migration_run_book as mrb
 
 
 def _ctx():
@@ -543,32 +543,56 @@ def generate_solution_doc_cmd(output_path, object_names, mapping_path, template_
             click.echo(f"  {', '.join(group)}")
 
 
-@cli.command("generate-run-book")
+@cli.command("generate-migration-run-book")
 @click.argument("output_path")
 @click.option("--tab", "tab_name", required=True, help="New tab name (e.g. Dev1, UAT, PROD) -- refuses to overwrite an existing tab.")
-@click.option("--objects", "object_names", multiple=True, help="Auto-fills the Script/Transformation section from analyze-load-order's results. Omit for a blank section to fill in by hand.")
+@click.option("--objects", "object_names", multiple=True, help="Auto-fills the Load phase from analyze-load-order's results. Omit for a blank phase to fill in by hand.")
 @click.option("--schema", default="dbo")
-@click.option("--template", "template_path", default=None, help="Custom run-book template -- falls back to docs/RUN_BOOK_TEMPLATE.md if omitted.")
-def generate_run_book_cmd(output_path, tab_name, object_names, schema, template_path):
-    _, _, engine = _ctx()
-    kwargs = {"schema": schema}
+@click.option("--template", "template_path", default=None, help="Custom Migration Run Book template -- falls back to docs/MIGRATION_RUN_BOOK_TEMPLATE.md if omitted.")
+@click.option("--project", "project_name", default=None, help="Project name shown in the header.")
+@click.option("--source-env", default=None, help="Source environment shown in the header (defaults to the configured SQL Server mirror DB).")
+@click.option("--target-env", default=None, help="Target environment shown in the header (defaults to the configured Salesforce org alias).")
+@click.option("--ticket-url", default=None, help="Link to this project's ticket-system project, shown in the header (defaults to TICKET_SYSTEM_URL if configured).")
+@click.option("--ticket-label", default=None, help="Ticket system name shown in the header, e.g. JIRA (defaults to TICKET_SYSTEM_LABEL).")
+def generate_migration_run_book_cmd(output_path, tab_name, object_names, schema, template_path,
+                           project_name, source_env, target_env, ticket_url, ticket_label):
+    s, _, engine = _ctx()
+    kwargs = {
+        "schema": schema,
+        "project_name": project_name,
+        "source_env": source_env or f"SQL Server: {s.sql_database}",
+        "target_env": target_env or (s.sf_org_alias or None),
+        "ticket_url": ticket_url or (s.ticket_system_url or None),
+        "ticket_label": ticket_label or s.ticket_system_label,
+    }
     if template_path:
         kwargs["template_path"] = template_path
     if object_names:
         kwargs["engine"] = engine
         kwargs["object_names"] = list(object_names)
-    path = rb.generate_run_book(output_path, tab_name, **kwargs)
+    path = mrb.generate_migration_run_book(output_path, tab_name, **kwargs)
     click.echo(f"Wrote {path} (tab '{tab_name}')")
     if object_names:
-        click.echo(f"Script/Transformation section auto-filled from {schema}.ObjectLoadOrder for: {', '.join(object_names)}")
+        click.echo(f"Load phase auto-filled from {schema}.ObjectLoadOrder for: {', '.join(object_names)}")
 
 
-@cli.command("add-run-book-pass")
+@cli.command("add-migration-run-book-pass")
 @click.argument("path")
 @click.option("--from-tab", required=True, help="Existing tab to copy the recipe from (e.g. Dev1).")
 @click.option("--to-tab", required=True, help="New tab name for the fresh pass (e.g. UAT) -- refuses to overwrite an existing tab.")
-def add_run_book_pass_cmd(path, from_tab, to_tab):
-    rb.add_run_book_pass(path, from_tab, to_tab)
+@click.option("--project", "project_name", default=None, help="Override the carried-forward Project name.")
+@click.option("--source-env", default=None, help="Override the carried-forward Source Environment.")
+@click.option("--target-env", default=None, help="Target environment for this pass -- never carried forward automatically (Dev/UAT/PROD are different orgs); defaults to the configured Salesforce org alias.")
+@click.option("--ticket-url", default=None, help="Override the carried-forward ticket-system project link.")
+@click.option("--ticket-label", default=None, help="Override the carried-forward ticket system name.")
+def add_migration_run_book_pass_cmd(path, from_tab, to_tab, project_name, source_env, target_env, ticket_url, ticket_label):
+    s, _, _e = _ctx()
+    mrb.add_migration_run_book_pass(
+        path, from_tab, to_tab,
+        project_name=project_name, source_env=source_env,
+        target_env=target_env or (s.sf_org_alias or None),
+        ticket_url=ticket_url, ticket_label=ticket_label,
+    )
     click.echo(f"Copied '{from_tab}' -> '{to_tab}' in {path} (recipe carried forward, result columns blanked)")
 
 

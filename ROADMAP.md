@@ -28,7 +28,7 @@ summarizes.
 | 13 | Email Deliverability attestation gate | **Built** | `bulkops` (built in), hard rule 9 | Forces you to actually go check Setup's Email Deliverability setting before any insert/upsert that could send real email to real people, and pass what it shows as a flag. This is a required human confirmation, not an automatic check — Salesforce has no API to read that setting. |
 | 14 | Load activity logging + analytics | Logging **Built** (opt-in); analytics not built | `enable-bulkops-logging`, `disable-bulkops-logging` | Optional, off-by-default record of every `bulkops` run (what, when, how many succeeded/failed) written to a SQL Server table, so you can look back at history instead of relying on console scrollback. Turn it on once per schema; it then logs automatically. |
 | 15 | Dynamic batch sizing from org metadata review | **Built** — confirmed live against a real org (`D360_PLAYGROUND`): static/auto/none modes all produced the correct job counts and log entries | `recommend-batch-size`, `suggest-batch-heuristics`, `bulkops --batch-size` | Automatically start heavily-automated objects (Opportunity, CPQ/Billing, etc.) at a smaller batch size, adjusted further from this org's own automation and this project's own load history — full rationale printed, and a scripted value always overrides it. |
-| 16 | Run book (manual + programmatic step tracking) | **Built** | `generate-run-book`, `add-run-book-pass` | A living, per-project Excel workbook spanning Pre-Migration, Script/Transformations, and Post-Migration — one tab per pass (Dev/UAT/PROD), each new tab copying the recipe (items, script names, dependencies, Critical flags) forward while blanking who/when/errors/row-counts for a fresh run. Recipe structure lives in `docs/RUN_BOOK_TEMPLATE.md`, git-tracked and human-editable. |
+| 16 | Migration Run Book (manual + programmatic step tracking) | **Built** — structure mirrors a real client migration-status tab | `generate-migration-run-book`, `add-migration-run-book-pass` | A living, per-project Excel workbook: one unified table (Stage/Object/Dependency/Status/Critical/Person Responsible/Begin-End Time/Execution Time/JIRA Ticket Link/Notes/record counts) covering every phase, phases marked by a banner row — one tab per pass (Dev/UAT/PROD), each new tab copying the recipe forward while blanking result columns (Status reset to "Not Started") for a fresh run. Status/Critical use live Excel conditional-formatting colors, not a one-time paint. Recipe structure lives in `docs/MIGRATION_RUN_BOOK_TEMPLATE.md`, git-tracked and human-editable. Every tab also gets a header with Project/Source-Target Environment, hyperlinked Git repo/commit/scripts breadcrumbs, and an optional ticket-system project link. |
 | 17 | Fuzzy matching / dedup | Deprioritized, not built | — | Idea: flag "these two records are probably the same person/company" for dedup — deliberately lower priority than everything else here for now. |
 | 18 | Data Cloud (D360) query support | **Built** — all 5 findings researched, 4.5 confirmed live (Data Graph query-by-id/lookup-key is written but unverified — no test Data Graph exists yet) | `data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-status`, `data-cloud-profile`, `list-data-graphs` | Query Data Cloud objects (DLOs/DMOs), Calculated Insights, Unified Profile data, Data Graph metadata, and check processing status for Data Streams/DSOs/Identity Resolution/Data Transforms/Calculated Insights/Data Graphs — all confirmed live against a real org (`D360_PLAYGROUND`), all real CLI commands now, not ad hoc scripts. |
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
@@ -51,6 +51,8 @@ summarizes.
 | 36 | RecordType DeveloperName resolution for cross-org migration | Not built | — | Idea: correctly translate a `RecordTypeId` from the source into the *right* RecordType in the target org. RecordType Ids are org-specific and never match across orgs, so this is a common, easy-to-miss real-migration mistake if not handled. |
 | 37 | CLI alternative to Data Cloud's Profile Explorer | **Built** — same command as #18's Unified Profile finding | `data-cloud-profile` | Look up Unified Profile data (a specific person's attributes) via one command instead of Data Cloud Setup's own multi-click Profile Explorer (pick a Data Space, then an entity, then an attribute, repeatedly) — no Data Space parameter needed at all, confirmed live. |
 | 38 | Real-data anonymization for demos/scratch orgs | Not built | — | Idea: take a real client org's actual data and scramble the sensitive fields (names, emails, phones) into realistic-looking fakes — same relationships/volume, no real PII — for client demos or scratch-org seeding. Different from #6, which generates synthetic data from scratch rather than replacing real values. |
+| 39 | Ticket system (JIRA or equivalent) read/comment integration | Not built, needs API research | — | Idea: post comments to a specific JIRA (or equivalent) ticket directly (e.g. load results), and cross-reference GitHub commits/PRs tied to that ticket — deeper than the Migration Run Book header's static project link (#16). |
+| 40 | Configuration Workbook drift detection | Not built — blocked on a real template | — | Idea: read a team's existing "Configuration Workbook" (how developers document their build) and cross-check it against the actual deployed metadata — the same category of problem `check-mapping-balance` (#3) solves for mapping docs, applied to build documentation instead. Waiting on a real example template before this gets designed. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -887,7 +889,7 @@ future item if this proves insufficient); no exposure of Bulk API 2.0's
 `concurrency`/parallelism knob; `suggest-batch-heuristics` never writes
 the seed file automatically, by design.
 
-## 16. Run book (manual + programmatic step tracking) — BUILT (`run_book.py`)
+## 16. Migration Run Book (manual + programmatic step tracking) — BUILT (`migration_run_book.py`)
 
 Problem raised directly: today, nothing tracks the *human* side of a
 migration — every manual and programmatic step taken during a full load
@@ -895,27 +897,27 @@ migration — every manual and programmatic step taken during a full load
 retries done — the actual "recipe" of a migration, not just what a script
 did. Explicitly framed as high-stakes ("this is what can make or break a
 migration") and as something to track per main full load, not per script.
-Unblocked when the user described their real run-book template directly
+Unblocked when the user described their real Migration Run Book template directly
 (Item/Notes/Person Responsible/Start/End/Total Time for Pre-/Post-Migration;
 Script #-Name/Dependency/row counts/errors for Script/Transformations;
 critical steps like Email Deliverability colored red) instead of dropping a
 file into `_stage/`.
 
-**The recipe structure lives in `docs/RUN_BOOK_TEMPLATE.md`**, git-tracked
+**The recipe structure lives in `docs/MIGRATION_RUN_BOOK_TEMPLATE.md`**, git-tracked
 and human-editable directly — deliberately Markdown rather than a
 `reference/*.json` tuning file, since a data architect needs to *read* this
-structure as much as `run_book.py` needs to parse it (contrast
+structure as much as `migration_run_book.py` needs to parse it (contrast
 `mapping_doc.py`'s `_HEADERS`, which are hardcoded Python, not sourced from
 a checked-in template). One `## Heading` + one Markdown pipe-table per
 section (Pre-Migration, Script / Transformations, Post-Migration); editing
-the file changes what every new project's first run-book tab starts with.
+the file changes what every new project's first Migration Run Book tab starts with.
 
 **One continuous worksheet holds one full end-to-end pass** — confirmed
 directly against the initial "separate tab per section" idea: "One sheet
 should hold everything for a full end to end data load." Multiple **tabs in
 the same workbook** track the project's life across passes instead (a
 couple of Dev test tabs, then UAT/mock-go-live, then PROD). A new pass is
-created by *copying the previous tab's recipe forward* — `add-run-book-pass`
+created by *copying the previous tab's recipe forward* — `add-migration-run-book-pass`
 duplicates Item/Script name/Dependency/Critical-flag columns verbatim
 (including anything a human added by hand since generation) while blanking
 every execution-result column (who, when, errors, row counts) for the fresh
@@ -926,12 +928,12 @@ rows," in the user's own words.
 blanks: Pre-/Post-Migration recipe = `Item`, `Critical`; result = `Notes`,
 `Person Responsible`, `Start`, `End`, `Total Time`. Script/Transformation
 recipe = `Script # / Name`, `Dependency`; result = everything else. Both
-`generate-run-book` and `add-run-book-pass` **refuse to overwrite an
+`generate-migration-run-book` and `add-migration-run-book-pass` **refuse to overwrite an
 existing tab name** — unlike `mapping_doc.py`'s regenerate-in-place
-convention, a run-book tab holds live, manually-entered operational history
+convention, a Migration Run Book tab holds live, manually-entered operational history
 that must never be silently clobbered.
 
-**Auto-fills what's already known, doesn't guess**: `generate-run-book
+**Auto-fills what's already known, doesn't guess**: `generate-migration-run-book
 --objects` populates the Script/Transformation section from `load_order.py`'s
 (#2) `dbo.ObjectLoadOrder`/`dbo.ObjectDependency` — load order, and a
 `Dependency` cell naming real parent objects or "parallel with" siblings at
@@ -953,7 +955,7 @@ spreadsheet, not the log table, is the enduring single "bigger picture"
 across the whole migration.
 
 **A second real bug found via live testing**: the first implementation of
-`add_run_book_pass()`'s result-column blanking silently did nothing —
+`add_migration_run_book_pass()`'s result-column blanking silently did nothing —
 `openpyxl`'s `cell(value=None)` is a no-op indistinguishable from omitting
 `value` entirely, so populated Person/Start/End/row-count cells survived
 the copy unchanged. Confirmed by populating a tab with real values, copying
@@ -967,6 +969,122 @@ directly above each header row as the reliable section name instead.
 tie-in yet (the stated next phase); "practices on scripts" (dev/test runs
 short of a real pass) are deliberately out of scope — only real full loads
 against sandbox/UAT/prod get a tab.
+
+**Follow-up: header block with environment/Git/ticket breadcrumbs.**
+Feedback on the first build: it was missing an area answering "what is
+this, where did it come from, what's it tied to." Every tab now gets a
+fixed-height header (rows 1-7, so `add_migration_run_book_pass()` can refresh values
+in place without shifting the sections copied below it) — Project, Source/
+Target Environment, a Git Repository link, the exact commit/branch this
+pass's scripts came from, a link to those scripts at that commit, and
+(when configured) a link to the ticket system's project. Hyperlinks are
+real (`cell.hyperlink`), not just blue text. Clarified directly that the
+ticket link is header-level only — one link to the project, not a per-row
+column, since specific-story tickets belong in the SQL comment rule below,
+not the spreadsheet.
+
+Git breadcrumbs are pinned at generation/copy time, not just "whatever's
+current when someone opens the file": `_git_info()` shells out to
+`git remote`/`git rev-parse`, `_github_url()` normalizes an https or SSH
+GitHub remote (a non-GitHub host degrades to plain commit-SHA text, no
+hyperlink — a known v1 limitation). Matched Script/Transformation rows
+also get a real hyperlink to that exact file at the pinned commit.
+`add_migration_run_book_pass()` always **recomputes** Commit/Branch and the
+Scripts-link to the *current* Git state (each pass records what actually
+ran for it, not the original tab's snapshot) and **never** silently
+carries Target Environment forward (Dev/UAT/PROD are different Salesforce
+orgs) — but Project/Source Environment/Git Repository/ticket link do carry
+forward from the source tab unless explicitly overridden, so a later pass
+isn't retyping things that don't change. New `TICKET_SYSTEM_LABEL`/
+`TICKET_SYSTEM_URL` settings in `config.py`/`.env.example` give a project-
+wide default (not a credential — no token, just a base URL/label);
+`--ticket-url`/`--ticket-label` override per project.
+
+**A real bug found via live testing**: an early version of the header
+write used `openpyxl`'s built-in "value=None means don't touch this cell"
+behavior (the same gotcha already found once in this item's build) when
+computing hyperlink-only cells, and separately, the fixed-row design was
+adopted specifically *because* an early draft that skipped absent header
+fields entirely produced a different header height per tab, which would
+have silently misaligned `add_migration_run_book_pass()`'s already-copied section
+rows on refresh — caught during design, not live, by tracing through what
+a variable-height header would do to a fixed-position copy operation.
+
+**New Hard Rule 10** (`CLAUDE.md`): every new file under
+`sql/transformations/` must have its ticket reference (JIRA story/bug
+key, or whichever system a project actually uses) hardcoded in a header
+comment when first built — never invented; ask if one hasn't been given.
+This is the per-script, per-story counterpart to the Migration Run Book header's
+project-level ticket link.
+
+**Follow-up: rewritten to mirror a real client's migration-status tab —
+supersedes the column model described above.** The user pointed at a
+real, in-production file (a real client engagement's own tracking
+workbook, "PROD Migration Status" tab) and asked the build to mirror it
+as closely as possible. Inspecting it directly (structure only — column
+names/layout, never its actual content) showed a genuinely different,
+better design than the verbally-described one built first:
+
+- **One unified table**, not a different column set per section. A
+  single header row — `Stage, Object, Dependency, Status, Critical,
+  Person Responsible, Begin Time, End Time, Execution Time, JIRA Ticket
+  Link, Notes, Total Records, Success Records, Failed Records, Success
+  Percent, Error Details` — covers every phase (`_COLUMNS` in
+  `migration_run_book.py`). Phases are marked by a single full-width,
+  dark-navy (`0D2C39`)/white-font banner row, matching the real file's
+  own styling exactly — the column header itself is never repeated. The
+  old per-section `Item`/`Script # / Name` split is gone; `Object` now
+  holds the step/task/script name either way (kept as the literal header
+  name to match the real file, even though it isn't necessarily a
+  Salesforce object API name).
+- **Status is a real dropdown** (`Not Started, N/A, In Process, Completed,
+  Issue` — the user's own stated list, not the real file's literal
+  `Error` value) driven by genuine Excel conditional-formatting rules
+  (`openpyxl.formatting.rule.CellIsRule`), not a one-time paint — colors
+  update live if a human changes the dropdown later, exactly like the
+  real file's own mechanism. Confirmed one exact color match directly
+  from the real file's own differential-style XML: `In Process` = pure
+  yellow (`FFFF00`). `N/A` = light green (`C6EFCE`), `Completed` = a
+  darker green (`375623`), `Issue` = a stronger red (`FF0000`) than
+  `Critical`'s existing fill, so the two flags stay visually distinct.
+  Both rule sets are over-provisioned to row 1000, matching the real
+  file's own `D3:D1062`-style ranges, so rows added later still pick up
+  the coloring.
+- **A per-row `JIRA Ticket Link` column** was added back — the earlier
+  session's "header-level only" decision didn't hold up against the real
+  file, which has both a per-row ticket link *and* would benefit from a
+  project-level one; both now coexist (header = project, per-row =
+  specific story/bug), and `JIRA Ticket Link` is a **recipe** column
+  (carried forward on a new pass), not a result.
+- **`Begin Time`/`End Time`/`Execution Time` are three separate,
+  informally human-entered fields** ("21sec", "11:26", "4 hours" in the
+  real file) — the previous `Total Time` Excel formula assumed clean
+  datetimes it could subtract; real usage evidence says people don't
+  enter them that way, so the formula was dropped in favor of a plain,
+  human-entered `Execution Time` field.
+- **User decision, kept deliberately un-mirrored**: the real file has no
+  separate `Critical` column at all (importance is just called out in
+  free-text Notes, e.g. "CRITICAL to be done"). Kept anyway — Critical
+  flags ahead-of-time risk; Status = Issue flags something that already
+  went wrong. Different signals, worth keeping distinct even though it
+  diverges from an exact mirror.
+- `Zuora Download and Load` (a real Stage value in the source file) is
+  that client's own billing/CPQ tooling, not universal — flagged directly
+  and generalized to **`Source Download and Load`** for this template's
+  generic starter phases, so it doesn't bake in one client's stack as if
+  every migration has it.
+- `add_migration_run_book_pass()` simplifies accordingly: one shared
+  schema everywhere means no more per-section column-list matching — a
+  phase is just "banner row, then data rows until the next banner,"
+  identified by whether `Object` is populated (a banner row only ever
+  populates column 1).
+
+**Not built (still, and now more explicitly)**: no automatic
+`dbo.BulkOpsLog` tie-in into the Load phase's result columns; Excel
+row-grouping/outline levels (no evidence the real file used them,
+skipped); the real file's literal client-specific phase names (`Build
+Data Lake Data Sources`, `Install Functions`, etc.) — only the
+*mechanism* was mirrored, not that project's specific instance data.
 
 ## 17. Fuzzy matching / dedup (deprioritized, not built)
 
@@ -1706,6 +1824,49 @@ Ties into #33 (scratch org lifecycle) as a second seeding option once
 both exist — a scratch org auto-seeded with scrambled *real* data
 (realistic volume/shape) rather than purely synthetic mock data, for
 whichever a given demo actually needs.
+
+## 39. Ticket system (JIRA or equivalent) read/comment integration (not built, needs API research)
+
+Raised directly, off the Migration Run Book's (#16) header getting a link to the
+ticket system's project: today that link is just a static URL a human
+clicks through to. The actual idea is deeper — being able to *read and
+update* a specific ticket's comments from here (post a comment to a JIRA
+story/bug directly, e.g. "load completed, 4,982/5,000 rows, 18 errors —
+see Migration Run Book tab UAT"), plus cross-referencing GitHub commits/PRs tied to
+that same ticket, so the ticket, the code that closed it, and the
+migration run that used it are all visible from one place.
+
+Idea, not yet scoped: JIRA's REST API (`/rest/api/3/issue/{key}/comment`
+for posting, `/rest/api/3/issue/{key}` for reading) would need a new
+credential type (API token + base URL) — document in
+`docs/SECURITY_OVERVIEW.md` *if and when* this gets built, per that file's
+own "update alongside any change that adds a credential type" convention.
+The GitHub side likely means either searching commit messages/PRs for a
+ticket key via GitHub's own API, or relying on an existing Atlassian-
+GitHub smart-commit integration if the org already has one configured —
+needs research before committing to an approach. Generalizes the same way
+Hard Rule 10's ticket-comment convention does: "JIRA" is the assumed
+default, but whatever system a given engagement actually uses should slot
+into the same shape.
+
+## 40. Configuration Workbook drift detection (not built, blocked on a template)
+
+Raised directly, off building the Migration Run Book's (#16) header: many
+teams keep a separate "Configuration Workbook" — a spreadsheet developers
+already use to document what they built (custom fields, automation, etc.)
+as they build it. The idea is to read that workbook and cross-check it
+against the actual deployed build, catching drift where the documented
+config and the real org disagree — the same category of problem
+`check-mapping-balance` (#3) already solves for a mapping doc vs. a real
+`sql/transformations/*.sql` transform, just for a different document
+against different ground truth (the org's live metadata/describe(), not
+a SQL file).
+
+**Blocked on a real example** — same pattern already used for the run
+book before its template was described directly: drop a real Configuration
+Workbook into `_stage/`, reviewed for structure/format only (column names,
+what it tracks), never content, before designing the comparison logic.
+Don't scope this further until that template exists to react to.
 
 ---
 
