@@ -80,6 +80,7 @@ summarizes.
 | 42 | Unit tests + CI for the pure-logic modules | Not built | — | Idea from the 2026-07-09 repo review: pytest coverage for the no-org-required logic (batch-size ladder math, load-order toposort, run-book template parsing/matching, mapping regex) plus a GitHub Action running it on push — the review found real bugs a test suite would have caught mechanically. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
 | 43 | Salesforce GraphQL API | **Researched — not pursued (out of scope)** | — | Nested relationship traversal and small-batch mutations in one call — genuinely useful for a UI making many round-trips, but this framework's actual needs (bulk extraction, bulk DML) are already better served by SOQL/Bulk API 2.0. See write-up for the specific reasoning. |
 | 44 | Native database connectors (SQL Server / MongoDB) as the Data Cloud source | Not built, needs research | — | Idea: let Data Cloud pull directly from the mirror DB (or MongoDB) via its own native connector types instead of this framework pushing data via API — no custom ingestion code needed, but network-reachability and schedule-vs-on-demand questions need answering first. |
+| 45 | Data Transform authoring as code | Researched, real progress — blocked on more real examples before writing generation code | — | Idea: generate a Data Transform's JSON definition programmatically instead of building it by hand in the drag-and-drop canvas. Confirmed real (export/import round-trip works, JSON shape partly mapped, 11-node taxonomy documented) — not yet buildable with confidence since only one real example (3 of ~11 node types) has been seen. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -2257,6 +2258,96 @@ transformed staging tables) rather than any ingestion code at all. Given
 as a stated trust-model fact (§7) about this framework itself, a real
 inbound-reachable SQL Server requirement on Data Cloud's side would be a
 genuinely new consideration worth surfacing there too if this gets built.
+
+## 45. Data Transform authoring as code (researched, real progress — blocked on more real examples)
+
+Raised directly, alongside the same pain point for Calculated Insights
+(#24) and field mapping (#21): building a Data Transform by hand in Data
+Cloud's drag-and-drop canvas is slow, and the goal is to generate its
+definition programmatically instead — write the transform as code, hand
+over something ready to drop in, the same spirit `auto_mapper.py` and
+`snowfakery_data.py`'s recipe-builder already apply elsewhere in this
+framework.
+
+**Confirmed real, not assumed — the export/import round-trip works.**
+The user confirmed directly (has done it many times as a DT backup
+mechanism): a Data Transform can be exported to JSON and re-imported.
+Import requires a container to import *into* — either **Create New** or
+**open an existing DT** — and then Upload **overwrites** whatever's
+already there. So the realistic workflow is a small, bounded manual
+bookend (create or open a DT) with the entire body fully scripted after
+that — not literally zero-touch, but close, and still a large win over
+building the whole thing by hand.
+
+**The JSON shape, from one real example** (reviewed for structure only —
+generalized here, the actual field/object names in that export were
+client-specific and aren't reproduced): top-level `version` (API version)
++ `nodes` + `ui`. `nodes` is a DAG — each entry has an `action`,
+action-specific `parameters`, and `sources` (upstream node names, the
+dependency edges). Three action types confirmed directly: `load` (pull a
+DMO/DLO by name with an explicit field list — just a field list, the same
+shape `describe()` already gives this framework for CRM objects),
+`formula` (adds computed fields; `expressionType: "SQL"` — the *same*
+SQL-flavored authoring surface DMQL already uses for Calculated Insights,
+confirmed live in #18 — a real internal-consistency signal, not a
+coincidence), and `outputD360` (a flat `sourceField`/`targetField`
+mapping array to write into a target DLO — structurally identical to
+what `auto_mapper.py` already generates for CRM field mapping, just a
+different target). `ui` holds node position/label/connector-line data for
+the canvas — confirmed by the user to encode literal layout coordinates,
+cosmetic/rendering-only rather than semantically required, but still a
+real requirement for the humans who'll review anything generated: a
+degenerate `ui` block would import fine but look wrong on screen.
+
+**No public schema reference or example library exists.** Searched
+directly — nothing on developer.salesforce.com, no GitHub examples repo,
+no sample gallery for this specific JSON format. It appears to be an
+internal/undocumented format Salesforce doesn't formally publish a spec
+for. The org's own real exports are the best available source of truth,
+not a stand-in for missing documentation.
+
+**Salesforce's own Trailhead documentation for the underlying node
+builder gives real, detailed ground**, cross-referenced against the one
+confirmed example rather than taken alone. Eleven node types documented,
+each with real UI-configurable options:
+
+| Node | Purpose | Configurable options |
+|---|---|---|
+| Data Source | Load a DMO/DLO as a starting dataset | Source object, field selection, related-object lookups + aliases |
+| Join | Combine two nodes on a related field | Join type (Inner/Left Outer/Right Outer/Outer), two source nodes, join field mapping, output field selection |
+| Filter | Keep only matching rows | Source node, filter condition/operator, hardcoded value or input variable, multiple conditions |
+| Append | Stack rows from multiple matching-structure nodes | Multiple source nodes, field matching |
+| Group and Aggregate | Group + summarize | Group-by fields (Text/Date/Date-Time), aggregation function (sum/avg/count/etc.) |
+| Formula | Add a computed field | Field alias, data type, format, the SQL-flavored expression itself |
+| Hierarchy | Resolve a parent-child path | Parent field, hierarchy path output |
+| Slice | Keep only selected fields, drop the rest | Fields-to-keep list |
+| Forecast | Predict future values from history | Source data, time period, historical range |
+| Writeback Object | Push results into an object | Target object, operation (create/update/upsert), field mapping |
+| Composite Writeback | Coordinate multiple Writeback nodes in one transaction | Container of Writeback nodes |
+
+**A real open question, flagged rather than assumed away**: that
+Trailhead content documents the "Data Processing Engine," and it isn't
+yet confirmed that's the *identical* builder/schema behind Data Cloud's
+Data Transform feature specifically, versus a closely related engine
+with partial overlap. This would explain the user's own observation that
+"Output has many pieces to manually configure" — there may genuinely be
+**two different output concepts**, not one node with many options:
+`outputD360` (write to a DLO/DMO, confirmed directly from the real
+example) versus "Writeback Object" (reads like it targets a core CRM
+object instead — a materially different destination and likely a
+different JSON shape).
+
+**Not building generation code yet, deliberately.** Only one real example
+has been seen, covering 3 of the 11 documented node types (`load`/
+`Data Source`, `formula`/`Formula`, `outputD360`/part of `Output`). Writing
+a generator off inference for the other 8 node types (`Join`, `Filter`,
+`Append`, `Group and Aggregate`, `Hierarchy`, `Slice`, `Forecast`,
+`Writeback Object`, `Composite Writeback`) — and resolving the Output
+question above — risks building against a guess rather than a fact,
+exactly the mistake #22's research was built to avoid. **Next step**: more
+real exported DTs (ideally exercising Join/Filter/Aggregate/Writeback),
+reviewed for structure only same as this one, before any generation code
+gets written.
 
 ---
 
