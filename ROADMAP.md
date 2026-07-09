@@ -81,6 +81,15 @@ summarizes.
 | 43 | Salesforce GraphQL API | **Researched — not pursued (out of scope)** | — | Nested relationship traversal and small-batch mutations in one call — genuinely useful for a UI making many round-trips, but this framework's actual needs (bulk extraction, bulk DML) are already better served by SOQL/Bulk API 2.0. See write-up for the specific reasoning. |
 | 44 | Native database connectors (SQL Server / MongoDB) as the Data Cloud source | Not built, needs research | — | Idea: let Data Cloud pull directly from the mirror DB (or MongoDB) via its own native connector types instead of this framework pushing data via API — no custom ingestion code needed, but network-reachability and schedule-vs-on-demand questions need answering first. |
 | 45 | Data Transform authoring as code | Researched, real progress — blocked on more real examples before writing generation code | — | Idea: generate a Data Transform's JSON definition programmatically instead of building it by hand in the drag-and-drop canvas. Confirmed real (export/import round-trip works, JSON shape partly mapped, 11-node taxonomy documented) — not yet buildable with confidence since only one real example (3 of ~11 node types) has been seen. |
+| 46 | Source directory ingestion + cross-pass structure validation | Not built | — | Idea: read a whole client-provided directory of CSVs into a Source SQL Server database in one step, and on a later pass, validate new files against what's already there — alert the architect if the structure has drifted, before silently breaking existing mappings. |
+| 47 | Pass-aware mapping/profiling workflow state | Not built | — | Idea: track whether an object's mapping has already been done for this project, so a first pass gets full profiling + auto-map and a later pass (UAT, mock go-live) gets review-and-polish of the existing doc instead of starting over. |
+| 48 | Auto-map autonomy boundary (real vs. mock data) + learning feedback loop | Boundary confirmed **Hard Rule 11**; learning-loop tooling not built | — | On real client data, auto-map only ever produces a first pass (profile/document/auto-map/notes) — humans finish it via workshop, always. On self-generated mock data, a full mapping can be completed autonomously for practice. Separately: after a human finishes a *real* mapping, ask (every time, never assumed) whether to contribute what was learned to the shared synonym thesaurus — staged for a human to review and commit later, never auto-written. |
+| 49 | Migrate-flagged-but-unmapped field detection + suggestion | Not built, refines #3/#10 | — | Idea: catch a mapping-doc row flagged `Migrate Data = Yes` with no Target Field chosen yet, alert the architect, and attempt a `describe()`-driven suggestion rather than just flagging the gap. |
+| 50 | Migration-key/External ID field validation against live describe() | Not built, hardens rules 4/7 | — | Idea: confirm the mapping doc's declared migration-key target field is genuinely `externalId`+`unique` in the live org before ever loading — not this framework's job to create that field, just to gate on it being correctly in place. |
+| 51 | Reference-record pull/compare tool | Not built | — | Idea: pull an architect-hand-created record by Id and diff it field-by-field against what this project's own load script would have produced, instead of eyeballing two field lists side by side. |
+| 52 | Mermaid process-flow diagrams from the Migration Run Book | Not built — new feature, explicitly requested | — | Idea: generate a Mermaid flowchart from a run-book tab's Stage/Object/Dependency structure as a `.md` file — renders natively on GitHub, and is already the right input format for a Lucid Chart import later. |
+| 53 | Supervised end-to-end load orchestrator | Not built — needs a collaborative design pass, UAT/PROD-only, aspirational | — | Idea: for UAT/PROD passes only (never dev/test), run the full load order with less per-step confirmation — but only ever with a strong bias to stop and ask over "plow ahead," since backing data out of a live org is worse than waiting for approval. An aspiration to earn over many projects, not a switch to flip; the actual warn/pause/stop signal framework needs to be designed together, not scoped solo. |
+| 54 | Chat-driven human-in-the-loop alerting/control (Slack/Teams) | Not built — roadmap idea per explicit request | — | Idea: outbound alerts to Slack/Teams instead of email (low-risk, near-term), and further out, driving a production run from Slack itself — the latter needs a real architecture decision (listener vs. polling) that would require revisiting `docs/SECURITY_OVERVIEW.md`'s current "no network listener" trust model. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -2349,41 +2358,273 @@ real exported DTs (ideally exercising Join/Filter/Aggregate/Writeback),
 reviewed for structure only same as this one, before any generation code
 gets written.
 
+## 46. Source directory ingestion + cross-pass structure validation (not built)
+
+Raised directly as the actual start of a real project: a client hands
+over a directory of CSV files (or this is a later pass — e.g. a UAT
+reload — of a directory shaped like one seen before). Nothing today reads
+a whole directory at once and turns it into a Source SQL Server database
+in one step; `import-parquet` (#12) handles one file at a time.
+
+Two cases, and they need different handling:
+- **New scripts / first pass**: infer schema per file (extending
+  `import-parquet`'s typed-inference approach from Parquet's own schema
+  to CSV, where types have to be sniffed rather than read off the file
+  itself), build one SQL Server table per file, following this project's
+  established naming convention.
+- **Existing scripts / a later pass** (a second test round, UAT, etc.):
+  before loading anything, **validate the new files against what's
+  already there** — same file names, same column structure. If they've
+  drifted (a column renamed, added, removed, reordered in a way that
+  matters), **alert the architect explicitly** rather than silently
+  loading something that will quietly break existing mappings and
+  transforms downstream. Only load once confirmed safe (or once the
+  architect has acknowledged the drift and decided how to handle it).
+
+## 47. Pass-aware mapping/profiling workflow state (not built)
+
+Raised directly: mapping and profiling are **first-pass** activities,
+not repeated every time. A second or third pass (UAT, a mock go-live,
+etc.) means *reviewing and polishing* the existing mapping doc against
+newly-arrived source data — confirming it's still accurate — not
+generating a new one from scratch, and profiling (#7) by default only
+happens once unless the architect explicitly asks for it again.
+
+Nothing today tracks "has this object's mapping already been done for
+this project" — that's the actual gap. Needs a small piece of durable,
+per-project state (a natural extension of the same idea `migration_run_
+book.py`'s per-tab watermark already established for sync state) so the
+right behavior — first-pass full treatment vs. later-pass review-only —
+can be chosen automatically instead of a human having to remember and
+say so every time.
+
+## 48. Auto-map autonomy boundary (real vs. mock data) + learning feedback loop, gated behind explicit consent (not built, builds on #10; boundary is now Hard Rule 11)
+
+Raised directly, and it turned out to be a bigger, more foundational
+point than "gate the synonym-learning loop" — it's the actual autonomy
+boundary for auto-mapping (and any similar first-draft-generation tool)
+itself, now **Hard Rule 11** in `CLAUDE.md`, not just a note here:
+
+- **Real client data**: mapping is iterative and workshop-driven with the
+  client, humans are always in the loop, and this framework's job is to
+  *speed that up*, not replace it — profile, document, auto-map, add
+  notes, then stop. A human takes that first pass and polishes it. Only
+  once *they've* finished does anything move further. No exceptions, no
+  autonomous "finishing" of a real mapping.
+- **Mock/test data this framework generated itself** (`generate-mock-
+  data`/`generate-related-mock-data`): the ground truth is already known
+  (we made it up), so a mapping *can* be carried all the way to complete
+  autonomously — for practice, testing new tooling, and dogfooding
+  ("we have to build it before we can dogfood it"). This is the
+  deliberate, narrow exception, never extended to a real engagement.
+
+The **narrower piece this item was originally about** still stands as a
+real idea layered on top of that boundary: after a human finishes a real
+mapping, their corrections are learning that could improve `reference/
+field_synonyms.json` for every future migration — the **one** exception
+to "most of what happens on a real engagement is client-specific and
+never touches the shared repo." Design constraints, stated directly and
+non-negotiable:
+- **Never shared without asking, every single time** — not a
+  once-per-architect standing preference, a fresh, explicit question
+  each migration: "this mapping session taught us these things — want to
+  contribute them to the shared thesaurus?"
+- **Default is no.** Silence or a "no" means nothing leaves this project.
+- **If yes, still never auto-commits.** Same "git is truth, a human
+  merges deliberately" principle `suggest-batch-heuristics` (#15) already
+  established for the batch-size knowledge base — candidate synonym
+  additions get staged somewhere durable and reviewable (there's
+  explicitly **no SQL Server session backing this decision point**, per
+  the user directly — the learning has to be captured in a form that
+  survives to be deployed later, not dependent on the live project
+  database still existing), not written into `reference/field_synonyms.
+  json` directly.
+
+## 49. Migrate-flagged-but-unmapped field detection + describe()-driven suggestion (not built, refines #3/#10)
+
+Partially covered already — `check-mapping-balance` (#3) already flags a
+transform that populates an undocumented field, or documents a field the
+transform doesn't populate, and cross-checks both against live
+`describe()` for `not_a_real_field`. What it doesn't do yet: catch this
+**in the mapping doc itself, before any transform is written** — a row
+where `Migrate Data = Yes` but the Target Field cell is still blank.
+Raised directly: when found, alert the architect and attempt a
+`describe()`-driven suggestion (reusing `auto_mapper.py`'s existing
+matching logic) rather than just flagging the gap and stopping there.
+
+## 50. Migration-key / External ID field validation against live describe() (not built, hardens rules 4/7)
+
+Hard rules 4 and 7 (plus `CheckLoadTableDuplicateKeys`) already validate
+that a load table's migration-key column is unique and non-null **in SQL
+Server** — but nothing today confirms the *target* field it's mapped to
+is actually flagged `externalId: true` and `unique: true` in the live
+org's own `describe()`. Raised directly, in the strongest terms used in
+this whole conversation: "the target will always need to be unique and
+external. No exceptions... we should not load until it is fixed."
+
+The field's own name can't be assumed (`MigrationID__c` is this
+project's own convention, not guaranteed to match whatever a given
+build team actually created) — it has to be read from the mapping doc,
+then confirmed live against `describe()`, not assumed from the mapping
+doc's text alone (same "never invent, always confirm" discipline as
+hard rule 5). And explicitly **not this framework's job to create that
+field if it's missing** — that's a different team's responsibility; this
+is a pre-flight gate that blocks a load until someone else has fixed it,
+not a tool that fixes it itself.
+
+## 51. Reference-record pull/compare tool for architect-provided known-good Ids (not built)
+
+Raised directly: sometimes an architect creates a record by hand through
+the Salesforce UI (to see how the org's real automation shapes a record)
+and can hand over its Id for review. Already possible today in an ad hoc
+way via `query` — the gap is a dedicated command that pulls that record
+and **diffs it field-by-field against what this project's own load
+script would have produced** from the matching source row, instead of a
+human eyeballing two field lists side by side every time. Treat these
+records purely as review/debugging input for fixing the SQL transform,
+never as something this framework writes back to.
+
+## 52. Mermaid process-flow diagrams from the Migration Run Book (not built — new feature, explicitly requested)
+
+Generate a Mermaid flowchart from a Migration Run Book tab's own
+structure (phases → steps → dependencies, straight off the Stage/Object/
+Dependency columns #16 already tracks) as a `.md` file. Deliberately
+simple for v1, per the user's own framing — "for now, you would just
+create mermaid" — emit the Mermaid syntax itself and stop there; GitHub
+(and most modern Markdown renderers) already render ` ```mermaid ` code
+fences as real diagrams natively, no additional tooling required to get
+a visual result out of this. Lucid Chart itself supports importing
+Mermaid syntax directly (paste-to-import), so plain Mermaid is also
+already the right foundation for handing a diagram to Lucid later,
+without needing to build a direct Lucid API integration to get value
+from this. Building/saving a *polished*, styled diagram elsewhere is a
+named future stretch, explicitly not part of this item yet.
+
+## 53. Supervised end-to-end load orchestrator — a framework to design collaboratively, not scope solo (not built)
+
+The single biggest capability described in this conversation. Confirmed
+directly, with real constraints that narrow it a lot from "automate the
+whole thing":
+
+- **UAT and PROD passes only.** Not dev, not earlier test iterations —
+  those stay exactly as manual and per-step-confirmed as they are today,
+  unaffected by this item. Full orchestration is specifically for the
+  later, higher-stakes passes where the sequence is already well-worn.
+- **An aspiration to earn over many projects, not a switch to flip.**
+  Stated directly: "It is a dream to do this... but the orchestrator
+  isn't going to be something we just do every time... has to be tested
+  over many projects." This gets built and trusted incrementally, not
+  shipped and turned on.
+- **Bias to stop, hard.** "You should never just plow ahead when we get
+  to UAT and production loads... caution should be that you stop and ask
+  if things are looking off and we don't have enough info." The stated
+  cost asymmetry is explicit and should drive every design choice here:
+  **backing data out of a live org is worse than waiting for approval.**
+  A false pause costs a little time; a false continue can cost a
+  backout-and-redo cycle in production. When genuinely unsure which way
+  to round, round toward stopping.
+- **This still runs against Hard Rule 2** (`CLAUDE.md`: confirm before
+  every `bulkops` call, enforced today as a per-invocation approval gate)
+  — approving an entire UAT/PROD run up front, then proceeding through
+  multiple objects/batches without re-confirming each one, is a genuine,
+  deliberate loosening of that rule for this specific, narrow case, not
+  a blanket change to how `bulkops` behaves everywhere.
+
+**Not scoping this further alone.** The real work is designing the
+actual warn/pause/full-stop signal framework — what "looking off" means
+concretely, what counts as "enough info," where the line sits between
+"log it and continue" and "stop and ask" — and that's explicitly a
+collaborative design effort, not a spec to hand over. Next step when
+picked up: a dedicated planning session for this framework specifically,
+not folded into other work.
+
+## 54. Chat-driven human-in-the-loop alerting/control — Slack/Teams (not built — roadmap idea per explicit request)
+
+Two distinct capabilities worth keeping separate, raised directly
+("I would love more than an email... that would be a cool feature to
+turn Slack into an interface... Put that as a roadmap idea to
+consider"):
+
+1. **Outbound alerting** — push a notification to Slack/Teams instead of
+   (or alongside) email when something needs the architect's attention
+   (a batch failed, a run finished, a decision is needed). Low-risk, a
+   webhook POST, no new trust boundary.
+2. **Bidirectional chat-driven control** — the more ambitious version:
+   the architect drives a production migration run *from* Slack instead
+   of a terminal session. Real architecture question to flag up front,
+   not gloss over: does this need a listening process (a bot subscribed
+   to Slack events — an inbound network listener) or can it be done by
+   polling (something periodically checks for new messages, no
+   listener)? `docs/SECURITY_OVERVIEW.md` §7 states "no network
+   listener" as a **current fact** about this framework's trust model,
+   and §8 already says adding one requires a full fresh security review,
+   not an incremental patch — if capability 2 is ever built via a
+   listener, that document needs deliberate revisiting, not quiet
+   staleness.
+
+Capability 1 is a much smaller, safer first step and could ship well
+before any version of capability 2 is even designed.
+
 ---
 
 ## End-to-end project workflow (vision, not built)
 
 The long-term shape this framework is heading toward — a full project
-lifecycle, not just a set of standalone tools. Roughly, in order:
+lifecycle, not just a set of standalone tools. Laid out end to end
+directly in one conversation, phase by phase, referencing what already
+exists and what's newly captured above rather than restating either:
 
-1. **Kick off a project**: generate the mapping document (see #3), with
-   places in it for profiling results (#7) to land.
-2. **Decide scope**: flag which source objects (SQL or Salesforce) are
-   actually being migrated — a documented decision, not an implicit one.
-   Generate RAIDD (Risks/Assumptions/Issues/Decisions/Dependencies) entries
-   for anything that needs one, for a RAIDD log.
-3. **Auto-map** (BUILT, see #10): attempt source → target field mapping
-   based on the mapping document, profiling data, and the git-tracked
-   synonym thesaurus, as a first draft, not a final answer.
-4. **Draft the solution document** (BUILT, see #4): once mapping and
-   profiling exist for the objects in scope, auto-draft the migration
-   solution/design document from them — a living draft that gets
-   regenerated as the mapping/profiling underneath it evolves, not a
-   one-time snapshot.
-5. **Generate scripts**: build the T-SQL transform for each source →
-   target object pairing (following the standard workflow already in
-   `CLAUDE.md`: mapping → confirm field names → build → sort → dupe-check).
-6. **AI review of transformed data**: review subsets of transformed
-   records and check them against the org's build/automation metadata —
-   a **Risk Analyzer** distinct from #5 (which looks at org metadata
-   ahead of time; this looks at actual transformed *data* against that
-   metadata to catch problems #5 wouldn't surface from schema alone).
-7. **Human in the loop**: a person reviews everything generated so far and
-   polishes each object for real migration — AI proposes and drafts
-   proactively, but doesn't load anything without that review.
+1. **Source ingestion**: read a client-provided directory of CSVs (or
+   validate a later pass's files against what's already loaded) and
+   build the Source SQL Server database from it — #46, the current gap.
+2. **Mapping**: generate the mapping document (#3) with one tab per
+   source table just loaded, then decide by pass — first pass gets a
+   full profile (#7) and auto-map (#10) first draft for a human to
+   finish; a later pass reviews and polishes the *existing* doc instead
+   (#47's pass-awareness gap). A finished first-pass mapping is also,
+   with explicit per-project consent, a candidate to teach the shared
+   synonym thesaurus something new (#48) — and a chance to catch a
+   migrate-flagged field with no target chosen yet (#49).
+3. **Build**: generate the T-SQL transform for each source → target
+   pairing, in load order (#2), using this project's established
+   numbering convention (`CLAUDE.md`'s standard workflow: mapping →
+   confirm field names via `describe`/`dump-describe` (rule 5) → build →
+   sort (rule 6) → dupe-check (rule 7)). Before any of it can load,
+   confirm the migration key's target field is genuinely
+   external+unique in the live org (#50, hardening rules 4/7) — this
+   framework's job is to verify that gate, not to build the field itself.
+4. **Test each script individually, not end to end yet**: drive toward
+   100% of rows loading per object, fixing the SQL when it doesn't
+   rather than accepting errors as normal at this stage. Two established
+   tools do double duty here: `bulkops delete --where`/`--dry-run` (#32)
+   for the load → find a problem → back out → fix → reload cycle during
+   iteration, and `analyze-org-risk` (#5) plus a reference-record pull
+   (#51, new) when an architect hand-creates a record in the UI to show
+   what "correct" actually looks like against the org's real automation.
+   The standing goal stated directly: our data should land looking
+   indistinguishable from a record created natively in the org — the
+   migration key is the *only* thing that should ever tell the two apart.
+5. **Document and diagram**: code review and documentation of the
+   scripts as they stabilize, plus a new, explicitly lower-stakes idea —
+   Mermaid process-flow diagrams generated from the Migration Run Book
+   (#52) for a visual instead of a spreadsheet-only view.
+6. **Full end-to-end runs**: once individual scripts are solid, run the
+   real sequence — object by object, adapting batch size (#15) and
+   retrying (#11) automatically, logging everything (#14/#16). Perfect
+   completion isn't the bar; a UAT pass with a handful of genuinely
+   unfixable source-data rows is a normal, reportable outcome, not a
+   failure — call it out in the run book, report it to the client, and
+   revisit with a subset reload later if needed. This is #53's
+   orchestrator, still waiting on the consent-model decision described
+   there before it gets built.
+7. **Keep the human in the loop, better than email**: #54's Slack/Teams
+   idea — starting with outbound alerts, with bidirectional chat-driven
+   control as the further-out, architecture-changing version.
 
 This ties together #2 (load order), #3 (mapping doc), #4 (solution doc),
-#5 (org metadata risk), #7 (profiling), and #10 (auto-mapping) into one
-pipeline, plus one remaining new piece: RAIDD log generation. Scoping that
-into a concrete build is the next step — this section is the shape of
-where it's all going, not a spec for it yet.
+#5 (org metadata risk), #6 (mock data), #7 (profiling), #10
+(auto-mapping), #11 (bulkops + retry), #14/#16 (logging + run book), #15
+(batch sizing), and #32 (purge-by-filter) into one pipeline, plus the
+gaps captured above (#46–#54) as the concrete next pieces. Scoping any
+one of them into a real build is the next step — this section is the
+shape of where it's all going, not a spec for any single piece of it.

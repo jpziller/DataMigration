@@ -359,6 +359,17 @@ available even when there's no dedicated skill for it.
     comment, or state explicitly that this project isn't using a ticket
     system. This is a consistency/traceability rule (not a safety-critical
     one like 1-9), but still every project, every script.
+11. **Auto-mapping (and any similar first-draft tool) only ever produces a
+    first pass on real client data — never a finished mapping.** Profile,
+    document, auto-map, add notes, then stop. The workshop process and the
+    human own everything past that point, every time, no exceptions —
+    mapping is iterative and client-facing, not something to autonomously
+    complete on someone else's real data. The one deliberate exception:
+    data this framework generated itself (`generate-mock-data`/
+    `generate-related-mock-data`) has known ground truth, so a mapping may
+    be carried all the way to complete for practice, testing, and
+    dogfooding new tooling — never for a live engagement's actual data.
+    See `ROADMAP.md` #48.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
