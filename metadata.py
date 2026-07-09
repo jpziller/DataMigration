@@ -62,6 +62,41 @@ def record_counts(sf, object_names=None):
     return {row["name"]: row["count"] for row in resp.json().get("sObjects", [])}
 
 
+def validate_external_id_field(sf, object_name, field_name):
+    """Confirm field_name is real on object_name AND flagged both
+    externalId and unique in the live org's describe() -- the two
+    properties a Bulk API 2.0 upsert external ID/migration key actually
+    needs (roadmap #50). This hardens Hard Rules 4/6/7, which only ever
+    validate the SQL-Server load table's key column -- never whether the
+    live org's TARGET field is genuinely configured to serve as a
+    migration key. Read-only; does not create or fix the field itself --
+    that's a human/admin task, this only gates on it already being
+    correct.
+
+    Returns {"ok": bool, "problems": [...]} -- each problem is its own
+    plain-English message so a caller can report exactly what's wrong
+    rather than a single "not valid" verdict."""
+    fields = {f["name"]: f for f in getattr(sf, object_name).describe()["fields"]}
+
+    if field_name not in fields:
+        return {
+            "ok": False,
+            "problems": [
+                f"'{field_name}' is not a field on {object_name} in this org "
+                "(typo, not deployed, or removed)."
+            ],
+        }
+
+    field = fields[field_name]
+    problems = []
+    if not field.get("externalId"):
+        problems.append(f"'{field_name}' on {object_name} is not flagged as an External ID field.")
+    if not field.get("unique"):
+        problems.append(f"'{field_name}' on {object_name} is not flagged as Unique.")
+
+    return {"ok": not problems, "problems": problems}
+
+
 def dump_describe(sf, object_name, out_dir="metadata"):
     """Write an object's full describe to metadata/<Object>.json for git."""
     os.makedirs(out_dir, exist_ok=True)

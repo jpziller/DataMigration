@@ -101,6 +101,25 @@ def dump_describe(object_name):
     click.echo(md.dump_describe(sf, object_name))
 
 
+@cli.command("validate-external-id")
+@click.argument("object_name")
+@click.argument("field_name")
+def validate_external_id_cmd(object_name, field_name):
+    """Confirm field_name is genuinely externalId+unique in the live org's
+    describe() before it's trusted as a migration key (roadmap #50, hard
+    rule 12). Read-only, no confirmation needed. Exits nonzero on failure
+    so this can gate a script, not just be eyeballed."""
+    _, sf, _e = _ctx()
+    result = md.validate_external_id_field(sf, object_name, field_name)
+    if result["ok"]:
+        click.echo(f"OK -- {field_name} on {object_name} is a real, externalId+unique field.")
+        return
+    click.echo(f"NOT VALID -- {field_name} on {object_name} cannot be trusted as a migration key:")
+    for problem in result["problems"]:
+        click.echo(f"  {problem}")
+    raise SystemExit(1)
+
+
 @cli.command("record-counts")
 @click.argument("object_names", nargs=-1)
 @click.option("--all-objects", "all_objects", is_flag=True, help="Every object in the org, not just the ones named -- can be a large response for a real org.")

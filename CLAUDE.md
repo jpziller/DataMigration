@@ -280,6 +280,11 @@ venv may not be active in a fresh shell:
                 table too). Also available as an opt-in automatic step on `bulkops` itself via
                 `--run-book`/`--run-book-tab` (same underlying sync, called right after that load's
                 own `BulkOpsLog` row is written) instead of running this separately.)
+- Validate migration key: `.venv/Scripts/python.exe cli.py validate-external-id Account Legacy_Id__c`
+                (confirms the named field is genuinely externalId+unique in the live org's
+                describe() before it's trusted as a migration key — rule 12. Read-only, no
+                confirmation needed, exits nonzero on failure. Not this framework's job to
+                create/fix the field; only to gate on it being correctly in place.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
@@ -292,7 +297,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
-`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`
+`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
+`/validate-external-id`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -370,6 +376,15 @@ available even when there's no dedicated skill for it.
     be carried all the way to complete for practice, testing, and
     dogfooding new tooling — never for a live engagement's actual data.
     See `ROADMAP.md` #48.
+12. Before any `bulkops insert`/`upsert` (or a delete resolved by
+    external id), the target field being used as the migration key must
+    be checked live via `validate-external-id <Object> <Field>` —
+    confirms it's genuinely flagged both External ID and Unique in the
+    org's current `describe()`, not just assumed from the mapping doc's
+    field name or the transform's column name. Do not load until it
+    passes. It is not this framework's job to create or fix the field if
+    it isn't — that's another team's task; this rule only gates on it
+    already being correctly in place. See `ROADMAP.md` #50.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
@@ -394,7 +409,11 @@ don't jump straight to writing T-SQL:
    (rule 6), if it has one.
 6. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
    key (rule 7). Resolve anything it flags.
-7. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2)
+7. **Validate the migration key live** — `validate-external-id <Object>
+   <Field>` against the actual target field (rule 12). Do not proceed
+   until it reports OK; fixing a failing field is another team's job, not
+   something to work around here.
+8. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2)
    and, for insert/upsert, Email Deliverability checked and passed (rule 9).
    Leave `--batch-size` at its `auto` default unless you already know a
    pinned value from a prior run of this same project — a scripted

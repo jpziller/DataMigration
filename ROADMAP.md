@@ -77,7 +77,7 @@ summarizes.
 | 39 | Ticket system (JIRA or equivalent) read/comment integration | Not built, needs API research | — | Idea: post comments to a specific JIRA (or equivalent) ticket directly (e.g. load results), and cross-reference GitHub commits/PRs tied to that ticket — deeper than the Migration Run Book header's static project link (#16). |
 | 40 | Configuration Workbook drift detection | Not built — blocked on a real template | — | Idea: read a team's existing "Configuration Workbook" (how developers document their build) and cross-check it against the actual deployed metadata — the same category of problem `check-mapping-balance` (#3) solves for mapping docs, applied to build documentation instead. Waiting on a real example template before this gets designed. |
 | 41 | Per-object record counts via the recordCount API | **Built** | `record-counts` | One HTTP call for many objects' record counts instead of a SOQL COUNT() per object — fast rough triage across many objects, confirmed live to be an approximate/cached snapshot (can lag real inserts by more than a few seconds), so not a substitute for `profile-salesforce`'s exact count when validating a load actually landed. |
-| 42 | Unit tests + CI for the pure-logic modules | Not built | — | Idea from the 2026-07-09 repo review: pytest coverage for the no-org-required logic (batch-size ladder math, load-order toposort, run-book template parsing/matching, mapping regex) plus a GitHub Action running it on push — the review found real bugs a test suite would have caught mechanically. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
+| 42 | Unit tests + CI for the pure-logic modules | **Built** | `tests/*.py` (pytest) + `.github/workflows/tests.yml` | 43 pytest cases over the no-org-required logic (batch-size ladder math, load-order toposort/cycle grouping, run-book template parsing + `_object_matches()`'s Order/OrderItem regression, mapping-doc INSERT-INTO regex, auto-mapper name normalization/matching, plus #50's `validate_external_id_field`), run automatically on every push/PR via GitHub Actions. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
 | 43 | Salesforce GraphQL API | **Researched — not pursued (out of scope)** | — | Nested relationship traversal and small-batch mutations in one call — genuinely useful for a UI making many round-trips, but this framework's actual needs (bulk extraction, bulk DML) are already better served by SOQL/Bulk API 2.0. See write-up for the specific reasoning. |
 | 44 | Native database connectors (SQL Server / MongoDB) as the Data Cloud source | Not built, needs research | — | Idea: let Data Cloud pull directly from the mirror DB (or MongoDB) via its own native connector types instead of this framework pushing data via API — no custom ingestion code needed, but network-reachability and schedule-vs-on-demand questions need answering first. |
 | 45 | Data Transform authoring as code | Researched, real progress — blocked on more real examples before writing generation code | — | Idea: generate a Data Transform's JSON definition programmatically instead of building it by hand in the drag-and-drop canvas. Confirmed real (export/import round-trip works, JSON shape partly mapped, 11-node taxonomy documented) — not yet buildable with confidence since only one real example (3 of ~11 node types) has been seen. |
@@ -85,7 +85,7 @@ summarizes.
 | 47 | Pass-aware mapping/profiling workflow state | Not built | — | Idea: track whether an object's mapping has already been done for this project, so a first pass gets full profiling + auto-map and a later pass (UAT, mock go-live) gets review-and-polish of the existing doc instead of starting over. |
 | 48 | Auto-map autonomy boundary (real vs. mock data) + learning feedback loop | Boundary confirmed **Hard Rule 11**; learning-loop tooling not built | — | On real client data, auto-map only ever produces a first pass (profile/document/auto-map/notes) — humans finish it via workshop, always. On self-generated mock data, a full mapping can be completed autonomously for practice. Separately: after a human finishes a *real* mapping, ask (every time, never assumed) whether to contribute what was learned to the shared synonym thesaurus — staged for a human to review and commit later, never auto-written. |
 | 49 | Migrate-flagged-but-unmapped field detection + suggestion | Not built, refines #3/#10 | — | Idea: catch a mapping-doc row flagged `Migrate Data = Yes` with no Target Field chosen yet, alert the architect, and attempt a `describe()`-driven suggestion rather than just flagging the gap. |
-| 50 | Migration-key/External ID field validation against live describe() | Not built, hardens rules 4/7 | — | Idea: confirm the mapping doc's declared migration-key target field is genuinely `externalId`+`unique` in the live org before ever loading — not this framework's job to create that field, just to gate on it being correctly in place. |
+| 50 | Migration-key/External ID field validation against live describe() | **Built**, hardens rules 4/7 | `validate-external-id <Object> <Field>` (hard rule 12) | Confirms a named target field is genuinely `externalId`+`unique` in the live org's describe() before it's trusted as a migration key — explicit object+field parameters (same convention as `CheckLoadTableDuplicateKeys`/`--external-id`), not auto-detected from the mapping doc. Read-only, exits nonzero on failure so it can gate a script. Not this framework's job to create that field, just to gate on it being correctly in place. |
 | 51 | Reference-record pull/compare tool | Not built | — | Idea: pull an architect-hand-created record by Id and diff it field-by-field against what this project's own load script would have produced, instead of eyeballing two field lists side by side. |
 | 52 | Mermaid process-flow diagrams from the Migration Run Book | Not built — new feature, explicitly requested | — | Idea: generate a Mermaid flowchart from a run-book tab's Stage/Object/Dependency structure as a `.md` file — renders natively on GitHub, and is already the right input format for a Lucid Chart import later. |
 | 53 | Supervised end-to-end load orchestrator | Not built — needs a collaborative design pass, UAT/PROD-only, aspirational | — | Idea: for UAT/PROD passes only (never dev/test), run the full load order with less per-step confirmation — but only ever with a strong bias to stop and ask over "plow ahead," since backing data out of a live org is worse than waiting for approval. An aspiration to earn over many projects, not a switch to flip; the actual warn/pause/stop signal framework needs to be designed together, not scoped solo. |
@@ -2172,7 +2172,7 @@ deeply") where a several-minutes-stale cache doesn't matter. Also excludes
 deleted/archived records and associated objects (`History`/`Feed`/`Share`/
 `ChangeEvent`).
 
-## 42. Unit tests + CI for the pure-logic modules (not built)
+## 42. Unit tests + CI for the pure-logic modules (built)
 
 Raised by the 2026-07-09 full repo review: every verification in this
 project is live and manual — thorough and well-documented in this file's
@@ -2185,19 +2185,35 @@ Order-vs-OrderItem substring false-positive, the template's 17-cells-vs-
 *three separate times* this project — it's this codebase's single most
 repeated gotcha).
 
-Scope when picked up: the pure-logic, no-org-required surfaces first —
-`batch_advisor`'s ladder math and rung adjustments, `load_order`'s
-topological sort/cycle detection, `migration_run_book`'s template parser
-and `_object_matches()` (the ten-case matrix from the review is already
-effectively a test fixture, currently living only in a chat transcript),
-`mapping_doc`'s INSERT-INTO regex, `auto_mapper`'s name normalization.
-Plus a minimal GitHub Actions workflow running them on push — the repo
-already has GitHub community files (SECURITY.md/CONTRIBUTING.md), and CI
-is the natural next piece of that same "meant to be opened to others"
-posture. Live end-to-end verification against a real org stays the
-standard for the org-touching paths (that's a genuine strength of this
-project's process, not something tests replace) — this item is about the
-logic underneath it.
+Scoped to the pure-logic, no-org-required surfaces, matching the review's
+own framing — nothing here needs a live SQL Server connection or
+Salesforce org, which is what keeps the CI job runnable on a bare GitHub
+Actions runner:
+- `batch_advisor._ladder_index`/`_step`/`_seed_lookup` — ladder math and
+  rung stepping, using the real committed `reference/batch_size_
+  heuristics.json`.
+- `load_order.compute_load_order`/`_group_cycle_members` — topological
+  sort, self-reference detection, and unresolved-cycle grouping.
+- `migration_run_book._object_matches`/`_is_separator_row`/
+  `_parse_template` — including the exact Order-vs-OrderItem regression
+  case as a named test, plus the header/cell-count drift protection.
+- `mapping_doc.extract_insert_columns`/`_safe_sheet_name` — INSERT INTO
+  regex matching (case-insensitivity, bracket-stripping, table-name
+  selection) and Excel sheet-name sanitizing.
+- `auto_mapper._normalize`/`_match_target` — name normalization (`__c`
+  stripping) and exact/thesaurus/fuzzy/no-match resolution.
+- `metadata.validate_external_id_field` (new in #50) — tested against a
+  small stub object exposing `.describe()`, no real org needed.
+
+43 test cases total (`tests/test_*.py`), all passing. `.github/workflows/
+tests.yml` runs them on every push/PR: checkout, Python 3.11, an
+`apt-get install unixodbc` step (defensive — `pyodbc`'s wheel dynamically
+links `libodbc.so.2` at import time, which a bare `ubuntu-latest` runner
+doesn't ship), `pip install -r requirements.txt`, then `pytest tests/ -v`.
+Live end-to-end verification against a real org stays the standard for
+the org-touching paths (that's a genuine strength of this project's
+process, not something tests replace) — this covers the logic underneath
+it.
 
 ## 43. Salesforce GraphQL API (researched — not pursued, out of scope)
 
@@ -2452,25 +2468,40 @@ Raised directly: when found, alert the architect and attempt a
 `describe()`-driven suggestion (reusing `auto_mapper.py`'s existing
 matching logic) rather than just flagging the gap and stopping there.
 
-## 50. Migration-key / External ID field validation against live describe() (not built, hardens rules 4/7)
+## 50. Migration-key / External ID field validation against live describe() (built, hardens rules 4/7)
 
 Hard rules 4 and 7 (plus `CheckLoadTableDuplicateKeys`) already validate
 that a load table's migration-key column is unique and non-null **in SQL
-Server** — but nothing today confirms the *target* field it's mapped to
-is actually flagged `externalId: true` and `unique: true` in the live
-org's own `describe()`. Raised directly, in the strongest terms used in
-this whole conversation: "the target will always need to be unique and
+Server** — but nothing confirmed the *target* field it's mapped to is
+actually flagged `externalId: true` and `unique: true` in the live org's
+own `describe()`. Raised directly, in the strongest terms used in this
+whole conversation: "the target will always need to be unique and
 external. No exceptions... we should not load until it is fixed."
 
-The field's own name can't be assumed (`MigrationID__c` is this
-project's own convention, not guaranteed to match whatever a given
-build team actually created) — it has to be read from the mapping doc,
-then confirmed live against `describe()`, not assumed from the mapping
-doc's text alone (same "never invent, always confirm" discipline as
-hard rule 5). And explicitly **not this framework's job to create that
-field if it's missing** — that's a different team's responsibility; this
-is a pre-flight gate that blocks a load until someone else has fixed it,
-not a tool that fixes it itself.
+**Design decision**: the field's own name can't be assumed (`MigrationID
+__c` is this project's own convention, not guaranteed to match whatever a
+given build team actually created), and the mapping doc has no dedicated
+"this is THE migration key" column — `mapping_doc.py`'s own `_HEADERS`/
+`fields_in_scope_from_mapping()` only track generic "Migrate Data == Yes"
+fields, not which one specifically serves as the key. Rather than invent
+a new mapping-doc convention, this follows the codebase's existing
+pattern for migration-key info elsewhere: an **explicit parameter**, never
+auto-detected (`CheckLoadTableDuplicateKeys '<LoadTable>',
+'<MigrationKeyColumn>'`, `bulkops --external-id <field>`).
+
+**What shipped**: `metadata.validate_external_id_field(sf, object_name,
+field_name)` — reads live `describe()`, confirms the field exists and is
+flagged both `externalId` and `unique`, returning every problem found
+(not real / not externalId / not unique) so nothing is silently assumed.
+Wired up as `cli.py validate-external-id <Object> <Field>` (read-only, no
+confirmation needed, exits nonzero on failure so it can gate a script) and
+`/validate-external-id`. New **hard rule 12** requires this check before
+any `bulkops insert`/`upsert`/external-id-resolved delete, inserted into
+the Standard Workflow between the Sort (rule 6) and Dupe-check (rule 7)
+steps. Explicitly **not this framework's job to create that field if it's
+missing** — that's a different team's responsibility; this is a
+pre-flight gate that blocks a load until someone else has fixed it, not a
+tool that fixes it itself.
 
 ## 51. Reference-record pull/compare tool for architect-provided known-good Ids (not built)
 
