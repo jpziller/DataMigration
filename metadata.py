@@ -8,6 +8,7 @@ import json
 import os
 
 import requests
+from simple_salesforce.exceptions import SalesforceResourceNotFound
 
 
 def list_objects(sf, queryable_only=True):
@@ -76,7 +77,14 @@ def validate_external_id_field(sf, object_name, field_name):
     Returns {"ok": bool, "problems": [...]} -- each problem is its own
     plain-English message so a caller can report exactly what's wrong
     rather than a single "not valid" verdict."""
-    fields = {f["name"]: f for f in getattr(sf, object_name).describe()["fields"]}
+    try:
+        desc = getattr(sf, object_name).describe()
+    except SalesforceResourceNotFound:
+        return {
+            "ok": False,
+            "problems": [f"'{object_name}' is not an object in this org (typo or removed)."],
+        }
+    fields = {f["name"]: f for f in desc["fields"]}
 
     if field_name not in fields:
         return {

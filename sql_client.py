@@ -24,6 +24,14 @@ def build_odbc_string(s: Settings) -> str:
 
 
 def make_engine(s: Settings) -> Engine:
+    # NOTE: the SQL password (if any -- Windows/trusted auth needs none) ends
+    # up inside the odbc_connect blob, not the URL's native user:pass@host
+    # form -- so SQLAlchemy's own hide_password=True redaction (its default
+    # logging/repr behavior) can't find and mask it. Nothing here sets
+    # echo=True or prints/logs the engine or its .url today, and it must
+    # stay that way -- do not add echo=True or debug-print this engine's URL
+    # without first redacting PWD=... out of it, or the SQL Server password
+    # will end up in cleartext in logs/console output.
     odbc = urllib.parse.quote_plus(build_odbc_string(s))
     # fast_executemany dramatically speeds up pandas.to_sql / executemany writes.
     return create_engine(

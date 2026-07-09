@@ -9,6 +9,7 @@ Three auth modes (set SF_AUTH_MODE):
   password - username + password + security token.
 """
 import json
+import re
 import subprocess
 import os
 
@@ -16,8 +17,28 @@ from simple_salesforce import Salesforce
 
 from config import Settings
 
+# `sf` resolves to `sf.cmd` on Windows (confirmed: `where sf` -> ...\sf.cmd),
+# which can't be launched by CreateProcess directly -- shell=True (routing
+# through cmd.exe) is genuinely required there, not just a convenience. But
+# cmd.exe treats &/|/^/% as live metacharacters even inside a quoted
+# argument, and Python's list2cmdline (used to build the command line for
+# shell=True) only handles argv-quoting, not cmd.exe's own shell escaping --
+# so anything reaching _run_sf's args has to be constrained up front rather
+# than relied on to be quote-safe. Salesforce CLI alias names are
+# alphanumeric/dash/underscore/dot by convention; anything else is rejected
+# before it ever reaches subprocess.
+_SAFE_SF_ARG_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
 
 def _run_sf(args):
+    for arg in args:
+        if not _SAFE_SF_ARG_RE.fullmatch(arg):
+            raise ValueError(
+                f"Refusing to pass {arg!r} to the `sf` CLI -- contains characters "
+                "outside [A-Za-z0-9_.-], which risks shell metacharacter "
+                "interpretation on Windows (shell=True is required there for "
+                "sf.cmd resolution). Check SF_ORG_ALIAS in .env."
+            )
     proc = subprocess.run(
         ["sf", *args, "--json"],
         capture_output=True, text=True, check=True,

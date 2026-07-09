@@ -223,6 +223,14 @@ exception is the optional DBHub MCP server (§2), fetched via `npx` rather
 than pinned in this repo -- flag it explicitly if evaluating this framework
 for adoption.
 
+`.github/workflows/tests.yml` (roadmap #42) runs the pure-logic test suite
+on every push/PR: `permissions: contents: read` (least privilege, no
+write/deploy access), and its two GitHub Actions (`actions/checkout`,
+`actions/setup-python`) are pinned to major-version tags rather than a
+commit SHA -- a smaller, well-known trust surface than the DBHub `npx`
+case above, but the same class of consideration if this is evaluated for
+adoption.
+
 ## 10. Checklist for a security reviewer
 
 - [ ] Confirm `.env` file permissions on whatever machine runs this (OS-level
@@ -245,7 +253,10 @@ for adoption.
 
 ---
 
-*Last reviewed against the codebase during the 2026-07-09 full repo review
-(covering the Migration Run Book, `record-counts`, and `SECURITY.md`/
-`CONTRIBUTING.md` additions). Update alongside any change that adds a
-credential type, a network listener, or an authentication boundary.*
+*Last reviewed against the codebase during the 2026-07-09 ruthless-review
+pass (covering `validate-external-id`/pytest+CI additions, the `sf_client.py`
+shell-argument hardening, and the ODBC password-masking caveat in
+`sql_client.py`) -- previously reviewed during the 2026-07-09 full repo
+review (Migration Run Book, `record-counts`, `SECURITY.md`/`CONTRIBUTING.md`
+additions). Update alongside any change that adds a credential type, a
+network listener, or an authentication boundary.*
