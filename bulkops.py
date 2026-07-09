@@ -546,6 +546,63 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     return summary
 
 
+def purge_by_filter(sf, engine, object_name, where, schema="dbo",
+                    stage_dir="_stage", batch_size="auto", dry_run=False,
+                    run_book_path=None, run_book_tab=None):
+    """Bulk test-data cleanup by SOQL filter (ROADMAP #32): resolve every
+    Id matching `where` via SOQL, materialize them into
+    [schema].[<Object>_Purge], and delegate to the normal bulk_op() delete
+    path -- so batch sizing, activity logging, result writeback, and the
+    run-book sync all behave exactly like any other delete, no parallel
+    code path. Built for the mock-data test cycle (generate -> insert ->
+    validate -> purge -> repeat), not as a real-migration load feature.
+
+    `where` is required and never defaulted -- there is deliberately no
+    "delete everything" mode. Purging an entire object means writing
+    `Id != null` yourself, explicitly and on purpose.
+
+    dry_run=True returns {"matched", "sample_ids"} and touches nothing --
+    no SQL table, no API call. Run that first; this is a destructive
+    command.
+
+    v1 non-goal: no hard-delete (Bulk API hard delete needs its own org
+    permission and skips the Recycle Bin). A standard delete is
+    recoverable from the Recycle Bin, which is the right default for a
+    cleanup command.
+    """
+    if not where or not str(where).strip():
+        raise ValueError(
+            "purge_by_filter requires a non-empty WHERE clause -- there is "
+            "deliberately no delete-everything default. To purge an entire "
+            "object, say so explicitly with e.g. \"Id != null\"."
+        )
+
+    ids = [rec["Id"] for rec in sf.query_all_iter(
+        f"SELECT Id FROM {object_name} WHERE {where}"
+    )]
+
+    if dry_run:
+        return {"operation": "delete (dry run)", "object": object_name,
+                "where": where, "matched": len(ids), "sample_ids": ids[:10]}
+
+    if not ids:
+        return {"operation": "delete", "object": object_name, "where": where,
+                "matched": 0, "submitted": 0,
+                "note": "no records matched -- nothing sent to the API"}
+
+    purge_table = f"{object_name}_Purge"
+    pd.DataFrame({"Id": ids, "Error": None}).to_sql(
+        purge_table, engine, schema=schema, if_exists="replace", index=False
+    )
+
+    summary = bulk_op(sf, engine, object_name, "delete", purge_table,
+                      schema=schema, stage_dir=stage_dir, batch_size=batch_size,
+                      run_book_path=run_book_path, run_book_tab=run_book_tab)
+    summary["where"] = where
+    summary["matched"] = len(ids)
+    return summary
+
+
 def _writeback_inplace(engine, schema, table, df, key_column,
                        id_column, error_column):
     with engine.begin() as cx:

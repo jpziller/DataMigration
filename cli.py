@@ -142,7 +142,9 @@ def import_parquet_cmd(parquet_path, table_name, schema, append):
 @cli.command("bulkops")
 @click.argument("object_name")
 @click.argument("operation", type=click.Choice(["insert", "update", "upsert", "delete"]))
-@click.argument("source_table")
+@click.argument("source_table", required=False, default=None)
+@click.option("--where", default=None, help="Purge mode (delete only, no source table): SOQL WHERE clause selecting the records to delete, e.g. \"AccountNumber LIKE 'MOCKACCT-%'\". Matching Ids are resolved via SOQL into <Object>_Purge, then deleted through the normal path. No delete-everything default -- purging a whole object means writing \"Id != null\" explicitly.")
+@click.option("--dry-run", is_flag=True, help="With --where: report the matched count and sample Ids without touching SQL Server or Salesforce.")
 @click.option("--external-id", default=None, help="External id field (upsert; also delete -- resolved to real Ids via a query first, since Bulk API 2.0's delete only ever accepts Id).")
 @click.option("--key-column", default="LoadId", help="Local unique key for in-place writeback.")
 @click.option("--schema", default="dbo")
@@ -157,19 +159,36 @@ def import_parquet_cmd(parquet_path, table_name, schema, append):
                    "number always wins and is never overridden.")
 @click.option("--run-book", "run_book_path", default=None, help="Migration Run Book workbook path -- with --run-book-tab, auto-syncs this load's BulkOpsLog row into that tab's Load phase right after it's written.")
 @click.option("--run-book-tab", default=None, help="Migration Run Book tab name to sync into -- requires --run-book.")
-def bulkops_cmd(object_name, operation, source_table, external_id, key_column, schema,
-                email_deliverability, confirm_external_email_risk, batch_size,
-                run_book_path, run_book_tab):
+def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_id,
+                key_column, schema, email_deliverability, confirm_external_email_risk,
+                batch_size, run_book_path, run_book_tab):
     if bool(run_book_path) != bool(run_book_tab):
         raise click.BadParameter("--run-book and --run-book-tab must be given together.")
+    if where and operation != "delete":
+        raise click.UsageError("--where is purge mode and only valid with the delete operation.")
+    if where and source_table:
+        raise click.UsageError("--where and a source table are mutually exclusive -- "
+                               "purge mode builds its own <Object>_Purge table from the filter.")
+    if dry_run and not where:
+        raise click.UsageError("--dry-run only applies to --where purge mode.")
+    if not where and not source_table:
+        raise click.UsageError("Pass a source table, or (delete only) --where \"<SOQL filter>\" to purge by filter.")
     s, sf, engine = _ctx()
-    summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
-                         external_id=external_id, key_column=key_column,
-                         schema=schema, stage_dir=s.stage_dir,
-                         email_deliverability=email_deliverability,
-                         confirm_external_email_risk=confirm_external_email_risk,
-                         batch_size=batch_size, run_book_path=run_book_path,
-                         run_book_tab=run_book_tab)
+
+    if where:
+        summary = bo.purge_by_filter(sf, engine, object_name, where,
+                                     schema=schema, stage_dir=s.stage_dir,
+                                     batch_size=batch_size, dry_run=dry_run,
+                                     run_book_path=run_book_path,
+                                     run_book_tab=run_book_tab)
+    else:
+        summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
+                             external_id=external_id, key_column=key_column,
+                             schema=schema, stage_dir=s.stage_dir,
+                             email_deliverability=email_deliverability,
+                             confirm_external_email_risk=confirm_external_email_risk,
+                             batch_size=batch_size, run_book_path=run_book_path,
+                             run_book_tab=run_book_tab)
     warnings = summary.pop("preflight_warnings", [])
     rationale = summary.pop("batch_size_rationale", [])
     if rationale:

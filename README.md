@@ -314,6 +314,13 @@ python cli.py bulkops Case delete Case_Purge --key-column LoadId
 # never reaches the API; it's reported back as a clear local error.
 python cli.py bulkops Account delete Account_Purge --external-id Legacy_Id__c
 
+# Purge test data by filter -- no delete load table needed. Dry-run first
+# (reports the matched count + sample Ids, touches nothing), then delete.
+# No delete-everything default: purging a whole object means writing
+# "Id != null" explicitly. Standard Recycle-Bin-recoverable delete only.
+python cli.py bulkops Account delete --where "AccountNumber LIKE 'MOCKACCT-%'" --dry-run
+python cli.py bulkops Account delete --where "AccountNumber LIKE 'MOCKACCT-%'"
+
 # After a load with failures: copy only the failed rows into a fresh
 # <table>_Retry table (does not call Salesforce itself), then resubmit
 # just that table via a normal, separately-confirmed bulkops call.

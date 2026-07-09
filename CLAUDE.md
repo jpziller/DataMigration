@@ -176,6 +176,15 @@ venv may not be active in a fresh shell:
                 resolves external id values to real Ids via a query first, then deletes the resolved
                 rows. A value with no matching org record never reaches the API; it gets a clear
                 local "no matching record found" error written back like any other failure.)
+                `.venv/Scripts/python.exe cli.py bulkops Account delete --where "AccountNumber LIKE 'MOCKACCT-%'" [--dry-run]`
+                (purge by filter — test-data cleanup without hand-building a delete load table:
+                matching Ids are resolved via SOQL into `<Object>_Purge`, then deleted through the
+                normal path (batch sizing, logging, run-book sync all apply). Run `--dry-run` first —
+                it reports the matched count and sample Ids without touching anything. No
+                delete-everything default: purging a whole object means writing `"Id != null"`
+                explicitly. Standard delete only (Recycle Bin–recoverable, deliberately no
+                hard-delete). See `ROADMAP.md` #32. Rule 2 applies in full — this deletes real
+                records from a live org.)
                 `--batch-size auto|none|<N>` (default `auto` — dynamic recommendation printed as
                 rationale before the load runs, layering seed knowledge for OOTB-heavy objects
                 (`reference/batch_size_heuristics.json`), this org's own automation (`analyze-org-risk`'s
@@ -456,6 +465,9 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   - `<LoadTable>_Result`, `<LoadTable>_Retry` — `bulkops`/`bulkops-retry`
     writeback and retry tables (only when the load table has no
     `key_column` for in-place writeback, or a retry was built).
+  - `<Object>_Purge` — `bulkops <Object> delete --where` purge mode's
+    materialized Id list (dropped/recreated each purge; its `_Result`
+    twin gets the delete outcomes written back).
   - `<schema>.BulkOpsLog` — **opt-in only, never created automatically.**
     `enable-bulkops-logging --schema <schema>` creates it; from then on
     every `bulkops` call against that schema logs itself (action, object,

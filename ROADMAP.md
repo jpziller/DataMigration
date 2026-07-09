@@ -44,7 +44,7 @@ summarizes.
 | 29 | Shared/VM-hosted SQL Server for multi-user access | Not built, deliberately deferred — prototyping is single-user/local for now | — | Idea: for when more than one person needs to work against the *same* mirror database at the same time, instead of everyone having their own local SQL Server. |
 | 30 | Additional migration source connectors (Snowflake, MongoDB, etc.) | Not built, deliberately deferred | — | Idea: pull source data from more systems (Snowflake, MongoDB), the same way this framework already pulls from a Salesforce org (`replicate`) or a flat file (`import-parquet`). |
 | 31 | Target-count/scaled mock data generation | Not built, builds on #6 | — | Idea: say "keep generating mock Accounts until the org has 50,000 total" instead of a fixed count every run — useful for realistic load/performance testing. |
-| 32 | Bulk test-data cleanup by filter | Not built, builds on #6/#11 | — | Idea: a quick "delete every mock record I created for this test" command driven by a filter, instead of needing to build a delete load table first. |
+| 32 | Bulk test-data cleanup by filter | **Built** | `bulkops <Object> delete --where` (+ `--dry-run`) | "Delete every mock record I created for this test" as one command: a SOQL WHERE clause resolves the matching Ids into `<Object>_Purge` and deletes them through the normal `bulkops` path (batch sizing, logging, run-book sync all apply). `--dry-run` previews the matched count first; no delete-everything default; standard Recycle-Bin-recoverable delete only. |
 | 33 | Scratch org lifecycle + auto-seeded test data | Not built, deliberately deferred | — | Idea: let this framework spin up a disposable Salesforce scratch org and automatically fill it with mock data, instead of assuming an org already exists. |
 | 34 | Relationship-consistent subset replication | Not built, builds on #2 | — | Idea: pull a small, realistic *slice* of an org — e.g. 50 pilot Accounts and everything genuinely related to them — instead of either replicating everything or hand-coordinating a `--where` filter across every object yourself. |
 | 35 | Relative date shifting utility | Not built | — | Idea: a helper that shifts old dates forward so migrated data still makes sense relative to today — e.g. a contract end date that's already in the past wouldn't make sense to a Flow expecting a future date. |
@@ -1738,27 +1738,53 @@ rather than reinventing repeat-until-count logic. Low implementation
 cost — Snowfakery already does the heavy lifting; the work here is
 CLI/recipe plumbing, not a new generation engine.
 
-## 32. Bulk test-data cleanup by filter (not built, builds on #6/#11)
+## 32. Bulk test-data cleanup by filter — BUILT (`bulkops.py`)
 
 Problem: repeated migration-testing cycles (generate mock data → `bulkops`
-insert → validate → reset → repeat) currently need a load table with a
-key column to drive `bulkops <Object> delete`; there's no quick way to
-purge previously-inserted test/mock records by a WHERE-clause-style
-filter (e.g. "delete every Account where `MigrationID__c` LIKE
-'MOCKACCT-%'") without first building a delete load table from a query.
+insert → validate → reset → repeat) needed a hand-built load table with a
+key column to drive `bulkops <Object> delete` — no quick way to purge
+previously-inserted test records by a WHERE-clause-style filter. The
+motivating evidence was this project's own history: one working session
+did the manual query → CSV → purge-table → delete dance **three separate
+times** cleaning up the same test org. Originally surfaced reviewing
+CumulusCI's `delete_data` task, which does exactly this.
 
-Surfaced reviewing CumulusCI's `delete_data` task, which does exactly
-this: object + WHERE-clause bulk delete, with row-error tolerance and an
-optional hard-delete permission set for a full purge bypassing the
-Recycle Bin.
+**Built as the roadmap sketched it**: `bulkops <Object> delete --where
+"<SOQL WHERE clause>"` (`purge_by_filter()` in `bulkops.py`). Matching
+Ids are resolved via `sf.query_all_iter()` (transparent pagination),
+materialized into `[schema].[<Object>_Purge]` — an auditable, inspectable
+mirror-DB table, consistent with the framework's SQL-centric shape — and
+then **delegated to the existing `bulk_op()` delete path**, so dynamic
+batch sizing (#15), `BulkOpsLog` activity logging (#14), result writeback
+(`<Object>_Purge_Result`), and the Migration Run Book sync hook (#16) all
+apply identically to a purge with zero parallel code. Extending `bulkops`
+rather than adding a new verb was deliberate: it's the one gated
+org-writing entry point, so `.claude/settings.json`'s existing ask-list
+rule covers purge mode automatically — a destructive filter delete can
+never run without the same explicit human approval as any other org write.
 
-Idea: a `bulkops <Object> delete --where "<SOQL WHERE clause>"` mode —
-resolve matching Ids via a SOQL query first (the same pattern this
-framework's own `_resolve_external_ids_to_sf_id` already established for
-delete-by-external-id in #11), then run the existing delete path against
-the resolved Ids. Mainly a test/demo-data hygiene convenience, not a
-real-migration-load feature — most useful paired with #6's mock data
-commands for cleaning up between test runs.
+Safety posture, all deliberate:
+- **`--dry-run` first**: reports the matched count and sample Ids
+  without touching SQL Server or Salesforce — the preview step for a
+  destructive command.
+- **No delete-everything default**: `--where` is required and never
+  defaulted; purging an entire object means writing `"Id != null"`
+  yourself, explicitly and on purpose.
+- **Zero matches short-circuit**: nothing is sent to the API, reported
+  plainly rather than submitting an empty job.
+- **No hard-delete (v1 non-goal, not a gap)**: CumulusCI offers a
+  Recycle-Bin-bypassing hard delete behind its own org permission; a
+  standard, Recycle-Bin-recoverable delete is the right default for a
+  *cleanup* command, where "oops, wrong filter" should be survivable.
+
+**Verified live** (D360_PLAYGROUND): 5 mock Accounts inserted, `--dry-run`
+reported matched=5 + sample Ids with the org untouched, the real purge
+deleted 5/5 through the normal path (batch rationale printed, BulkOpsLog
+row written, `_Purge`/`_Purge_Result` tables produced), post-purge SOQL
+count = 0, a no-match filter returned the zero-summary without an API
+call, and all four CLI misuse combinations (`--where` with insert, delete
+with neither source, both at once, `--dry-run` without `--where`) produce
+clear usage errors.
 
 ## 33. Scratch org lifecycle + auto-seeded test data (not built, deliberately deferred)
 
