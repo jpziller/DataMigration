@@ -57,7 +57,7 @@ summarizes.
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
 | 20 | DSO refresh/error monitoring | **Built** — both the Data Stream (ingestion connector) and the DSO itself, confirmed as genuinely separate objects | `data-cloud-status data-stream`, `data-cloud-status dso` | Check whether a Data Cloud Data Stream or the DSO it feeds last refreshed successfully and whether either hit errors, before trusting the data behind it — confirmed live via plain SOQL, no Data Cloud tenant token needed. |
 | 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — | Idea: read (and maybe suggest) how a DSO's fields map into a DLO — the Data Cloud version of what `auto-map` (#10) already does for CRM field mapping. |
-| 22 | SQL-Server-backed local DSO ingestion | Researched, buildable — blocked on a manual Data Cloud Setup step (an Ingestion API connector + OpenAPI schema + `cdp_ingest_api` scope), not on missing code | — | Real Ingestion API confirmed (bulk CSV job pattern, same shape as `bulkops`'s own Bulk API 2.0 staging) — push SQL Server data into a Data Cloud DSO for local testing once a human configures the connector in Setup. |
+| 22 | SQL-Server-backed local DSO ingestion (API-driven file-upload replacement) | **Dead end** for the actual ask — confirmed no REST API exists for Data Cloud's Local File Upload connector; the real Ingestion API is a heavier, separate path not being pursued | — | Wanted an API to drive Data Cloud's simple local-file-upload workflow directly — that connector type is browser-UI-only by design, no API surface to build against. See #44 for the direction being pursued instead. |
 | 23 | Data Kit / Bundle documentation | Not built, depends on #18/#19 | — | Idea: document what's actually in a Data Cloud Data Kit for a data architect scoping a migration — the Data Cloud version of the mapping spreadsheet (#3). |
 | 24 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #18 | — | Idea: version Data Cloud Calculated Insight definitions in git and test them like code, instead of only building them by hand in Data Cloud Setup. |
 | 25 | Web UI for less-technical users | Not built (future) | — | Idea: a browser-based front end so someone who isn't comfortable with a terminal or Claude Code could still use this framework's tools. |
@@ -79,6 +79,7 @@ summarizes.
 | 41 | Per-object record counts via the recordCount API | **Built** | `record-counts` | One HTTP call for many objects' record counts instead of a SOQL COUNT() per object — fast rough triage across many objects, confirmed live to be an approximate/cached snapshot (can lag real inserts by more than a few seconds), so not a substitute for `profile-salesforce`'s exact count when validating a load actually landed. |
 | 42 | Unit tests + CI for the pure-logic modules | Not built | — | Idea from the 2026-07-09 repo review: pytest coverage for the no-org-required logic (batch-size ladder math, load-order toposort, run-book template parsing/matching, mapping regex) plus a GitHub Action running it on push — the review found real bugs a test suite would have caught mechanically. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
 | 43 | Salesforce GraphQL API | **Researched — not pursued (out of scope)** | — | Nested relationship traversal and small-batch mutations in one call — genuinely useful for a UI making many round-trips, but this framework's actual needs (bulk extraction, bulk DML) are already better served by SOQL/Bulk API 2.0. See write-up for the specific reasoning. |
+| 44 | Native database connectors (SQL Server / MongoDB) as the Data Cloud source | Not built, needs research | — | Idea: let Data Cloud pull directly from the mirror DB (or MongoDB) via its own native connector types instead of this framework pushing data via API — no custom ingestion code needed, but network-reachability and schedule-vs-on-demand questions need answering first. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -1516,7 +1517,7 @@ DSO→DLO mappings is a natural, well-precedented next step — the matching
 *logic* built for CRM field mapping should mostly transfer; what's unknown
 is only the metadata read/write surface on the Data Cloud side.
 
-## 22. SQL-Server-backed local DSO ingestion — RESEARCHED, buildable, blocked on manual Data Cloud Setup
+## 22. SQL-Server-backed local DSO ingestion — DEAD END for the actual ask; a heavier alternative exists but isn't being pursued
 
 Idea, raised directly: build something equivalent to Data Cloud's local
 CSV upload path for a DSO, but sourced from SQL Server instead of a local
@@ -1528,10 +1529,37 @@ just CRM object testing — generate mock rows into a SQL Server table, then
 push them into a DSO locally for testing without touching a real source
 system.
 
-**Answer: yes, a real Ingestion API exists and this is buildable — but
-it is not a zero-config API call.** Confirmed against Salesforce's own
-Data 360 Integration Guide and a July 2023 Salesforce Developers blog
-walkthrough (not assumed, per this repo's post-training-cutoff rule):
+**The specific ask — an API that drives Data Cloud's local file-upload
+workflow itself — is a confirmed dead end.** Data Cloud's "Local File
+Upload Connector" (the thing under Data Cloud Setup → Other Connectors,
+shown as a connector named `UploadedFiles`) is **browser-UI-only, by
+design**: Salesforce's own Beta announcement describes it as a manual
+drag-and-drop/file-picker feature for one-off files under 10MB, and
+confirms data streams built from it "cannot be scheduled or refreshed."
+Confirmed across multiple independent sources (Salesforce's own blog +
+several third-party Data Cloud implementer write-ups, cross-checked, not
+assumed) that **no REST endpoint exists for this connector type at all**
+— there's nothing to call instead of clicking the button. This isn't a
+missing-code gap; there's no API surface to build against.
+
+**A materially different, heavier path is real but explicitly not being
+pursued right now.** The separate, full **Ingestion API** *does* have a
+genuine REST surface (confirmed live research below) — but it means
+adopting an entirely different connector type per object (author an
+OpenAPI schema, create a dedicated Ingestion API connector + Data Stream,
+grant an extra OAuth scope), not a lightweight bolt-on to the simple
+file-upload flow. Told directly this isn't the direction wanted, so this
+path stays researched-and-parked rather than built — the design notes
+below are kept for the record in case that changes later, not as a
+current plan. S3/SFTP connectors were also considered and ruled out for
+the same core reason: both are Data-Cloud-initiated, schedule-based
+*pulls*, not something this framework could trigger on demand the way
+`bulkops` triggers a CRM load today.
+
+**What was confirmed about the (currently unpursued) Ingestion API path**,
+against Salesforce's own Data 360 Integration Guide and a July 2023
+Salesforce Developers blog walkthrough (not assumed, per this repo's
+post-training-cutoff rule):
 
 **A one-time manual setup step in Data Cloud Setup is required per
 object, before any code can run** — this is the actual answer to the
@@ -1586,11 +1614,12 @@ neither backend is CumulusCI-dependent (CumulusCI has no Data Cloud/DSO
 capability at all, confirmed reviewing its data docs) so nothing about
 that changes.
 
-**Not built yet, and won't be live-verified until the Setup prerequisite
-is done** — this is the one Data Cloud roadmap item so far whose blocker
-is a genuine manual configuration step rather than pure research or
-missing code, so it's called out explicitly rather than silently treated
-like the others.
+**Not built, and not currently planned to be** — parked in the
+researched-not-pursued sense (see the "Scope" note at the top of this
+file), specifically because the lightweight version that motivated this
+item doesn't exist, and the real alternative is a heavier lift than
+wanted right now. Revisit if the appetite for the full Ingestion API
+setup changes; see #44 for the direction actually being pursued instead.
 
 ## 23. Data Kit / Bundle documentation (not built, depends on #18/#19)
 
@@ -2202,6 +2231,32 @@ remediation needs that GraphQL fills better than what's already built.
 Recorded here specifically so it isn't re-researched or re-proposed
 without this reasoning being visible first — the "Scope" section above
 is the general version of this same judgment call.
+
+## 44. Native database connectors (SQL Server / MongoDB) as the Data Cloud source (not built, needs research)
+
+Redirected here directly off #22's dead end: rather than push data *to*
+Data Cloud via an API from this framework's own code, use Data Cloud's
+own native database connector types (SQL Server, MongoDB, and whatever
+else is available in this org's connector list — the user confirmed
+these show up as real connector options alongside S3/SFTP/Ingestion API)
+so Data Cloud *pulls* from the mirror DB (or a MongoDB instance) directly
+as a real, schedulable Data Stream — closer to how a production data
+source would actually feed Data Cloud, and no custom ingestion code
+needed on this framework's side at all.
+
+Needs its own research pass before scoping further: what connection info
+a SQL Server connector actually needs (does it require inbound network
+access to the local mirror DB from Salesforce's side — a public
+endpoint, a secure agent/tunnel? — given `SF_Migration` is a local/on-prem
+instance today per `docs/SECURITY_OVERVIEW.md` §1), what a MongoDB
+connector needs by comparison, refresh/schedule behavior versus an
+on-demand trigger, and whether this framework's role becomes just
+"prepare well-shaped tables for the connector to find" (mock data,
+transformed staging tables) rather than any ingestion code at all. Given
+`docs/SECURITY_OVERVIEW.md` already treats "no listening network port"
+as a stated trust-model fact (§7) about this framework itself, a real
+inbound-reachable SQL Server requirement on Data Cloud's side would be a
+genuinely new consideration worth surfacing there too if this gets built.
 
 ---
 
