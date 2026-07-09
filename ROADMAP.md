@@ -3,6 +3,29 @@
 Notes on future tooling for this framework — captured as ideas to review and
 scope later, not committed designs. Nothing here is built yet unless marked.
 
+## Scope: what this framework is (and isn't)
+
+The filter every idea below gets evaluated against, stated explicitly so
+it doesn't have to be re-derived each time: this is a **data movement and
+remediation tool** — move data between a Salesforce org and SQL Server
+(`replicate`/`bulkops`), and clean/transform/validate it in T-SQL and
+Python along the way (profiling, mapping, mock data, load-order,
+run-book tracking). It is **not an integration platform** — not trying
+to be a generic API-to-API bridge, a real-time sync tool, or a
+replacement for enterprise integration middleware.
+
+The purpose is to make a data architect's or data engineer's life
+better with **free tools they'd otherwise pay for or piece together
+across several different products** — not to build something for every
+interesting Salesforce API that exists. An idea earns a place here
+because it removes real friction from *moving or fixing migration data*,
+not because the API is novel or well-documented. When something gets
+looked at and doesn't clear that bar, it's recorded as **Researched —
+not pursued (out of scope)**, distinct from *not built yet* (on the
+list, just not done) or *deliberately deferred* (in scope, just not
+prioritized) — so the reasoning survives and nobody re-proposes the same
+API without seeing why it was already turned down.
+
 ## Capabilities at a glance
 
 Read this table first — it's the answer to "what can this framework do
@@ -55,6 +78,7 @@ summarizes.
 | 40 | Configuration Workbook drift detection | Not built — blocked on a real template | — | Idea: read a team's existing "Configuration Workbook" (how developers document their build) and cross-check it against the actual deployed metadata — the same category of problem `check-mapping-balance` (#3) solves for mapping docs, applied to build documentation instead. Waiting on a real example template before this gets designed. |
 | 41 | Per-object record counts via the recordCount API | **Built** | `record-counts` | One HTTP call for many objects' record counts instead of a SOQL COUNT() per object — fast rough triage across many objects, confirmed live to be an approximate/cached snapshot (can lag real inserts by more than a few seconds), so not a substitute for `profile-salesforce`'s exact count when validating a load actually landed. |
 | 42 | Unit tests + CI for the pure-logic modules | Not built | — | Idea from the 2026-07-09 repo review: pytest coverage for the no-org-required logic (batch-size ladder math, load-order toposort, run-book template parsing/matching, mapping regex) plus a GitHub Action running it on push — the review found real bugs a test suite would have caught mechanically. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
+| 43 | Salesforce GraphQL API | **Researched — not pursued (out of scope)** | — | Nested relationship traversal and small-batch mutations in one call — genuinely useful for a UI making many round-trips, but this framework's actual needs (bulk extraction, bulk DML) are already better served by SOQL/Bulk API 2.0. See write-up for the specific reasoning. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -2135,6 +2159,49 @@ posture. Live end-to-end verification against a real org stays the
 standard for the org-touching paths (that's a genuine strength of this
 project's process, not something tests replace) — this item is about the
 logic underneath it.
+
+## 43. Salesforce GraphQL API (researched — not pursued, out of scope)
+
+Asked directly: what could this framework do with Salesforce's GraphQL
+API? Researched against Salesforce's own current docs and Developer
+Relations content, not assumed — GraphQL mutations were only added
+Spring '26, after this session's training cutoff, so this genuinely
+needed checking rather than recalling.
+
+**What it actually offers**: a single `POST
+.../services/data/v{version}/graphql` endpoint returning nested
+parent-to-child data in one call (e.g. an `Account` with its related
+`Contacts` in one response, each scalar field wrapped in `{ value: ... }`
+rather than a flat row), aggregate functions (`avg`/`count`/
+`countDistinct`/`min`/`max`/`sum`, with or without `groupBy`), and — new
+this Spring — mutations (`insert`/`update`/`delete` via the `Mutation`
+operation type). Its real selling point, per Salesforce's own framing,
+is cutting REST round-trips for apps (especially LWC, which has a
+dedicated wire adapter for it) that would otherwise make several
+separate calls.
+
+**Measured against this framework's actual scope (see "Scope" at the top
+of this file), not against "is the API interesting"**:
+- **Bulk extraction** (`replicate.py`): wants flat, independent per-object
+  rows to land in SQL Server tables for T-SQL to join/transform later.
+  GraphQL's nested `edges → node → { value }` response shape would need
+  *more* flattening work to become tabular than SOQL's already-flat REST
+  response — a regression for this specific job, not an improvement.
+- **Related-record lookups** (`query`/`query_tool.py`): GraphQL's
+  headline "parent + children in one call" benefit is something plain
+  SOQL already does today via subqueries (`SELECT Id, (SELECT Id FROM
+  Contacts) FROM Account`) — the specific advantage GraphQL advertises
+  isn't actually a gap in what this framework already has.
+- **Bulk DML** (`bulkops.py`): GraphQL mutations are shaped for
+  single/small-batch writes (an LWC saving one record), not the
+  high-volume batch DML a real migration load needs — Bulk API 2.0 stays
+  the right tool for that, unchanged.
+
+**Conclusion**: no gap in this framework's actual data-movement or
+remediation needs that GraphQL fills better than what's already built.
+Recorded here specifically so it isn't re-researched or re-proposed
+without this reasoning being visible first — the "Scope" section above
+is the general version of this same judgment call.
 
 ---
 
