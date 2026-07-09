@@ -34,7 +34,7 @@ summarizes.
 | 19 | Data Cloud semantic model reference | Not built, depends on #18 | — | Idea: a reference for what a DMO's fields/relationships actually *mean* in business terms, the same way `dump-describe` documents a CRM object's schema today. Needs #18 first. |
 | 20 | DSO refresh/error monitoring | **Built** — both the Data Stream (ingestion connector) and the DSO itself, confirmed as genuinely separate objects | `data-cloud-status data-stream`, `data-cloud-status dso` | Check whether a Data Cloud Data Stream or the DSO it feeds last refreshed successfully and whether either hit errors, before trusting the data behind it — confirmed live via plain SOQL, no Data Cloud tenant token needed. |
 | 21 | DSO→DLO mapping read + auto-map | Not built — needs API research | — | Idea: read (and maybe suggest) how a DSO's fields map into a DLO — the Data Cloud version of what `auto-map` (#10) already does for CRM field mapping. |
-| 22 | SQL-Server-backed local DSO ingestion | Not built — needs API research | — | Idea: push SQL Server data into a Data Cloud DSO for local testing, the same way `bulkops` pushes into Salesforce CRM objects today. |
+| 22 | SQL-Server-backed local DSO ingestion | Researched, buildable — blocked on a manual Data Cloud Setup step (an Ingestion API connector + OpenAPI schema + `cdp_ingest_api` scope), not on missing code | — | Real Ingestion API confirmed (bulk CSV job pattern, same shape as `bulkops`'s own Bulk API 2.0 staging) — push SQL Server data into a Data Cloud DSO for local testing once a human configures the connector in Setup. |
 | 23 | Data Kit / Bundle documentation | Not built, depends on #18/#19 | — | Idea: document what's actually in a Data Cloud Data Kit for a data architect scoping a migration — the Data Cloud version of the mapping spreadsheet (#3). |
 | 24 | Calculated Insight scripting + testing + CI/CD | Not built, depends on #18 | — | Idea: version Data Cloud Calculated Insight definitions in git and test them like code, instead of only building them by hand in Data Cloud Setup. |
 | 25 | Web UI for less-technical users | Not built (future) | — | Idea: a browser-based front end so someone who isn't comfortable with a terminal or Claude Code could still use this framework's tools. |
@@ -1429,6 +1429,17 @@ objects today, but for Data Cloud's own metadata layer. Needs real API
 research first (see #18's caution); likely depends on #18 existing first
 since both need the same Data Cloud API access.
 
+**Reference for whenever this (and #22/#24) gets picked up**: the user
+pointed at Salesforce Developers' public Postman workspace
+(`postman.com/salesforce-developers/salesforce-developers`), which has
+folders for several Data 360 APIs — Ingestion API, Data Graph API,
+Metadata API, Query Unified Record Id — flagged for later review, not
+yet dug into. `WebFetch` can't render Postman's workspace pages (JS SPA,
+returns only the static shell); when it's actually time to review these,
+either ask for an exported collection JSON or go straight to
+developer.salesforce.com's own docs/blog posts for the same API, which
+is what worked cleanly for #22's Ingestion API research.
+
 ## 20. DSO refresh/error monitoring — BUILT (`data_cloud.py`)
 
 Problem: before trusting data pulled from a DSO (Data Source Object — the
@@ -1481,7 +1492,7 @@ DSO→DLO mappings is a natural, well-precedented next step — the matching
 *logic* built for CRM field mapping should mostly transfer; what's unknown
 is only the metadata read/write surface on the Data Cloud side.
 
-## 22. SQL-Server-backed local DSO ingestion (not built)
+## 22. SQL-Server-backed local DSO ingestion — RESEARCHED, buildable, blocked on manual Data Cloud Setup
 
 Idea, raised directly: build something equivalent to Data Cloud's local
 CSV upload path for a DSO, but sourced from SQL Server instead of a local
@@ -1491,18 +1502,71 @@ framework is built around, applied to Data Cloud ingestion instead of CRM
 (already built, Mockaroo-backed) useful for **Data Cloud** testing too, not
 just CRM object testing — generate mock rows into a SQL Server table, then
 push them into a DSO locally for testing without touching a real source
-system. Needs research into Data Cloud's actual ingestion API for local/
-manual uploads (as opposed to a configured Data Stream from a real
-connector) before scoping further.
+system.
 
-Both mock-data backends (#6) are natural sources for this once the
-ingestion API question is answered — `generate-mock-data` for a single
-DSO-shaped table, `generate-related-mock-data` (Snowfakery, also #6) for
-relationship-aware multi-object DSO test data — neither is CumulusCI-
-dependent (CumulusCI itself has no Data Cloud/DSO capability at all,
-confirmed directly reviewing its data docs), so nothing here changes; the
-blocker is still purely the ingestion API research, not the mock-data
-side.
+**Answer: yes, a real Ingestion API exists and this is buildable — but
+it is not a zero-config API call.** Confirmed against Salesforce's own
+Data 360 Integration Guide and a July 2023 Salesforce Developers blog
+walkthrough (not assumed, per this repo's post-training-cutoff rule):
+
+**A one-time manual setup step in Data Cloud Setup is required per
+object, before any code can run** — this is the actual answer to the
+roadmap's original open question ("local/manual upload" vs. "a
+configured Data Stream from a real connector"): **it turns out to be the
+latter.** The Ingestion API *is itself* a connector/Data Stream type
+("Ingestion API connector"), not a bypass of that model:
+1. Author an OpenAPI 3.0 YAML schema defining the target object's fields
+   (`components.schemas.<object>.properties`), and upload it in Data
+   Cloud Setup → Ingestion API → Connect.
+2. Create and deploy a Data Stream from that connector — pick the
+   object, a category (Engagement/Profile/Other), map the primary key
+   and (for Engagement) an event-time field.
+3. The connected app / External Client App needs the `cdp_ingest_api`
+   OAuth scope granted, **in addition to** the `cdp_query_api` scope
+   `data_cloud.py`'s existing tenant-token exchange already needs (§18) —
+   a real, disclosed gap: today's app almost certainly doesn't have this
+   scope yet, since nothing in this repo has requested it.
+
+**Two ingestion patterns, and Bulk is the right fit for this framework,
+not Streaming**:
+- **Bulk (CSV, job-based)** — matches this framework's existing shape
+  almost exactly (the same "stage a CSV, submit a job, poll/complete it"
+  pattern `bulkops.py` already uses for Bulk API 2.0):
+  `POST /api/v1/ingest/jobs` (`{"object": "<name>", "operation":
+  "upsert"|"delete"}`) → `PUT /api/v1/ingest/jobs/<id>/data` (raw CSV
+  body) → `POST /api/v1/ingest/jobs/<id>/actions/complete` → job closes
+  (auto, or `PATCH .../jobs/<id>` `{"state": "Closed"}`). CSV up to
+  150MB/file, but rate-limited to 20 requests/hour, 5 concurrent — fine
+  for periodic test-data pushes, not a high-frequency path.
+- **Streaming (JSON)** — `POST /api/v1/ingest/sources/<connector>/
+  <object>` with `{"data": [...]}`, capped at 200KB/request, built for
+  small real-time incremental updates. Wrong shape for "push N mock rows
+  from a SQL Server table" — noted for completeness, not the build target.
+- Both hang off the tenant instance URL from the *same* Data Cloud
+  session exchange `data_cloud.py`'s `get_data_cloud_session()` already
+  does (`grant_type=urn:salesforce:grant-type:external:cdp`) — this is
+  additive to that module, not a new auth mechanism.
+
+**Design once someone actually configures a test connector+Data Stream**
+(this step needs a human with Data Cloud Setup access; nothing here can
+do it programmatically): a `dso_ingest.py` mirroring `bulkops.py`'s own
+shape — `ingest_dso(sf, engine, source_table, object_name, operation,
+schema="dbo", stage_dir="_stage")`: stage the SQL Server table to CSV
+(reusing the exact CSV-staging convention already in `bulkops.py`),
+create the bulk job, `PUT` the CSV, mark complete, poll job status until
+`Completed`/`Failed`, return a summary — same shape as `bulk_op()`'s own
+return dict, for CLI/reporting consistency. `generate-mock-data`/
+`generate-related-mock-data` (#6) are natural sources once this exists —
+mock rows into a SQL Server table, then this pushes them into the DSO,
+neither backend is CumulusCI-dependent (CumulusCI has no Data Cloud/DSO
+capability at all, confirmed reviewing its data docs) so nothing about
+that changes.
+
+**Not built yet, and won't be live-verified until the Setup prerequisite
+is done** — this is the one Data Cloud roadmap item so far whose blocker
+is a genuine manual configuration step rather than pure research or
+missing code, so it's called out explicitly rather than silently treated
+like the others.
 
 ## 23. Data Kit / Bundle documentation (not built, depends on #18/#19)
 
