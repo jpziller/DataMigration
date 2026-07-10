@@ -1,6 +1,7 @@
 .env
 .venv/
 _stage/
+_sqlite/
 __pycache__/
 *.pyc
 server.key

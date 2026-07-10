@@ -6,10 +6,12 @@ Copyright (c) 2026 JP Ziller LLC. Released under the [MIT License](LICENSE) —
 free to use, modify, and redistribute (including commercially), provided the
 copyright notice is retained.
 
-SQL Server is the integration hub. Python handles the two directions of
+SQL Server is the integration hub — SQLite is also supported as a lighter
+alternative (`SQL_BACKEND=sqlite`, no server/install required; see "SQL
+backend: SQL Server or SQLite" below). Python handles the two directions of
 movement: `replicate` (org → SQL) and `bulkops` (SQL → org, with Id/Error
-written back). All transformation logic stays in T-SQL, version-controlled in
-`sql/`.
+written back). All transformation logic stays in versioned SQL under
+`sql/` (T-SQL by convention, since SQL Server is the default backend).
 
 See [`docs/MIGRATION_PLAYBOOK.md`](docs/MIGRATION_PLAYBOOK.md) for the
 methodology behind this framework — script pattern, row-lock/batching
@@ -19,9 +21,9 @@ review — credential inventory, trust boundaries, and what's actually
 code-enforced versus convention-enforced today.
 
 ```
-org  --replicate-->  SQL Server (typed mirror tables)
+org  --replicate-->  SQL Server or SQLite (typed mirror tables)
                          |
-                         |  T-SQL transforms (sql/transformations/*.sql, in git)
+                         |  SQL transforms (sql/transformations/*.sql, in git)
                          v
                      *_Load tables  --bulkops-->  org
                          ^                              |
@@ -34,7 +36,13 @@ org  --replicate-->  SQL Server (typed mirror tables)
 
 Windows host assumed (SQL Server's natural home); notes for Mac/Linux where
 they differ. **Follow this order** — later steps depend on earlier ones
-(noted inline), so installing out of order means backtracking:
+(noted inline), so installing out of order means backtracking.
+
+**Using SQLite instead (`SQL_BACKEND=sqlite`)?** Skip steps 4–7 entirely
+(SQL Server, SSMS, the ODBC driver, and creating a database) — SQLite needs
+no server, no separate driver install, and no credentials at all. Jump to
+"SQL backend: SQL Server or SQLite" below for the config and what's in/out
+of scope on that path.
 
 ```
 Git for Windows ──> clone this repo ──┬─> Python venv + pip install -r requirements.txt
@@ -135,10 +143,12 @@ layer" below for install + setup details.
 ```bash
 copy .env.example .env       # cp on Mac/Linux
 ```
-Set `SF_ORG_ALIAS=MIGRATION_TARGET`, your SQL Server values, and (if using
-mock data) `MOCKAROO_API_KEY`. `.gitignore` already excludes `.env`,
-`_stage/`, and `server.key` — never commit real credentials, and never paste
-`.env` contents into a chat session (including with an AI assistant).
+Set `SF_ORG_ALIAS=MIGRATION_TARGET`, your SQL Server values (or, on
+SQLite, `SQL_BACKEND=sqlite` + `SQL_SQLITE_DIR`/`SQL_SQLITE_SCHEMAS` — see
+"SQL backend: SQL Server or SQLite" below), and (if using mock data)
+`MOCKAROO_API_KEY`. `.gitignore` already excludes `.env`, `_stage/`,
+`_sqlite/`, and `server.key` — never commit real credentials, and never
+paste `.env` contents into a chat session (including with an AI assistant).
 
 ---
 
@@ -150,8 +160,9 @@ Two categories, and the distinction matters for what gets committed:
 whoever clones this repo:
 ```
 cli.py, config.py, sf_client.py, sql_client.py,        framework code
-replicate.py, bulkops.py, type_map.py, metadata.py,
-parquet_import.py, load_order.py, profiling.py, query_tool.py,
+sql_dialect.py, load_table_prep.py,                    (backend-aware SQL seam;
+replicate.py, bulkops.py, type_map.py, metadata.py,      hard rules 6/7 -- see "SQL
+parquet_import.py, load_order.py, profiling.py, query_tool.py,  backend" above)
 mock_data.py, mapping_doc.py, auto_mapper.py,
 solution_doc.py, risk_analyzer.py
 
@@ -177,6 +188,7 @@ mapping/*.xlsx           generate-mapping-doc/auto-map output -- one specific
                          solution document -- put your own copy under
                          version control deliberately if you want one
 _stage/                  CSV staging, dropped-in reference docs, scratch work
+_sqlite/                 SQLite mirror-DB files (SQL_BACKEND=sqlite projects only)
 .env                     real credentials
 ```
 
@@ -237,6 +249,53 @@ keeping it in git per-object as you build it out.)
   regardless. See `ROADMAP.md` #18 for the full tested walkthrough,
   including the Data-Cloud-specific `cdp_*` scopes if you need those too.
 - **`password`** — username + password + security token. Dev fallback only.
+
+---
+
+## SQL backend: SQL Server or SQLite
+
+`SQL_BACKEND` in `.env` — `mssql` (default) or `sqlite`, per project. Every
+backend-specific SQL construct (existence checks, identifier quoting,
+`SELECT INTO` vs `CREATE TABLE AS SELECT`, autoincrement PK DDL) routes
+through `sql_dialect.py`, keyed off the real engine in hand
+(`engine.dialect.name`), so the rest of the framework doesn't need to know
+or care which one is active.
+
+**Why you'd pick SQLite**: no server to install, no ODBC driver, no
+credentials at all — genuinely useful for a quick trial, a CI/test
+environment, or a project that just doesn't want a SQL Server install.
+**Why you'd stick with SQL Server**: it's the fully-featured path — the
+whole `sql/functions/` cleansing/matching library (Jaro-Winkler, Soundex,
+postal cleansing) and several data-architect tools (`profiling.py`,
+`risk_analyzer.py`, `auto_mapper.py`, `migration_run_book.py`,
+`mock_data.py`'s single-object generator, `solution_doc.py`,
+`load_order.py`, `mapping_doc.py`, `parquet_import.py`, `record_types.py`,
+`reference_record.py`) are SQL-Server-only today — a deliberate scope
+boundary, not a bug. **What does work on SQLite**: the actual load
+engine — `replicate`, `bulkops` (writeback, activity logging, retry), hard
+rules 6/7's sort-column/duplicate-key checks (`add-bulk-load-sort-column`/
+`check-load-table-duplicate-keys` — no longer stored procedures on either
+backend), `import-csv-directory`'s CSV staging, and
+`snowfakery_data.py`'s relationship-aware mock data
+(`generate-related-mock-data`).
+
+**Config for SQLite mode**:
+```bash
+SQL_BACKEND=sqlite
+SQL_SQLITE_DIR=./_sqlite          # a directory, not a file
+SQL_SQLITE_SCHEMAS=dbo            # comma-separated, e.g. dbo,source,staging
+```
+One `<schema>.db` file gets created per declared schema under
+`SQL_SQLITE_DIR`, each real-`ATTACH DATABASE`'d under its own schema name
+on every connection — so an existing `--schema` flag or `schema=` kwarg
+anywhere in this codebase already means the right thing on either
+backend, no different usage. To look at the data directly: the `sqlite3`
+CLI, or any SQLite browser (DB Browser for SQLite, DBeaver, etc.) pointed
+at the relevant `<schema>.db` file — no `sqlcmd`/SSMS/MCP setup needed.
+
+See `ROADMAP.md` #28 for the full design writeup and what was found/fixed
+building it (a couple of real `bulk_op()` correctness bugs, unrelated to
+SQLite specifically, surfaced by testing both backends live).
 
 ---
 
@@ -427,13 +486,20 @@ locally-generated error on that row, the same shape as any other failure.
   (`BillingStreet`, etc.) are replicated instead — same net result,
   different column set than a naive `SELECT *`.
 - **Type coercion at load.** Typed replicate maps booleans `true/false → 1/0`.
-  Datetimes are loaded as ISO strings and rely on SQL Server's implicit
-  conversion into `DATETIME2` — verify on your first datetime-heavy object, or
-  use `--raw` and `CAST` in T-SQL (which also fits the SQL-centric method).
+  Datetimes are loaded as ISO strings — on SQL Server this relies on implicit
+  conversion into `DATETIME2` (verify on your first datetime-heavy object);
+  on SQLite there's no enforced column typing to rely on at all (type
+  *affinity*, not enforcement), so a malformed value wouldn't error the way
+  SQL Server's strict typing would — use `--raw` and `CAST` during transform
+  if you need to double-check this on either backend.
 - **Performance.** Replicate loads via `to_sql` + `fast_executemany`. Fine into
-  the low millions. For very large objects, swap the load step for `BULK INSERT`
-  against the staged CSVs (the SQL Server service account must be able to read
-  the file) or `bcp` — both are markedly faster at scale.
+  the low millions on SQL Server. For very large objects there, swap the load
+  step for `BULK INSERT` against the staged CSVs (the SQL Server service
+  account must be able to read the file) or `bcp` — both are markedly faster
+  at scale. On SQLite, `sql_client.py`'s connect hook sets `PRAGMA
+  journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout` for real write
+  throughput, but SQLite is still single-writer — it's the lighter-weight
+  option, not the higher-throughput one.
 - **Open bug: `Contact.MigrationID__c` FLS.** Deployed with a bundled `Admin`
   profile FLS grant (see hard rule 8), and both a SOQL query and a
   `FieldPermissions` query confirmed System Administrator had access right
@@ -447,7 +513,7 @@ locally-generated error on that row, the same shape as any other failure.
 ## Claude Code operating layer
 
 Claude Code drives this repo through a deliberate split: **read-only eyes** on
-SQL Server, **reviewed hands** for mutations.
+the mirror DB (SQL Server or SQLite), **reviewed hands** for mutations.
 
 - `CLAUDE.md` — loaded every session; the rules and canonical commands.
 - `.claude/settings.json` — permissions. Read/inspect/replicate and git-read run
@@ -496,6 +562,14 @@ verify.
 Whichever tier: point the MCP/login at a **read-only** account. Table drops and
 loads go through the reviewed Python CLI, never the MCP.
 
+**On a SQLite-backed project (`SQL_BACKEND=sqlite`)**, none of the above
+applies — no server, no ODBC driver, no read-only login to provision, no
+MCP setup. Claude Code (or you) can just read the `<schema>.db` files
+under `SQL_SQLITE_DIR` directly via the `sqlite3` CLI or a plain file
+read; the "read-only eyes, reviewed hands" split still holds (introspect
+freely, mutations go through the Python CLI), it's just a smaller trust
+surface to begin with.
+
 Next-level guardrail (not shipped): a `PreToolUse` hook in `.claude/settings.json`
 that vetoes `bulkops` against a production org alias, or any `DROP`/`TRUNCATE`
 against a non-`SF_Migration` database.
@@ -529,7 +603,9 @@ a recommendation to wire it in now.
 ## Untested paths to verify on first run
 
 1. `sf org auth show-access-token --json` result shape (cli auth mode).
-2. Datetime string → `DATETIME2` on your first datetime-heavy replicate.
+2. Datetime string → `DATETIME2` on your first datetime-heavy replicate
+   (SQL Server backend only — SQLite's type affinity has no equivalent
+   conversion step to verify).
 3. `get_failed_records` / `get_successful_records` kwarg names on your installed
    `simple-salesforce` (this code reads the returned CSV text, avoiding the
    `path=` vs `file=` divergence between versions).
