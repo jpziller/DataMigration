@@ -39,10 +39,12 @@ cli.py (Python, runs locally, under the operator's own OS-level permissions)
    |                                   |
    v                                   v
 SQL Server "SF_Migration"        Salesforce org (via simple-salesforce /
-(local integration hub)           Bulk API 2.0 REST endpoints; also the
-                                  /limits/recordCount REST resource for
-                                  `record-counts` -- same core-org token,
-                                  same host, no new boundary)
+(local integration hub;           Bulk API 2.0 REST endpoints; also the
+ or local SQLite files,           /limits/recordCount REST resource for
+ SQL_BACKEND=sqlite,              `record-counts` -- same core-org token,
+ roadmap #28 -- no server         same host, no new boundary)
+ process, no credential
+ of any kind)
 ```
 
 Two purely local surfaces worth naming for completeness (no network
@@ -85,8 +87,16 @@ default:
 | Salesforce JWT cert / connected-app key | `server.key` on disk (path set in `.env`) | Provisioned once by whoever sets up the connected app (an **External Client App** as of Spring '26 — legacy Connected App creation is disabled; see `ROADMAP.md` #18) | `.gitignore`'d (`server.crt`, the public half, is also gitignored — org/app-specific generated material, not template content); never read or printed by this framework outside the auth call itself. |
 | Data Cloud tenant token (`data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-profile`, `list-data-graphs` — `data-cloud-status`'s six checks don't need it, plain core-org SOQL) | In-process memory only, for the duration of a single CLI invocation | A second OAuth hop off an already-valid core-org session (`POST {instance}/services/a360/token`, `grant_type=urn:salesforce:grant-type:external:cdp`) — see `ROADMAP.md` #18 | `data_cloud.py`; a genuinely separate host (`*.c360a.salesforce.com`) and access token from the core org's, so treat it as its own credential, not an extension of the core session. |
 | Salesforce username/password/security token (`password` mode) | `.env` | Manually configured | Documented as the "dev fallback only" mode in `README.md` -- weakest of the three, avoid in any shared/production environment. |
-| SQL Server credentials | `.env` (`SQL_UID`/`SQL_PWD`), or none at all if `SQL_TRUSTED_CONNECTION=yes` (Windows auth, the default) | Manually configured | Windows/trusted auth is the default and avoids a stored SQL password entirely. |
+| SQL Server credentials (`SQL_BACKEND=mssql`, the default) | `.env` (`SQL_UID`/`SQL_PWD`), or none at all if `SQL_TRUSTED_CONNECTION=yes` (Windows auth, the default) | Manually configured | Windows/trusted auth is the default and avoids a stored SQL password entirely. |
 | Mockaroo API key | `.env` | Manually configured | Only ever sent to Mockaroo's API; scoped to mock-data generation. |
+
+**`SQL_BACKEND=sqlite` (roadmap #28) has no credential at all** — SQLite is
+local-file access (`SQL_SQLITE_DIR`, one `<schema>.db` file per schema),
+no server process, no network connection, no auth handshake of any kind.
+A smaller trust surface than the SQL Server path by construction, not by
+configuration choice — there's no equivalent of `SQL_UID`/`SQL_PWD` to
+even get wrong. Filesystem permissions on `SQL_SQLITE_DIR` are the only
+access control that applies, same as any other file this framework writes.
 
 Explicitly **not** credentials, listed to preempt the question:
 `TICKET_SYSTEM_URL`/`TICKET_SYSTEM_LABEL` in `.env` are a plain display

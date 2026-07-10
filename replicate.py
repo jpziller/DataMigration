@@ -1,12 +1,14 @@
-"""Object replication: org -> SQL Server mirror table.
+"""Object replication: org -> mirror table (SQL Server or SQLite).
 
-replicate() drops+recreates a typed SQL Server table matching the object's
+replicate() drops+recreates a typed mirror table matching the object's
 describe, extracts every record via Bulk API 2.0 (low-memory CSV download),
-and loads the CSVs into the table.
+and loads the CSVs into the table. See sql_dialect.py for the backend-aware
+DDL/type-mapping this delegates to.
 
-Pass raw=True to make every column NVARCHAR(MAX) instead of typed columns.
+Pass raw=True to make every column this backend's "store anything as text"
+type (NVARCHAR(MAX) on SQL Server, TEXT on SQLite) instead of typed columns.
 That sidesteps datetime/decimal/bit coercion at load time and lets you CAST
-in T-SQL during transform -- the SQL-centric path.
+during transform -- the SQL-centric path.
 """
 import glob
 import os
@@ -14,7 +16,8 @@ import os
 import pandas as pd
 from sqlalchemy import text
 
-from type_map import sf_type_to_sql, is_compound, typed_value_coercers
+import sql_dialect
+from type_map import is_compound, typed_value_coercers
 
 
 def _query_columns(desc):
@@ -26,20 +29,21 @@ def _boolean_columns(desc):
 
 
 def create_table(engine, object_name, desc, schema="dbo", raw=False):
+    d = sql_dialect.for_engine(engine)
     cols = []
     for f in desc["fields"]:
         if is_compound(f):
             continue
-        col_type = "NVARCHAR(MAX)" if raw else sf_type_to_sql(f)
-        cols.append(f'[{f["name"]}] {col_type} NULL')
+        col_type = d.raw_text_type() if raw else d.sf_type_to_sql(f)
+        cols.append(f'{d.quote_ident(f["name"])} {col_type} NULL')
     cols_sql = ",\n    ".join(cols)
+    qualified = d.qualify(schema, object_name)
+    already_exists = d.table_exists(engine, schema, object_name)
     with engine.begin() as cx:
+        if already_exists:
+            cx.execute(text(f"DROP TABLE {qualified};"))
         cx.execute(text(
-            f"IF OBJECT_ID('{schema}.{object_name}', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[{object_name}];"
-        ))
-        cx.execute(text(
-            f"CREATE TABLE [{schema}].[{object_name}] (\n    {cols_sql}\n);"
+            f"CREATE TABLE {qualified} (\n    {cols_sql}\n);"
         ))
 
 

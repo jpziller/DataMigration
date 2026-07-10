@@ -63,7 +63,7 @@ summarizes.
 | 25 | Web UI for less-technical users | Not built (future) | — | Idea: a browser-based front end so someone who isn't comfortable with a terminal or Claude Code could still use this framework's tools. |
 | 26 | SSO / multi-user access control | Not built, depends on #25 | — | Idea: once a Web UI exists, this is "who's allowed to log in, and as whom." Not a concern today since it's just a CLI one person runs. |
 | 27 | Open query in SSMS (stage + launch) | Not built, depends on #25 | — | Idea: write a query to a file and launch SSMS pointed at it, for someone who'd rather review/run it in SSMS's own editor than in this framework's console output. |
-| 28 | Pluggable integration-hub backend (e.g. MongoDB alongside SQL Server) | Not built, deliberately deferred — prototyping is SQL-Server-only for now | — | Idea: someday support a database other than SQL Server as the "hub" this framework is built around, so it isn't permanently locked into one tool. Not needed while still prototyping on one database. |
+| 28 | Pluggable integration-hub backend — SQLite alongside SQL Server | **Built**; MongoDB still deferred | `SQL_BACKEND=mssql\|sqlite`, `sql_dialect.py`, `load_table_prep.py` | The real load engine (`replicate`, `bulkops` incl. activity logging/retry, hard rules 6/7, CSV ingestion) now works on either backend, keyed off the engine itself (`engine.dialect.name`). SQL-Server-only cleansing/matching functions and several data-architect tools stay SQL-Server-only, a deliberate scope boundary. MongoDB remains deferred — a genuinely different data model, not a mechanical syntax difference. |
 | 29 | Shared/VM-hosted SQL Server for multi-user access | Not built, deliberately deferred — prototyping is single-user/local for now | — | Idea: for when more than one person needs to work against the *same* mirror database at the same time, instead of everyone having their own local SQL Server. |
 | 30 | Additional migration source connectors (Snowflake, MongoDB, etc.) | Not built, deliberately deferred | — | Idea: pull source data from more systems (Snowflake, MongoDB), the same way this framework already pulls from a Salesforce org (`replicate`) or a flat file (`import-parquet`). |
 | 31 | Target-count/scaled mock data generation | Not built, builds on #6 | — | Idea: say "keep generating mock Accounts until the org has 50,000 total" instead of a fixed count every run — useful for realistic load/performance testing. |
@@ -1830,42 +1830,110 @@ Also keeps with this framework's "reviewed hands" model (`CLAUDE.md`) —
 staging a query for a human to knowingly execute in SSMS, rather than this
 framework executing it invisibly on their behalf.
 
-## 28. Pluggable integration-hub backend, e.g. MongoDB alongside SQL Server (not built, deliberately deferred)
+## 28. Pluggable integration-hub backend — SQLite alongside SQL Server (built); MongoDB still deferred
 
-Raised directly: don't want this framework permanently locked into one
-tool as the integration hub, even though SQL Server is the right call
-while prototyping. MongoDB is the concrete alternative named as worth
-keeping open.
+Originally raised as "don't want this framework permanently locked into
+one tool as the integration hub" with MongoDB named as the concrete
+alternative to keep open. **SQLite is what actually got built**, raised
+directly for a real reason rather than speculatively: a coworker doing
+similar migration work chose SQLite and was loading via raw CSV/Excel
+without a proper SQL staging layer — it "blew up" at volume, exactly the
+failure mode this framework's SQL-centric design exists to avoid. Making
+the real load engine work against SQLite lets that project get this
+framework's actual value (a proper staging DB, row-level error tracking,
+activity logging) without requiring a SQL Server install.
 
-**Why this is a bigger ask than a driver swap.** This framework's entire
-identity is "SQL Server is the integration hub, transformation logic lives
-in versioned T-SQL" (`README.md`'s opening line, `CLAUDE.md` throughout).
-A document store like MongoDB isn't a drop-in alternative behind the same
-interface — there's no relational `JOIN`, no `sql/transformations/*.sql`
-equivalent (aggregation pipelines or Python-side transforms would have to
-fill that role), and every tool that currently emits T-SQL DDL/DML
-directly (`replicate.py`'s `to_sql`, every `_ensure_table`-style function
-in `risk_analyzer.py`/`bulkops.py`/`load_order.py`, `sql/functions/`'s
-whole reusable-function library) would need either a parallel MongoDB-
-native implementation or a genuine abstraction layer sitting in front of
-both. Scoping this honestly as "a second hub mode," not a small connector
-addition, is the point of flagging it here rather than understating it.
+**Why SQLite was a tractable ask where MongoDB (still) isn't.** The
+original caution about a "second hub mode" being a bigger ask than a
+driver swap remains true for a genuinely different data model (a document
+store, no relational `JOIN`, no `sql/transformations/*.sql` equivalent).
+SQLite doesn't have that problem — it's still SQL, still relational, still
+has real `JOIN`/`GROUP BY`/window functions. The actual gap was narrower:
+SQL-Server-only system functions (`OBJECT_ID`/`COL_LENGTH` existence
+checks), bracket-quoted identifiers, `SELECT ... INTO`, `TOP (n)`, and
+`IDENTITY` columns — all mechanical syntax differences, not a data-model
+mismatch.
 
-**Security considerations, raised directly and worth tracking from the
-start of scoping, not bolted on after**: a different auth model entirely
-(SCRAM/x.509 vs. today's Windows/SQL-auth-only `sql_client.py`), different
-default network exposure (MongoDB has a well-known history of
-internet-exposed, unauthenticated instances from insecure defaults —
-`docs/SECURITY_OVERVIEW.md` would need its own section on this backend
-the moment it's real, not just an update to the credential inventory
-table it already has for SQL Server).
+**Explicit, deliberate scope boundary, agreed directly rather than
+assumed**: the SQL-Server-only cleansing/matching function library
+(`sql/functions/cleansing|matching|lookups` — Jaro-Winkler, Soundex,
+postal cleansing; genuine T-SQL-only tricks like `master..spt_values`/
+`FOR XML PATH` with no SQLite equivalent) stays SQL-Server-only,
+permanently — "kept in flavors by db, only where they work," an accepted
+gap, not a blocker. Several data-architect tools that use the same
+`OBJECT_ID`/bracket-quoting patterns but aren't part of the load engine
+itself — `profiling.py`, `risk_analyzer.py`, `auto_mapper.py`,
+`migration_run_book.py`, `mock_data.py`/`snowfakery_data.py`,
+`solution_doc.py`, `load_order.py`, `mapping_doc.py`, `parquet_import.py`,
+`record_types.py`, `reference_record.py` — are **SQL-Server-only for now**,
+confirmed safe to exclude (nothing in `bulk_op()`'s or `replicate()`'s
+call graph reaches them) and portable later, incrementally, via the same
+seam whenever a real SQLite project actually needs one of them.
 
-**Deliberately not scoped further yet** — prototyping today is
-single-backend (SQL Server) on purpose; this is a "keep the door open,
-don't design yourself into a corner" marker, not a committed design.
-Revisit once there's a real reason (a client already on MongoDB, a
-concrete multi-backend requirement) rather than speculatively building
-an abstraction layer with only one real implementation behind it.
+**What shipped**:
+- `sql_dialect.py` — a `SqlDialect` ABC (`MssqlDialect`/`SqliteDialect`)
+  keyed off `engine.dialect.name` (not a separately-threaded backend flag,
+  which could silently drift from what the engine actually is): existence
+  checks, identifier quoting, `SELECT INTO`/`CREATE TABLE AS SELECT`,
+  `TOP`/`LIMIT`, autoincrement PK DDL, and a per-backend Salesforce-field-
+  to-SQL-type mapping (`type_map.py` for SQL Server; a much simpler
+  TEXT/INTEGER/REAL mapping for SQLite's type *affinity* system).
+- `sql_client.py` — `SQL_BACKEND=mssql|sqlite`. SQLite mode uses
+  `SQL_SQLITE_DIR` (a directory) and `SQL_SQLITE_SCHEMAS` (comma-separated)
+  — one `<schema>.db` file per declared schema, real `ATTACH DATABASE`'d
+  under its own name on every connection (not a name-prefixing scheme,
+  which was considered and rejected — it breaks per-schema `DROP`/
+  discovery and doesn't match what pandas' `schema=` kwarg already means
+  on SQLite). This makes every existing `schema=schema` call site work
+  **unchanged** across both backends. Also sets `PRAGMA journal_mode=WAL`/
+  `synchronous=NORMAL` once per connection — the real lever for SQLite
+  write throughput at volume (a `method="multi"` `to_sql()` optimization
+  was considered and rejected: SQLite's bound-parameter limit can overflow
+  with a wide load table, a real failure mode at exactly the volume this
+  is for).
+- `replicate.py`, `bulkops.py` (writeback, retry, opt-in `BulkOpsLog`
+  activity logging), and `batch_advisor.py`'s two existence-checks
+  (confirmed **not optional** — `bulk_op()`'s default `batch_size="auto"`
+  path calls them unconditionally, so this was the one fix that would
+  have broken the very first default SQLite call otherwise) all migrated
+  to `sql_dialect.py`.
+- Hard rules 6/7 (`AddBulkLoadSortColumn`/`CheckLoadTableDuplicateKeys`)
+  **retired as stored procedures entirely** — confirmed the only 2 in the
+  whole repo — replaced by `load_table_prep.py` + real `cli.py` commands
+  (`add-bulk-load-sort-column`/`check-load-table-duplicate-keys`) running
+  backend-appropriate inline SQL directly. A genuine improvement, not just
+  a port: these were the only hard-rule tools still requiring a human to
+  hand-run raw T-SQL via `sqlcmd` instead of a real command.
+- `source_ingestion.py` gained a SQLite staging path — `BULK INSERT` is
+  T-SQL-only, so SQLite gets a paired DDL-documenting `.sql` script plus a
+  chunked pandas `read_csv`+`to_sql` Python step for the actual data load,
+  same numbered/git-committed/drift-checked artifact philosophy either way.
+
+**Real bugs found via live verification against both backends, not just
+assumed correct**: a bare `RowCount` column alias raised a real SQL Server
+syntax error ("Incorrect syntax near the keyword 'RowCount'") in
+`load_table_prep.py`'s verification query — the same reserved-word
+collision `source_ingestion.py`'s own `SourceIngestionLog.[RowCount]`
+column already had to work around, just missed on this new query until
+tested against a real instance. Also: Python 3.12 deprecated `sqlite3`'s
+default datetime adapter — fixed by registering explicit ones in
+`sql_client.py` rather than letting a future Python version silently break
+`BulkOpsLog`/`SourceIngestionLog`'s timestamp columns.
+
+**Verification**: a real end-to-end flow (`replicate.create_table()` →
+load table → `bulk_op()` against a stub Salesforce client → writeback
+confirmed via a fresh connection → `build_retry_table()` → hard rules 6/7)
+run against both a real local SQL Server instance and a real SQLite file,
+not mocked. Promoted into `tests/test_bulkops_sqlite_integration.py`
+(the suite's first test file touching a real engine — every other test is
+pure-function/isolated) once proven out via a scratch script first.
+
+**MongoDB stays deferred, unchanged from the original reasoning** — a
+document store is still a genuinely different data model, not a mechanical
+syntax difference, and the security considerations already raised (a
+different auth model entirely, a well-known history of internet-exposed
+unauthenticated MongoDB instances from insecure defaults) still apply.
+Revisit only when there's a concrete reason, same as before.
 
 ## 29. Shared/VM-hosted SQL Server for multi-user access (not built, deliberately deferred)
 

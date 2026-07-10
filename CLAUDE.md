@@ -235,6 +235,13 @@ venv may not be active in a fresh shell:
                 mapping table; `--template <custom.docx>` lets a data architect swap in their own
                 branded Word template with the same context as `docxtpl` Jinja tags, falling back
                 to the default when omitted.)
+- Load-table pre-flight checks (hard rules 6/7 — not stored procedures;
+                plain Python + inline SQL via `sql_dialect.py`, works on either SQL backend):
+                `.venv/Scripts/python.exe cli.py add-bulk-load-sort-column Account_Load AccountId [--schema dbo]`
+                `.venv/Scripts/python.exe cli.py check-load-table-duplicate-keys Account_Load Legacy_Id__c [--schema dbo]`
+                (`load_table_prep.py` — replaces the old `EXEC dbo.AddBulkLoadSortColumn`/
+                `EXEC dbo.CheckLoadTableDuplicateKeys` stored-procedure step. `check-load-table-
+                duplicate-keys` exits nonzero if anything is found, so it can gate a script.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c --email-deliverability system-email-only`
                 (insert/upsert require `--email-deliverability` — check Setup > Email Administration
@@ -381,7 +388,29 @@ venv may not be active in a fresh shell:
                 names if not the defaults.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
-  for ad-hoc queries.
+  for ad-hoc queries. On a SQLite-backed project, use the `sqlite3` CLI (or
+  any SQLite browser) against the relevant `<schema>.db` file under
+  `SQL_SQLITE_DIR` instead — there's no `sqlcmd` equivalent needed.
+
+**SQL backend**: `SQL_BACKEND` in `.env` is `mssql` (default) or `sqlite`,
+per project — see `sql_client.py`/`sql_dialect.py`. SQLite mode uses
+`SQL_SQLITE_DIR` (a directory, one `<schema>.db` file per schema) and
+`SQL_SQLITE_SCHEMAS` (comma-separated, e.g. `dbo,source,staging`) instead
+of `SQL_SERVER`/`SQL_DATABASE`/the ODBC settings — every declared schema
+is `ATTACH DATABASE`'d under its own name on each connection, so an
+existing `schema=` argument anywhere in this codebase already means the
+right thing on either backend, no per-call-site changes needed. The
+actual load engine — `replicate`, `bulkops` (writeback, activity logging,
+retry), hard rules 6/7's tooling, and `import-csv-directory`'s CSV
+staging — works on both backends. The SQL-Server-only cleansing/matching
+function library (`sql/functions/cleansing|matching|lookups`) and several
+data-architect tools (`profiling.py`, `risk_analyzer.py`, `auto_mapper.py`,
+`migration_run_book.py`, `mock_data.py`/`snowfakery_data.py`,
+`solution_doc.py`, `load_order.py`, `mapping_doc.py`, `parquet_import.py`,
+`record_types.py`, `reference_record.py`) are **SQL-Server-only for now**
+— a deliberate scope boundary, not an oversight; port one incrementally
+via the same `sql_dialect.py` helpers whenever a real SQLite project
+actually needs it.
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,
@@ -394,7 +423,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
 `/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
 `/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
-`/generate-source-data-model`
+`/generate-source-data-model`, `/add-bulk-load-sort-column`,
+`/check-load-table-duplicate-keys`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -404,8 +434,10 @@ available even when there's no dedicated skill for it.
 
 ## Hard rules
 1. `replicate` and any `DROP`/`CREATE` run ONLY against the mirror DB
-   `SF_Migration`. Never point the tools at a source or production database.
-   Confirm `SQL_DATABASE` in `.env` before any replicate.
+   `SF_Migration` (or, on a SQLite-backed project, the mirror files under
+   `SQL_SQLITE_DIR` — see "SQL backend" below). Never point the tools at a
+   source or production database. Confirm `SQL_DATABASE`/`SQL_SQLITE_DIR`
+   in `.env` before any replicate.
 2. `bulkops` writes to a live Salesforce org. Before running it, state which org
    (`SF_ORG_ALIAS` and auth mode) and get confirmation. Never run it
    speculatively or to "test."
@@ -419,8 +451,9 @@ available even when there's no dedicated skill for it.
    or `dump-describe` first.
 6. Every `*_Load` table for an object with a parent lookup/master-detail field
    must get a `[Sort]` column before `bulkops`, via
-   `EXEC dbo.AddBulkLoadSortColumn '<LoadTable>', '<ParentKeyColumn>'`
-   (`sql/functions/utilities/AddBulkLoadSortColumn.sql`). This numbers rows by
+   `.venv/Scripts/python.exe cli.py add-bulk-load-sort-column <LoadTable> <ParentKeyColumn>`
+   (`load_table_prep.py` — plain Python + inline SQL via `sql_dialect.py`,
+   not a stored procedure; works on either SQL backend). This numbers rows by
    `ROW_NUMBER() OVER (ORDER BY <parent key>)` so all children of the same
    parent land in a contiguous range — `bulkops.py` submits in `[Sort]` order
    when the column is present, keeping same-parent rows in the same batch
@@ -429,11 +462,12 @@ available even when there's no dedicated skill for it.
    skip it because an object "seems small enough."
 7. Every `*_Load` table must have its migration-key column checked for
    duplicates/NULLs before `bulkops`, via
-   `EXEC dbo.CheckLoadTableDuplicateKeys '<LoadTable>', '<MigrationKeyColumn>'`
-   (`sql/functions/utilities/CheckLoadTableDuplicateKeys.sql`). A duplicate or
-   NULL migration key breaks the fingerprint-based result mapping in rule 4 —
-   resolve every duplicate it reports before loading, don't let it surface
-   later as an unexplained `ambiguous` count after a real Salesforce API call.
+   `.venv/Scripts/python.exe cli.py check-load-table-duplicate-keys <LoadTable> <MigrationKeyColumn>`
+   (`load_table_prep.py`, same non-stored-procedure convention as rule 6).
+   A duplicate or NULL migration key breaks the fingerprint-based result
+   mapping in rule 4 — resolve every duplicate it reports before loading,
+   don't let it surface later as an unexplained `ambiguous` count after a
+   real Salesforce API call.
 8. When deploying a new custom field via `sf project deploy start`, bundle a
    `Profile`/`PermissionSet` metadata component granting Read+Edit to System
    Administrator in the **same deploy**. API-deployed fields get zero
@@ -533,10 +567,10 @@ don't jump straight to writing T-SQL:
 5. **Build the transform** under `sql/transformations/`, producing the
    `*_Load` table. Include the ticket reference in a header comment
    (rule 10) — ask for it if it hasn't been given.
-6. **Sort it** — `AddBulkLoadSortColumn` against the object's parent key
+6. **Sort it** — `add-bulk-load-sort-column` against the object's parent key
    (rule 6), if it has one.
-7. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
-   key (rule 7). Resolve anything it flags.
+7. **Dupe-check it** — `check-load-table-duplicate-keys` against the
+   migration key (rule 7). Resolve anything it flags.
 8. **Validate the migration key live** — `validate-external-id <Object>
    <Field>` against the actual target field (rule 12). Do not proceed
    until it reports OK; fixing a failing field is another team's job, not
@@ -563,17 +597,31 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 ## Where things live
 - `cli.py` — CLI entry point wiring every verb together.
 - `config.py`, `sf_client.py`, `sql_client.py` — settings/env, Salesforce
-  auth, SQL Server connection.
+  auth, SQL connection (SQL Server or SQLite, per `SQL_BACKEND`).
+- `sql_dialect.py` — the backend-aware SQL seam every other module routes
+  through instead of hand-rolling `OBJECT_ID`/`COL_LENGTH`/bracket-quoted
+  T-SQL: table/column existence checks, identifier quoting, `SELECT INTO`
+  vs `CREATE TABLE AS SELECT`, `TOP`/`LIMIT`, autoincrement PK DDL, and a
+  per-backend Salesforce-field-to-SQL-type mapping. Keyed off the real
+  engine in hand (`engine.dialect.name`), not a separately-threaded flag.
+- `load_table_prep.py` — hard rules 6/7 (load-table sort column, migration-
+  key duplicate/NULL check). Originally SQL Server stored procedures;
+  retired in favor of plain Python + inline SQL via `sql_dialect.py`, so
+  both work on either backend with no `CREATE PROCEDURE`/`EXEC` step.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
-  movement and SF type mapping.
+  movement and SF type mapping. `type_map.py` is the SQL Server flavor;
+  `sql_dialect.py`'s `SqliteDialect.sf_type_to_sql()` is SQLite's.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
+  SQL-Server-only for now (see the "SQL backend" note above).
 - `source_ingestion.py` — bulk CSV-directory ingestion into the mirror DB
-  (roadmap #46): generates/reuses numbered `BULK INSERT` scripts under
-  `sql/source_ingestion/`, cross-pass structure drift detection, and the
-  opt-in `SourceIngestionLog`. A third flat-file entry point alongside
-  `replicate.py`/`parquet_import.py`, for the "client hands over a whole
-  directory of CSVs" starting point specifically.
+  (roadmap #46): generates/reuses numbered staging scripts under
+  `sql/source_ingestion/` (a `BULK INSERT` script on SQL Server; DDL text
+  paired with a Python-driven `read_csv`+`to_sql` load on SQLite, since it
+  has no `BULK INSERT` equivalent), cross-pass structure drift detection,
+  and the opt-in `SourceIngestionLog`. A third flat-file entry point
+  alongside `replicate.py`/`parquet_import.py`, for the "client hands over
+  a whole directory of CSVs" starting point specifically.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
   `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`,

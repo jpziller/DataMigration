@@ -11,11 +11,13 @@ Zero-dependency string/number/date helpers: `CleanNumber`, `RemoveNonAscii`,
 `GetMonthsBetweenDates`, `EscapeContentNote`, `ToBase64`/`FromBase64`,
 `UrlDecode`, `RemoveInvalidXmlChars`.
 
-Also here (load-table pre-flight checks, not string/date helpers, but same
-folder): `AddBulkLoadSortColumn` (numbers a load table by parent key so
-same-parent rows land in the same Bulk API batch — CLAUDE.md hard rule 6)
-and `CheckLoadTableDuplicateKeys` (flags duplicate/NULL migration-key values
-before `bulkops` — hard rule 7).
+The load-table pre-flight checks (hard rules 6/7) used to live here as
+`AddBulkLoadSortColumn`/`CheckLoadTableDuplicateKeys` stored procedures.
+They're now `load_table_prep.py` + the `add-bulk-load-sort-column`/
+`check-load-table-duplicate-keys` `cli.py` commands instead — plain Python
++ inline SQL via `sql_dialect.py`, so both work on SQLite as well as SQL
+Server, with no `CREATE PROCEDURE`/`EXEC` step. This folder's own functions
+(below) are still SQL-Server-only T-SQL, not ported.
 
 ## cleansing/
 `GetFirstName` / `GetLastName` (splits a "Full Name" column, handles

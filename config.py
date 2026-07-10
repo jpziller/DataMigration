@@ -24,7 +24,11 @@ class Settings:
     sf_password: str = _get("SF_PASSWORD", "")
     sf_security_token: str = _get("SF_SECURITY_TOKEN", "")
 
-    # SQL Server
+    # SQL backend -- "mssql" (default) or "sqlite". See sql_client.py/
+    # sql_dialect.py for what changes per backend.
+    sql_backend: str = _get("SQL_BACKEND", "mssql")
+
+    # SQL Server (sql_backend == "mssql")
     sql_server: str = _get("SQL_SERVER", "localhost")
     sql_database: str = _get("SQL_DATABASE", "SF_Migration")
     sql_driver: str = _get("SQL_DRIVER", "ODBC Driver 18 for SQL Server")
@@ -33,6 +37,12 @@ class Settings:
     sql_pwd: str = _get("SQL_PWD", "")
     sql_encrypt: str = _get("SQL_ENCRYPT", "yes")
     sql_trust_cert: str = _get("SQL_TRUST_SERVER_CERT", "yes")
+
+    # SQLite (sql_backend == "sqlite"): sql_sqlite_dir holds one <schema>.db
+    # file per schema in sql_sqlite_schemas, each ATTACHed under its own
+    # schema name on every new connection -- see sql_client.make_engine().
+    sql_sqlite_dir: str = _get("SQL_SQLITE_DIR", "./_sqlite")
+    sql_sqlite_schemas: str = _get("SQL_SQLITE_SCHEMAS", "dbo")
 
     stage_dir: str = _get("STAGE_DIR", "./_stage")
 

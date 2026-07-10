@@ -55,6 +55,7 @@ import source_ingestion as si
 import reference_record as rr
 import record_types as rt
 import data_model_diagram as dmd
+import load_table_prep as ltp
 
 
 def _ctx():
@@ -325,6 +326,54 @@ def disable_bulkops_logging_cmd(schema):
     click.echo(f"This permanently drops {schema}.BulkOpsLog and all of its history.")
     bo.disable_bulkops_logging(engine, schema=schema)
     click.echo(f"Bulk load logging disabled for schema '{schema}'.")
+
+
+@cli.command("add-bulk-load-sort-column")
+@click.argument("table_name")
+@click.argument("parent_key_column")
+@click.option("--schema", default="dbo")
+def add_bulk_load_sort_column_cmd(table_name, parent_key_column, schema):
+    """Hard rule 6: add/refresh a [Sort] column on TABLE_NAME, numbered by
+    ROW_NUMBER() OVER (ORDER BY PARENT_KEY_COLUMN), so bulkops submits
+    same-parent rows in the same batch. Replaces the old
+    EXEC dbo.AddBulkLoadSortColumn stored-procedure step -- run this before
+    bulkops for any load table with a parent lookup/master-detail field."""
+    _, _, engine = _ctx()
+    bad_ranges = ltp.add_bulk_load_sort_column(engine, table_name, parent_key_column, schema=schema)
+    click.echo(f"[Sort] column added/refreshed on {schema}.{table_name}, ordered by {parent_key_column}.")
+    if not bad_ranges:
+        click.echo("Verification: every parent key's rows landed in a contiguous Sort range. Clean.")
+        return
+    click.echo(f"Verification FAILED -- {len(bad_ranges)} parent key(s) have a non-contiguous Sort range:")
+    for r in bad_ranges:
+        click.echo(f"  {r['ParentKey']}: Sort {r['MinSort']}-{r['MaxSort']} "
+                   f"({r['RowCount']} rows, span {r['SortSpan']})")
+
+
+@cli.command("check-load-table-duplicate-keys")
+@click.argument("table_name")
+@click.argument("key_column")
+@click.option("--schema", default="dbo")
+def check_load_table_duplicate_keys_cmd(table_name, key_column, schema):
+    """Hard rule 7: check TABLE_NAME's KEY_COLUMN for duplicate or missing
+    values before bulkops -- either breaks fingerprint-based result mapping
+    on insert (see bulkops.py's own docstring). Replaces the old
+    EXEC dbo.CheckLoadTableDuplicateKeys stored-procedure step. Exits
+    nonzero if anything is found, so this can gate a script."""
+    _, _, engine = _ctx()
+    duplicates, missing_key_count = ltp.check_load_table_duplicate_keys(
+        engine, table_name, key_column, schema=schema
+    )
+    if not duplicates and not missing_key_count:
+        click.echo(f"OK -- {key_column} on {schema}.{table_name} has no duplicates or missing values.")
+        return
+    if duplicates:
+        click.echo(f"Duplicate {key_column} values in {schema}.{table_name}:")
+        for d in duplicates:
+            click.echo(f"  {d['DuplicateKey']!r} -- {d['Occurrences']} occurrences")
+    if missing_key_count:
+        click.echo(f"{missing_key_count} row(s) in {schema}.{table_name} have a NULL/missing {key_column}.")
+    raise SystemExit(1)
 
 
 @cli.command("analyze-load-order")

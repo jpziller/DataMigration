@@ -42,6 +42,8 @@ import os
 
 from sqlalchemy import text
 
+import sql_dialect
+
 _HEURISTICS_PATH = os.path.join(os.path.dirname(__file__), "reference", "batch_size_heuristics.json")
 
 
@@ -78,20 +80,18 @@ def _automation_adjustment(engine, heuristics, object_name, schema):
     rationale = []
     rungs_down = 0
 
-    with engine.connect() as cx:
-        has_table = cx.execute(
-            text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.ObjectAutomationRisk"}
-        ).scalar() is not None
-        if not has_table:
-            rationale.append(
-                "This object hasn't been scanned by analyze-org-risk yet -- "
-                "run it for a better-informed starting point (org automation unknown)."
-            )
-            return 0, rationale
+    d = sql_dialect.for_engine(engine)
+    if not d.table_exists(engine, schema, "ObjectAutomationRisk"):
+        rationale.append(
+            "This object hasn't been scanned by analyze-org-risk yet -- "
+            "run it for a better-informed starting point (org automation unknown)."
+        )
+        return 0, rationale
 
+    with engine.connect() as cx:
         counts = dict(cx.execute(
             text(
-                f"SELECT CheckType, COUNT(*) FROM [{schema}].[ObjectAutomationRisk] "
+                f"SELECT CheckType, COUNT(*) FROM {d.qualify(schema, 'ObjectAutomationRisk')} "
                 "WHERE ObjectName = :obj AND IsActive = 1 GROUP BY CheckType"
             ),
             {"obj": object_name},
@@ -129,35 +129,30 @@ def _history_adjustment(engine, heuristics, object_name, schema):
     hist = heuristics["history_rules"]
     rationale = []
 
+    d = sql_dialect.for_engine(engine)
+    if not d.table_exists(engine, schema, "BulkOpsLog"):
+        return 0, []
+
+    # An existing BulkOpsLog from before ROADMAP #15 won't have these
+    # columns yet -- confirmed live: querying them unconditionally
+    # crashes with "Invalid column name" rather than degrading. Check
+    # first and tell the architect how to fix it instead of erroring.
+    if not d.column_exists(engine, schema, "BulkOpsLog", "BatchSize"):
+        return 0, [
+            f"{schema}.BulkOpsLog exists but predates batch-size tracking -- "
+            f"run enable-bulkops-logging --schema {schema} again to upgrade it in place "
+            "(existing log history is preserved)."
+        ]
+
+    query = d.select_top_n_sql(
+        "BatchSize, LockErrorCount",
+        f"FROM {d.qualify(schema, 'BulkOpsLog')} "
+        "WHERE ObjectName = :obj AND BatchSize IS NOT NULL "
+        "ORDER BY CompletedAt DESC",
+        hist["runs_considered"],
+    )
     with engine.connect() as cx:
-        has_table = cx.execute(
-            text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.BulkOpsLog"}
-        ).scalar() is not None
-        if not has_table:
-            return 0, []
-
-        # An existing BulkOpsLog from before ROADMAP #15 won't have these
-        # columns yet -- confirmed live: querying them unconditionally
-        # crashes with "Invalid column name" rather than degrading. Check
-        # first and tell the architect how to fix it instead of erroring.
-        has_batch_size_col = cx.execute(
-            text("SELECT COL_LENGTH(:t, 'BatchSize')"), {"t": f"{schema}.BulkOpsLog"}
-        ).scalar() is not None
-        if not has_batch_size_col:
-            return 0, [
-                f"{schema}.BulkOpsLog exists but predates batch-size tracking -- "
-                f"run enable-bulkops-logging --schema {schema} again to upgrade it in place "
-                "(existing log history is preserved)."
-            ]
-
-        rows = cx.execute(
-            text(
-                f"SELECT TOP (:n) BatchSize, LockErrorCount FROM [{schema}].[BulkOpsLog] "
-                "WHERE ObjectName = :obj AND BatchSize IS NOT NULL "
-                "ORDER BY CompletedAt DESC"
-            ),
-            {"n": hist["runs_considered"], "obj": object_name},
-        ).fetchall()
+        rows = cx.execute(text(query), {"obj": object_name}).fetchall()
 
     if not rows:
         return 0, []
@@ -224,31 +219,27 @@ def suggest_heuristic_updates(engine, schema="dbo"):
     heuristics = _load_heuristics()
     hist = heuristics["history_rules"]
 
-    with engine.connect() as cx:
-        has_table = cx.execute(
-            text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.BulkOpsLog"}
-        ).scalar() is not None
-        if not has_table:
-            return []
-        has_batch_size_col = cx.execute(
-            text("SELECT COL_LENGTH(:t, 'BatchSize')"), {"t": f"{schema}.BulkOpsLog"}
-        ).scalar() is not None
-        if not has_batch_size_col:
-            return []
+    d = sql_dialect.for_engine(engine)
+    if not d.table_exists(engine, schema, "BulkOpsLog"):
+        return []
+    if not d.column_exists(engine, schema, "BulkOpsLog", "BatchSize"):
+        return []
 
+    qualified = d.qualify(schema, "BulkOpsLog")
+    with engine.connect() as cx:
         objects = [r[0] for r in cx.execute(
-            text(f"SELECT DISTINCT ObjectName FROM [{schema}].[BulkOpsLog] WHERE BatchSize IS NOT NULL")
+            text(f"SELECT DISTINCT ObjectName FROM {qualified} WHERE BatchSize IS NOT NULL")
         ).fetchall()]
 
         suggestions = []
         for obj in objects:
-            rows = cx.execute(
-                text(
-                    f"SELECT TOP (:n) BatchSize, LockErrorCount FROM [{schema}].[BulkOpsLog] "
-                    "WHERE ObjectName = :obj AND BatchSize IS NOT NULL ORDER BY CompletedAt DESC"
-                ),
-                {"n": hist["runs_considered"], "obj": obj},
-            ).fetchall()
+            query = d.select_top_n_sql(
+                "BatchSize, LockErrorCount",
+                f"FROM {qualified} WHERE ObjectName = :obj AND BatchSize IS NOT NULL "
+                "ORDER BY CompletedAt DESC",
+                hist["runs_considered"],
+            )
+            rows = cx.execute(text(query), {"obj": obj}).fetchall()
             if len(rows) < hist["clean_runs_to_increase"]:
                 continue
             sizes = {r[0] for r in rows}

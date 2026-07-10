@@ -10,9 +10,9 @@ data architect specifically catching it.
 Design, chosen directly over an alternative (automatic resolution inside
 bulk_op(), matching how CumulusCI does it): a plain T-SQL reference table
 the architect JOINs against themselves, matching this framework's
-established "T-SQL owns the transform logic" convention
-(AddBulkLoadSortColumn/CheckLoadTableDuplicateKeys), not new automatic
-bulkops behavior. Deliberately simpler, at the cost of no built-in
+established "the transform script owns the logic" convention
+(load_table_prep.py's sort/dupe-key checks), not new automatic bulkops
+behavior. Deliberately simpler, at the cost of no built-in
 unresolved-value guard -- writing the transform so an unmatched
 DeveloperName surfaces as a visible NULL RecordTypeId (a LEFT JOIN, not an
 INNER JOIN) is the architect's own responsibility, per hard rule 15.

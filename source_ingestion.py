@@ -3,60 +3,73 @@
 A client hands over a directory of CSV files (or this is a later pass --
 e.g. a UAT reload -- of a directory shaped like one seen before). This
 module reads a whole directory in one bulk operation and turns it into a
-Source SQL Server database, generalizing a proven real-world convention
-from hand-built client migration scripts: stage every column as
-NVARCHAR(MAX) via BULK INSERT, type/transform later via T-SQL under
-sql/transformations/ -- deliberately NOT type-sniffing the CSV (dates,
-leading-zero ids, and numeric-looking strings are exactly the values type
-inference gets wrong; explicit T-SQL transforms are this framework's own
-established way to type staged data, see replicate.py/type_map.py's own
-coercion step for the Salesforce side).
+Source mirror database (SQL Server or SQLite), generalizing a proven
+real-world convention from hand-built client migration scripts: stage
+every column as untyped text (NVARCHAR(MAX) on SQL Server, TEXT on
+SQLite), type/transform later via SQL under sql/transformations/ --
+deliberately NOT type-sniffing the CSV (dates, leading-zero ids, and
+numeric-looking strings are exactly the values type inference gets wrong;
+explicit typed transforms are this framework's own established way to type
+staged data, see replicate.py/type_map.py's own coercion step for the
+Salesforce side).
 
 Two cases, handled differently:
   - New file (no existing script for its derived table name): generate a
     numbered .sql script under sql/source_ingestion/ (git-committed,
-    human-readable, sqlcmd-runnable -- the actual artifact of record for
-    this project), then run it.
+    human-readable -- the actual artifact of record for this project),
+    then run it.
   - Existing file, later pass: the script is REUSED, never silently
     regenerated -- only its current CSV's header is checked against what
-    the script expects. BULK INSERT maps columns *positionally*, not by
-    name, so a reordered column is exactly as dangerous as a renamed one;
-    check_drift() compares the full ordered column list, not just set
+    the script expects. The staging step maps columns *positionally*, not
+    by name (BULK INSERT on SQL Server; the CSV's own header order on
+    SQLite), so a reordered column is exactly as dangerous as a renamed
+    one; check_drift() compares the full ordered column list, not just set
     membership. Any difference is a hard stop for that file -- the
     architect must understand what changed and explicitly --rebuild it
     before it loads again.
 
-Execution never shells out to sqlcmd or blindly evals a script's raw text:
-DROP/CREATE/BULK INSERT are always reconstructed from known values (table
-name, column list, csv path) and run via the same SQLAlchemy engine every
-other write path in this framework uses (see parquet_import.py's
-create_table() for the identical drop+create shape). The .sql file is a
-human-readable, independently re-runnable (`sqlcmd -i`) artifact, not
-something Python re-parses and evals wholesale.
+Execution never shells out to sqlcmd/the sqlite3 CLI or blindly evals a
+script's raw text: DROP/CREATE + the data load are always reconstructed
+from known values (table name, column list, csv path) and run via the
+same SQLAlchemy engine every other write path in this framework uses (see
+parquet_import.py's create_table() for the identical drop+create shape).
+The .sql file's DDL is a human-readable artifact matching what actually
+runs, not something Python re-parses and evals wholesale -- on SQL
+Server it's also independently re-runnable via `sqlcmd -i` end to end
+(BULK INSERT included); on SQLite the file documents the DDL, but the
+data-load half only happens through this module's own Python path, since
+SQLite has no BULK INSERT equivalent in SQL syntax.
 
-Known operational requirement, not fixable from Python: BULK INSERT needs
-the SQL Server service account itself to have filesystem read access to
-the CSV's path -- true by default for a local/on-prem SQL Server sharing a
-machine (or a reachable UNC path) with the files, but a real constraint to
-be aware of on an unusual setup.
+Known operational requirement, not fixable from Python: SQL Server's BULK
+INSERT needs the SQL Server service account itself to have filesystem read
+access to the CSV's path -- true by default for a local/on-prem instance
+sharing a machine (or a reachable UNC path) with the files, but a real
+constraint to be aware of on an unusual setup. Not a concern for SQLite --
+the CSV is read directly by this same Python process, no separate service
+account involved.
 """
 import csv
 import os
 import re
 from datetime import datetime, timezone
 
+import pandas as pd
 from sqlalchemy import text
 
 import migration_run_book
+import sql_dialect
 
 _SQL_DIR_DEFAULT = os.path.join(os.path.dirname(__file__), "sql", "source_ingestion")
 
 _TABLE_NAME_RE = re.compile(r"[^A-Za-z0-9_]")
+# Matches either bracket-quoted (SQL Server) or double-quoted (SQLite)
+# identifiers -- generate_import_script()/_run_script() write one or the
+# other depending on backend, and both must parse the same way here.
 _CREATE_TABLE_RE = re.compile(
-    r"CREATE\s+TABLE\s+(?:\[?[\w]+\]?\.)?\[?(\w+)\]?\s*\(([^;]+?)\)\s*;",
+    r'CREATE\s+TABLE\s+(?:[\[\"]?\w+[\]\"]?\.)?[\[\"]?(\w+)[\]\"]?\s*\(([^;]+?)\)\s*;',
     re.IGNORECASE | re.DOTALL,
 )
-_COLUMN_LINE_RE = re.compile(r"\[(\w+)\]\s+NVARCHAR\(MAX\)\s+NULL")
+_COLUMN_LINE_RE = re.compile(r'[\[\"]?(\w+)[\]\"]?\s+(?:NVARCHAR\(MAX\)|TEXT)\s+NULL')
 _BULK_INSERT_FROM_RE = re.compile(r"BULK\s+INSERT\s+.*?\bFROM\s+'([^']+)'", re.IGNORECASE | re.DOTALL)
 _SCRIPT_NUMBER_RE = re.compile(r"^(\d+)_")
 
@@ -113,10 +126,22 @@ def _script_path_for_table(sql_dir, table_name):
     return os.path.join(sql_dir, matches[0]) if matches else None
 
 
-def generate_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_SQL_DIR_DEFAULT):
-    """Write a new numbered BULK INSERT script for csv_path. Never
-    overwrites an existing script for this table -- rebuild_import_script()
-    is the only explicit path that replaces one."""
+def _dialect_for_script(engine):
+    # engine is optional here (not every caller of generate_import_script
+    # has one in hand -- e.g. tests that only check the generated file's
+    # structure) -- default to the SQL Server flavor, this module's
+    # original and still most common behavior, when none is given.
+    return sql_dialect.for_engine(engine) if engine is not None else sql_dialect.MssqlDialect()
+
+
+def generate_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_SQL_DIR_DEFAULT, engine=None):
+    """Write a new numbered staging script for csv_path -- BULK INSERT on
+    SQL Server, or (engine is a SQLite engine) a DDL-only script paired
+    with a Python-driven data load, since SQLite has no BULK INSERT
+    equivalent in SQL syntax (see _run_script()). Never overwrites an
+    existing script for this table -- rebuild_import_script() is the only
+    explicit path that replaces one."""
+    d = _dialect_for_script(engine)
     os.makedirs(sql_dir, exist_ok=True)
     columns = _read_csv_header(csv_path)
     _check_no_duplicate_columns(columns, csv_path)
@@ -126,8 +151,11 @@ def generate_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_
     filename = f"{number}_{table_name}_import.sql"
     out_path = os.path.join(sql_dir, filename)
 
-    cols_sql = ",\n    ".join(f"[{c}] NVARCHAR(MAX) NULL" for c in columns)
-    script = f"""/*  Source ingestion: stage {os.path.basename(csv_path)} into [{schema}].[{table_name}].
+    qualified = d.qualify(schema, table_name)
+    cols_sql = ",\n    ".join(f"{d.quote_ident(c)} {d.raw_text_type()} NULL" for c in columns)
+
+    if isinstance(d, sql_dialect.MssqlDialect):
+        script = f"""/*  Source ingestion: stage {os.path.basename(csv_path)} into {qualified}.
     Ticket: {ticket}
 
     Every column is staged as NVARCHAR(MAX) -- no type sniffing. Type and
@@ -153,13 +181,13 @@ def generate_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_
     loads cleanly. Don't "simplify" this back to '\\n'.
 */
 IF OBJECT_ID('{schema}.{table_name}', 'U') IS NOT NULL
-    DROP TABLE [{schema}].[{table_name}];
+    DROP TABLE {qualified};
 
-CREATE TABLE [{schema}].[{table_name}] (
+CREATE TABLE {qualified} (
     {cols_sql}
 );
 
-BULK INSERT [{schema}].[{table_name}]
+BULK INSERT {qualified}
 FROM '{abs_csv_path}'
 WITH (
     FORMAT = 'csv',
@@ -170,19 +198,49 @@ WITH (
     KEEPNULLS
 );
 """
+    else:
+        script = f"""/*  Source ingestion: stage {os.path.basename(csv_path)} into {qualified}.
+    Ticket: {ticket}
+
+    Every column is staged as TEXT -- no type sniffing. Type and transform
+    this data via sql/transformations/*.sql once mapped, the same "stage
+    raw, type explicitly" convention this framework already uses for every
+    other source.
+
+    Reused as-is on every later pass -- never regenerate by hand. If this
+    CSV's structure ever no longer matches the column list below, treat
+    that as a real signal to stop and understand why before reloading;
+    `import-csv-directory` checks this automatically and blocks the load
+    on drift, only proceeding once --rebuild is passed explicitly.
+
+    SQLite has no BULK INSERT equivalent -- the DDL below documents the
+    staged shape for audit/git-history, same as the SQL Server flavor of
+    this script, but the actual data load (this CSV's rows into the table)
+    happens via a chunked pandas read_csv + to_sql step in Python, not by
+    running this file directly through a SQL client. The DROP/CREATE
+    statements below ARE what actually runs (reconstructed from known
+    values, not this file's text -- see source_ingestion.py's _run_script()).
+*/
+DROP TABLE IF EXISTS {qualified};
+
+CREATE TABLE {qualified} (
+    {cols_sql}
+);
+"""
+
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(script)
     return out_path
 
 
-def rebuild_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_SQL_DIR_DEFAULT):
+def rebuild_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_SQL_DIR_DEFAULT, engine=None):
     """Explicitly replace an existing script for table_name with a fresh
     one matching the CSV's current structure -- only ever called when the
     architect has reviewed a drift report and decided to accept it."""
     existing = _script_path_for_table(sql_dir, table_name)
     if existing:
         os.remove(existing)
-    return generate_import_script(csv_path, table_name, ticket, schema=schema, sql_dir=sql_dir)
+    return generate_import_script(csv_path, table_name, ticket, schema=schema, sql_dir=sql_dir, engine=engine)
 
 
 def extract_create_table_columns(sql_text):
@@ -231,43 +289,64 @@ def check_drift(csv_path, script_path):
 
 
 def _run_script(engine, schema, table_name, columns, csv_path):
-    """Reconstruct and execute the DROP/CREATE/BULK INSERT sequence
+    """Reconstruct and execute the DROP/CREATE + data-load sequence
     directly -- same shape as parquet_import.py's create_table(), never a
-    blind exec of a script file's raw text. Returns the row count."""
-    cols_sql = ",\n    ".join(f"[{c}] NVARCHAR(MAX) NULL" for c in columns)
-    abs_csv_path = os.path.abspath(csv_path)
+    blind exec of a script file's raw text. Returns the row count.
+
+    SQL Server: DROP/CREATE + BULK INSERT, all as SQL text (matches the
+    generated .sql script exactly). SQLite: DROP/CREATE as SQL text, but
+    the actual data load is a chunked pandas read_csv + to_sql step --
+    SQLite has no BULK INSERT equivalent in SQL syntax."""
+    d = sql_dialect.for_engine(engine)
+    qualified = d.qualify(schema, table_name)
+    cols_sql = ",\n    ".join(f"{d.quote_ident(c)} {d.raw_text_type()} NULL" for c in columns)
+
+    already_exists = d.table_exists(engine, schema, table_name)
     with engine.begin() as cx:
-        cx.execute(text(f"IF OBJECT_ID('{schema}.{table_name}', 'U') IS NOT NULL DROP TABLE [{schema}].[{table_name}];"))
-        cx.execute(text(f"CREATE TABLE [{schema}].[{table_name}] (\n    {cols_sql}\n);"))
-        # BULK INSERT's FROM clause does not accept a bound parameter in
-        # SQL Server -- the path must be a literal. Safe here because
-        # abs_csv_path is a local filesystem path this same process just
-        # resolved via os.path.abspath, not external/user-facing input
-        # reaching this string via a SQL injection surface.
-        # ROWTERMINATOR = '0x0a', not '\n' -- confirmed live, see
-        # generate_import_script()'s docstring for why.
-        cx.execute(text(
-            f"BULK INSERT [{schema}].[{table_name}] FROM '{abs_csv_path}' WITH "
-            "(FORMAT = 'csv', FIRSTROW = 2, FIELDQUOTE = '\"', FIELDTERMINATOR = ',', "
-            "ROWTERMINATOR = '0x0a', KEEPNULLS);"
-        ))
-        count = cx.execute(text(f"SELECT COUNT(*) FROM [{schema}].[{table_name}]")).scalar()
-    return count
+        if already_exists:
+            cx.execute(text(f"DROP TABLE {qualified};"))
+        cx.execute(text(f"CREATE TABLE {qualified} (\n    {cols_sql}\n);"))
 
+        if isinstance(d, sql_dialect.MssqlDialect):
+            # BULK INSERT's FROM clause does not accept a bound parameter in
+            # SQL Server -- the path must be a literal. Safe here because
+            # abs_csv_path is a local filesystem path this same process just
+            # resolved via os.path.abspath, not external/user-facing input
+            # reaching this string via a SQL injection surface.
+            # ROWTERMINATOR = '0x0a', not '\n' -- confirmed live, see
+            # generate_import_script()'s docstring for why.
+            abs_csv_path = os.path.abspath(csv_path)
+            cx.execute(text(
+                f"BULK INSERT {qualified} FROM '{abs_csv_path}' WITH "
+                "(FORMAT = 'csv', FIRSTROW = 2, FIELDQUOTE = '\"', FIELDTERMINATOR = ',', "
+                "ROWTERMINATOR = '0x0a', KEEPNULLS);"
+            ))
+            return cx.execute(text(f"SELECT COUNT(*) FROM {qualified}")).scalar()
 
-def _ensure_log_table(engine, schema):
-    with engine.connect() as cx:
-        return cx.execute(text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.SourceIngestionLog"}).scalar() is not None
+    # SQLite: chunked pandas read_csv + to_sql -- no type sniffing (every
+    # column was already created as TEXT above), same "stage raw" intent
+    # as BULK INSERT's NVARCHAR(MAX) staging.
+    total = 0
+    for chunk in pd.read_csv(
+        csv_path, dtype=str, chunksize=50000,
+        keep_default_na=False, na_values=[""],
+    ):
+        chunk.to_sql(table_name, engine, schema=schema, if_exists="append", index=False)
+        total += len(chunk)
+    return total
 
 
 def _log_run(engine, schema, table_name, csv_path, script_path, status, row_count,
               started_at, completed_at, drift_details=None):
-    if not _ensure_log_table(engine, schema):
+    d = sql_dialect.for_engine(engine)
+    if not d.table_exists(engine, schema, "SourceIngestionLog"):
         return
+    qualified = d.qualify(schema, "SourceIngestionLog")
+    row_count_col = d.quote_ident("RowCount")
     with engine.begin() as cx:
         cx.execute(text(
-            f"INSERT INTO [{schema}].[SourceIngestionLog] "
-            "(TableName, CsvPath, ScriptPath, Status, [RowCount], StartedAt, CompletedAt, DurationSeconds, RunBy, DriftDetails) "
+            f"INSERT INTO {qualified} "
+            f"(TableName, CsvPath, ScriptPath, Status, {row_count_col}, StartedAt, CompletedAt, DurationSeconds, RunBy, DriftDetails) "
             "VALUES (:t, :c, :s, :st, :rc, :sa, :ca, :d, :rb, :dd)"
         ), {
             "t": table_name, "c": os.path.abspath(csv_path), "s": script_path,
@@ -306,7 +385,7 @@ def import_directory(engine, csv_dir, sql_dir=_SQL_DIR_DEFAULT, schema="dbo", ti
         if existing_script and table_name in rebuild:
             if not ticket:
                 raise ValueError(f"--ticket is required to rebuild the script for '{table_name}'.")
-            script_path = rebuild_import_script(csv_path, table_name, ticket, schema=schema, sql_dir=sql_dir)
+            script_path = rebuild_import_script(csv_path, table_name, ticket, schema=schema, sql_dir=sql_dir, engine=engine)
             status = "rebuilt"
         elif existing_script:
             drift = check_drift(csv_path, existing_script)
@@ -332,7 +411,7 @@ def import_directory(engine, csv_dir, sql_dir=_SQL_DIR_DEFAULT, schema="dbo", ti
         else:
             if not ticket:
                 raise ValueError(f"--ticket is required to generate a new script for '{table_name}'.")
-            script_path = generate_import_script(csv_path, table_name, ticket, schema=schema, sql_dir=sql_dir)
+            script_path = generate_import_script(csv_path, table_name, ticket, schema=schema, sql_dir=sql_dir, engine=engine)
             status = "created"
 
         with open(script_path, encoding="utf-8") as fh:
@@ -356,35 +435,45 @@ def import_directory(engine, csv_dir, sql_dir=_SQL_DIR_DEFAULT, schema="dbo", ti
     return results
 
 
+_SOURCE_INGESTION_LOG_COLUMNS = [
+    # (name, mssql_type, sqlite_type, nullable)
+    ("TableName", "NVARCHAR(255)", "TEXT", False),
+    ("CsvPath", "NVARCHAR(1000)", "TEXT", False),
+    ("ScriptPath", "NVARCHAR(1000)", "TEXT", False),
+    ("Status", "NVARCHAR(20)", "TEXT", False),
+    ("RowCount", "INT", "INTEGER", True),  # RowCount collides with a T-SQL reserved keyword (SET ROWCOUNT/@@ROWCOUNT) -- must be quoted
+    ("StartedAt", "DATETIME2", "TEXT", False),
+    ("CompletedAt", "DATETIME2", "TEXT", False),
+    ("DurationSeconds", "FLOAT", "REAL", False),
+    ("RunBy", "NVARCHAR(128)", "TEXT", True),
+    ("DriftDetails", "NVARCHAR(1000)", "TEXT", True),
+]
+
+
 def enable_source_ingestion_logging(engine, schema="dbo"):
     """Create <schema>.SourceIngestionLog if it doesn't already exist --
     same opt-in, presence-is-the-switch convention as
     bulkops.enable_bulkops_logging. Off by default; once this table
     exists, import_directory() logs every run against this schema
     automatically."""
+    d = sql_dialect.for_engine(engine)
+    if d.table_exists(engine, schema, "SourceIngestionLog"):
+        return
+    col_defs = [d.autoincrement_pk_column_ddl("LogId")]
+    for name, mssql_t, sqlite_t, nullable in _SOURCE_INGESTION_LOG_COLUMNS:
+        col_type = mssql_t if isinstance(d, sql_dialect.MssqlDialect) else sqlite_t
+        null_sql = "NULL" if nullable else "NOT NULL"
+        col_defs.append(f"{d.quote_ident(name)} {col_type} {null_sql}")
     with engine.begin() as cx:
         cx.execute(text(
-            f"IF OBJECT_ID('{schema}.SourceIngestionLog', 'U') IS NULL "
-            f"CREATE TABLE [{schema}].[SourceIngestionLog] ("
-            "LogId INT IDENTITY(1,1) PRIMARY KEY, "
-            "TableName NVARCHAR(255) NOT NULL, "
-            "CsvPath NVARCHAR(1000) NOT NULL, "
-            "ScriptPath NVARCHAR(1000) NOT NULL, "
-            "Status NVARCHAR(20) NOT NULL, "
-            "[RowCount] INT NULL, "  # RowCount collides with a T-SQL reserved keyword (SET ROWCOUNT/@@ROWCOUNT) -- must be bracketed
-            "StartedAt DATETIME2 NOT NULL, "
-            "CompletedAt DATETIME2 NOT NULL, "
-            "DurationSeconds FLOAT NOT NULL, "
-            "RunBy NVARCHAR(128) NULL, "
-            "DriftDetails NVARCHAR(1000) NULL);"
+            f"CREATE TABLE {d.qualify(schema, 'SourceIngestionLog')} (" + ", ".join(col_defs) + ");"
         ))
 
 
 def disable_source_ingestion_logging(engine, schema="dbo"):
     """Drop <schema>.SourceIngestionLog -- permanently discards that
     schema's log history. Idempotent (no-op if never enabled)."""
-    with engine.begin() as cx:
-        cx.execute(text(
-            f"IF OBJECT_ID('{schema}.SourceIngestionLog', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[SourceIngestionLog];"
-        ))
+    d = sql_dialect.for_engine(engine)
+    if d.table_exists(engine, schema, "SourceIngestionLog"):
+        with engine.begin() as cx:
+            cx.execute(text(f"DROP TABLE {d.qualify(schema, 'SourceIngestionLog')};"))

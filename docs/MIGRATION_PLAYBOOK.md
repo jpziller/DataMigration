@@ -48,7 +48,7 @@ here's how those concepts map onto this framework:
 | Incremental replicate (changed records only) | **Not built** — a known gap, see README's "Known limitations." Would filter on `SystemModstamp` and `MERGE` into the mirror. |
 | Load a staging table into Salesforce, write Id/Error back | `python cli.py bulkops <Object> <op> <LoadTable>` |
 | Ad hoc SOQL query, results to a table or the screen | `python cli.py query "<SOQL>"` |
-| A dedicated "add a sort column" step before loading | `EXEC dbo.AddBulkLoadSortColumn` (CLAUDE.md hard rule 6) |
+| A dedicated "add a sort column" step before loading | `python cli.py add-bulk-load-sort-column` (CLAUDE.md hard rule 6) |
 | A licensed COM object / linked server connecting SQL Server to Salesforce | The Salesforce Bulk API 2.0 REST endpoints, called directly via Python (`simple-salesforce`) — no licensed component, no linked server |
 
 ## 3. Data Mapping & Templates
@@ -95,9 +95,9 @@ adjusted without re-learning the whole script:
 3. **Drop the load table** — start clean (`IF OBJECT_ID(...) DROP TABLE`).
 4. **Build the load table** — the actual transformation logic. This is
    where nearly all real migration effort goes.
-5. **Sort column** — `AddBulkLoadSortColumn`, standard on every object with
-   a parent relationship. Not optional busywork — see §6.
-6. **Dupe-check** — `CheckLoadTableDuplicateKeys` on the migration key,
+5. **Sort column** — `add-bulk-load-sort-column`, standard on every object
+   with a parent relationship. Not optional busywork — see §6.
+6. **Dupe-check** — `check-load-table-duplicate-keys` on the migration key,
    before ever touching `bulkops`.
 7. **Load** — `bulkops`, with explicit org confirmation.
 
@@ -211,17 +211,16 @@ It happens when two batches, processing concurrently, both need exclusive
 access to the same parent record (via a lookup or master-detail field) at
 the same time.
 
-- **The fix this framework already builds in**: `AddBulkLoadSortColumn`
+- **The fix this framework already builds in**: `add-bulk-load-sort-column`
   groups every child of the same parent into a contiguous range so they
   land in the same submitted batch instead of being scattered across
   batches that run concurrently. A plain `ORDER BY` on the load-building
-  query is *not* sufficient on its own — nothing guarantees a `SELECT INTO`
-  preserves that order once the rows are actually submitted in batches.
+  query is *not* sufficient on its own — nothing guarantees that order
+  survives once the rows are actually submitted in batches.
   `ROW_NUMBER() OVER (ORDER BY <parent key>)`, materialized into a real
-  `[Sort]` column, is what makes the grouping durable — and
-  `AddBulkLoadSortColumn`'s companion verification (`MAX(Sort) - MIN(Sort)
-  = COUNT(*) - 1` per parent) is what proves it actually took, rather than
-  assuming it did.
+  `[Sort]` column, is what makes the grouping durable — and this command's
+  companion verification (`MAX(Sort) - MIN(Sort) = COUNT(*) - 1` per
+  parent) is what proves it actually took, rather than assuming it did.
 - **Lookup fields** can be configured locking or non-locking, depending on
   the "what to do if the lookup record is deleted" setting — "clear the
   value" is non-locking, "don't allow deletion" is locking. Consider

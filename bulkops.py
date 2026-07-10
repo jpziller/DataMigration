@@ -1,8 +1,10 @@
-"""Bulk load operations: SQL Server load table -> Salesforce.
+"""Bulk load operations: SQL load table -> Salesforce (SQL Server or SQLite).
 
 Reads a SQL "load table", pushes insert / update / upsert / delete to
 Salesforce via Bulk API 2.0, then writes the resulting Salesforce Id and Error
-back into that table -- the full round trip a migration load needs.
+back into that table -- the full round trip a migration load needs. Every
+backend-specific SQL construct (existence checks, identifier quoting, the
+BulkOpsLog DDL, retry-table creation) goes through sql_dialect.py.
 
 RESULT MAPPING (the part everyone gets wrong):
   Bulk API 2.0 returns separate "successful" and "failed" record sets, each
@@ -34,10 +36,11 @@ rather than ported verbatim):
   Salesforce would reject the whole job or every row for the same reason,
   just after burning a batch and taking longer to find out. This is a schema/
   permission check only, not a data-content one (see
-  sql/functions/utilities/CheckLoadTableDuplicateKeys.sql for that). A
-  required-but-not-sent field on insert is reported as a warning, not a
-  hard stop -- automation could still default it, so it isn't guaranteed to
-  fail the way a missing/non-writable field is.
+  load_table_prep.check_load_table_duplicate_keys / cli.py's
+  check-load-table-duplicate-keys for that). A required-but-not-sent field
+  on insert is reported as a warning, not a hard stop -- automation could
+  still default it, so it isn't guaranteed to fail the way a missing/
+  non-writable field is.
 
 RETRY HELPER (build_retry_table):
   Copies only the failed rows (Error column populated) from a load table or
@@ -107,6 +110,39 @@ from sqlalchemy import text
 
 import batch_advisor
 import migration_run_book
+import sql_dialect
+
+
+# (name, mssql_type, sqlite_type, nullable) for BulkOpsLog's original columns;
+# (name, mssql_type, sqlite_type) for the 3 added later (ROADMAP #15) --
+# always nullable, added idempotently to an existing table via ALTER TABLE.
+_BULKOPS_LOG_BASE_COLUMNS = [
+    ("Operation", "NVARCHAR(20)", "TEXT", False),
+    ("ObjectName", "NVARCHAR(255)", "TEXT", False),
+    ("SourceTable", "NVARCHAR(255)", "TEXT", False),
+    ("TargetSchema", "NVARCHAR(128)", "TEXT", False),
+    ("RecordsSubmitted", "INT", "INTEGER", False),
+    ("RecordsSucceeded", "INT", "INTEGER", False),
+    ("RecordsFailed", "INT", "INTEGER", False),
+    ("RecordsAmbiguous", "INT", "INTEGER", False),
+    ("ExternalIdNotFound", "INT", "INTEGER", False),
+    ("JobCount", "INT", "INTEGER", False),
+    ("EmailDeliverability", "NVARCHAR(255)", "TEXT", True),
+    ("WrittenTo", "NVARCHAR(255)", "TEXT", False),
+    ("StartedAt", "DATETIME2", "TEXT", False),
+    ("CompletedAt", "DATETIME2", "TEXT", False),
+    ("DurationSeconds", "FLOAT", "REAL", False),
+    ("RunBy", "NVARCHAR(128)", "TEXT", True),
+]
+_BULKOPS_LOG_UPGRADE_COLUMNS = [
+    ("BatchSize", "INT", "INTEGER"),
+    ("BatchSizeSource", "NVARCHAR(20)", "TEXT"),
+    ("LockErrorCount", "INT", "INTEGER"),
+]
+
+
+def _col_type(d, mssql_type, sqlite_type):
+    return mssql_type if isinstance(d, sql_dialect.MssqlDialect) else sqlite_type
 
 
 def _read_result_csv(csv_text):
@@ -218,61 +254,51 @@ def enable_bulkops_logging(engine, schema="dbo"):
     an existing table from before they were introduced -- re-running enable
     on an already-enabled schema upgrades it in place rather than requiring
     disable+re-enable (which would discard log history)."""
-    with engine.begin() as cx:
-        cx.execute(text(
-            f"IF OBJECT_ID('{schema}.BulkOpsLog', 'U') IS NULL "
-            f"CREATE TABLE [{schema}].[BulkOpsLog] ("
-            "LogId INT IDENTITY(1,1) PRIMARY KEY, "
-            "Operation NVARCHAR(20) NOT NULL, "
-            "ObjectName NVARCHAR(255) NOT NULL, "
-            "SourceTable NVARCHAR(255) NOT NULL, "
-            "TargetSchema NVARCHAR(128) NOT NULL, "
-            "RecordsSubmitted INT NOT NULL, "
-            "RecordsSucceeded INT NOT NULL, "
-            "RecordsFailed INT NOT NULL, "
-            "RecordsAmbiguous INT NOT NULL, "
-            "ExternalIdNotFound INT NOT NULL, "
-            "JobCount INT NOT NULL, "
-            "EmailDeliverability NVARCHAR(255) NULL, "
-            "WrittenTo NVARCHAR(255) NOT NULL, "
-            "StartedAt DATETIME2 NOT NULL, "
-            "CompletedAt DATETIME2 NOT NULL, "
-            "DurationSeconds FLOAT NOT NULL, "
-            "RunBy NVARCHAR(128) NULL, "
-            "BatchSize INT NULL, "
-            "BatchSizeSource NVARCHAR(20) NULL, "
-            "LockErrorCount INT NULL);"
-        ))
-        for col, coltype in (("BatchSize", "INT"), ("BatchSizeSource", "NVARCHAR(20)"),
-                             ("LockErrorCount", "INT")):
-            cx.execute(text(
-                f"IF COL_LENGTH('{schema}.BulkOpsLog', '{col}') IS NULL "
-                f"ALTER TABLE [{schema}].[BulkOpsLog] ADD [{col}] {coltype} NULL;"
-            ))
+    d = sql_dialect.for_engine(engine)
+    qualified = d.qualify(schema, "BulkOpsLog")
+
+    if not d.table_exists(engine, schema, "BulkOpsLog"):
+        col_defs = [d.autoincrement_pk_column_ddl("LogId")]
+        for name, mssql_t, sqlite_t, nullable in _BULKOPS_LOG_BASE_COLUMNS:
+            null_sql = "NULL" if nullable else "NOT NULL"
+            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} {null_sql}")
+        for name, mssql_t, sqlite_t in _BULKOPS_LOG_UPGRADE_COLUMNS:
+            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} NULL")
+        with engine.begin() as cx:
+            cx.execute(text(f"CREATE TABLE {qualified} (" + ", ".join(col_defs) + ");"))
+        return
+
+    missing = [
+        (name, mssql_t, sqlite_t) for name, mssql_t, sqlite_t in _BULKOPS_LOG_UPGRADE_COLUMNS
+        if not d.column_exists(engine, schema, "BulkOpsLog", name)
+    ]
+    if missing:
+        with engine.begin() as cx:
+            for name, mssql_t, sqlite_t in missing:
+                cx.execute(text(
+                    f"ALTER TABLE {qualified} ADD {d.quote_ident(name)} "
+                    f"{_col_type(d, mssql_t, sqlite_t)} NULL;"
+                ))
 
 
 def disable_bulkops_logging(engine, schema="dbo"):
     """Drop <schema>.BulkOpsLog -- permanently discards that schema's log
     history. Idempotent (no-op if logging was never enabled there)."""
-    with engine.begin() as cx:
-        cx.execute(text(
-            f"IF OBJECT_ID('{schema}.BulkOpsLog', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[BulkOpsLog];"
-        ))
+    d = sql_dialect.for_engine(engine)
+    if d.table_exists(engine, schema, "BulkOpsLog"):
+        with engine.begin() as cx:
+            cx.execute(text(f"DROP TABLE {d.qualify(schema, 'BulkOpsLog')};"))
 
 
 def _bulkops_log_table_exists(engine, schema):
-    with engine.connect() as cx:
-        return cx.execute(
-            text("SELECT OBJECT_ID(:t, 'U')"),
-            {"t": f"{schema}.BulkOpsLog"},
-        ).scalar() is not None
+    return sql_dialect.for_engine(engine).table_exists(engine, schema, "BulkOpsLog")
 
 
 def _write_bulkops_log_row(engine, schema, row):
+    qualified = sql_dialect.for_engine(engine).qualify(schema, "BulkOpsLog")
     with engine.begin() as cx:
         cx.execute(text(
-            f"INSERT INTO [{schema}].[BulkOpsLog] "
+            f"INSERT INTO {qualified} "
             "(Operation, ObjectName, SourceTable, TargetSchema, RecordsSubmitted, "
             "RecordsSucceeded, RecordsFailed, RecordsAmbiguous, ExternalIdNotFound, "
             "JobCount, EmailDeliverability, WrittenTo, StartedAt, CompletedAt, "
@@ -336,18 +362,16 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         batch_size_source = "static"
 
     # If the load table carries a [Sort] column (see
-    # sql/functions/utilities/AddBulkLoadSortColumn.sql), submit rows in that
-    # order so parent/child rows land in the same Bulk API batch rather than
-    # being scattered across batches that process concurrently and
+    # load_table_prep.add_bulk_load_sort_column / cli.py's
+    # add-bulk-load-sort-column), submit rows in that order so parent/child
+    # rows land in the same Bulk API batch rather than being scattered
+    # across batches that process concurrently and
     # lock-contend on a shared parent record.
-    with engine.connect() as cx:
-        has_sort_column = cx.execute(
-            text("SELECT COL_LENGTH(:t, 'Sort')"),
-            {"t": f"{schema}.{source_table}"},
-        ).scalar() is not None
-    order_by = " ORDER BY [Sort]" if has_sort_column else ""
+    d = sql_dialect.for_engine(engine)
+    has_sort_column = d.column_exists(engine, schema, source_table, "Sort")
+    order_by = f" ORDER BY {d.quote_ident('Sort')}" if has_sort_column else ""
 
-    df = pd.read_sql(f"SELECT * FROM [{schema}].[{source_table}]{order_by}", engine)
+    df = pd.read_sql(f"SELECT * FROM {d.qualify(schema, source_table)}{order_by}", engine)
 
     # Delete-by-external-id: resolve to real Ids first (see this module's
     # "DELETE BY EXTERNAL ID" docstring section). skip_mask marks rows with
@@ -515,7 +539,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     # Activity logging -- opt-in per schema, see this module's ACTIVITY
     # LOGGING docstring section. Only runs if the architect has already
     # created <schema>.BulkOpsLog via enable_bulkops_logging(); otherwise
-    # this is a single cheap OBJECT_ID lookup and nothing more happens.
+    # this is a single cheap table-existence check and nothing more happens.
     summary["logged"] = False
     if _bulkops_log_table_exists(engine, schema):
         try:
@@ -621,16 +645,21 @@ def purge_by_filter(sf, engine, object_name, where, schema="dbo",
 
 def _writeback_inplace(engine, schema, table, df, key_column,
                        id_column, error_column):
+    d = sql_dialect.for_engine(engine)
+    qualified = d.qualify(schema, table)
+    missing_cols = [
+        col for col in (id_column, error_column)
+        if not d.column_exists(engine, schema, table, col)
+    ]
     with engine.begin() as cx:
-        for col in (id_column, error_column):
+        for col in missing_cols:
             cx.execute(text(
-                f"IF COL_LENGTH('{schema}.{table}', '{col}') IS NULL "
-                f"ALTER TABLE [{schema}].[{table}] ADD [{col}] NVARCHAR(MAX) NULL;"
+                f"ALTER TABLE {qualified} ADD {d.quote_ident(col)} {d.raw_text_type()} NULL;"
             ))
         stmt = text(
-            f"UPDATE [{schema}].[{table}] "
-            f"SET [{id_column}] = :rid, [{error_column}] = :rerr "
-            f"WHERE [{key_column}] = :k"
+            f"UPDATE {qualified} "
+            f"SET {d.quote_ident(id_column)} = :rid, {d.quote_ident(error_column)} = :rerr "
+            f"WHERE {d.quote_ident(key_column)} = :k"
         )
         rows = [
             {"rid": r["_result_id"] if pd.notna(r["_result_id"]) else None,
@@ -658,31 +687,31 @@ def build_retry_table(engine, table, schema="dbo", error_column="Error", retry_s
     for resubmission via a normal bulk_op() call against just what failed,
     not the whole original load. Never resubmits anything itself; that's a
     separate, explicit bulkops call against the returned table name."""
-    with engine.connect() as cx:
-        has_error_col = cx.execute(
-            text("SELECT COL_LENGTH(:t, :c)"),
-            {"t": f"{schema}.{table}", "c": error_column},
-        ).scalar() is not None
-    if not has_error_col:
+    d = sql_dialect.for_engine(engine)
+    if not d.column_exists(engine, schema, table, error_column):
         raise ValueError(
             f"{schema}.{table} has no [{error_column}] column -- has bulkops been run against it yet?"
         )
 
     retry_table = f"{table}{retry_suffix}"
+    qualified_retry = d.qualify(schema, retry_table)
+    qualified_source = d.qualify(schema, table)
+
+    if d.table_exists(engine, schema, retry_table):
+        with engine.begin() as cx:
+            cx.execute(text(f"DROP TABLE {qualified_retry};"))
+
+    create_sql = d.create_table_as_select_sql(
+        schema, retry_table, "*",
+        f"FROM {qualified_source} WHERE {d.quote_ident(error_column)} IS NOT NULL"
+    )
     with engine.begin() as cx:
-        cx.execute(text(
-            f"IF OBJECT_ID('{schema}.{retry_table}', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[{retry_table}];"
-        ))
-        cx.execute(text(
-            f"SELECT * INTO [{schema}].[{retry_table}] "
-            f"FROM [{schema}].[{table}] WHERE [{error_column}] IS NOT NULL;"
-        ))
-        count = cx.execute(text(f"SELECT COUNT(*) FROM [{schema}].[{retry_table}]")).scalar()
+        cx.execute(text(create_sql + ";"))
+        count = cx.execute(text(f"SELECT COUNT(*) FROM {qualified_retry}")).scalar()
         if count == 0:
-            # SELECT INTO creates the table even when the WHERE clause
-            # matches nothing -- don't leave a stray empty table behind
-            # just because a load had no failures to retry.
-            cx.execute(text(f"DROP TABLE [{schema}].[{retry_table}];"))
+            # SELECT INTO / CREATE TABLE AS SELECT creates the table even
+            # when the WHERE clause matches nothing -- don't leave a stray
+            # empty table behind just because a load had no failures to retry.
+            cx.execute(text(f"DROP TABLE {qualified_retry};"))
 
     return f"{schema}.{retry_table}", count
