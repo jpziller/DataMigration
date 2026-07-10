@@ -17,7 +17,17 @@ from config import Settings
 # register explicit ones so bulkops.py/source_ingestion.py's log tables
 # (StartedAt/CompletedAt etc., passed as real Python datetimes) keep working
 # without relying on a default that's already on its way out.
-sqlite3.register_adapter(datetime.datetime, lambda dt: dt.isoformat(sep=" "))
+#
+# sep="T" (the real ISO 8601/XSD dateTime separator, and .isoformat()'s own
+# default) is required here, not just cosmetic -- confirmed live: a
+# space-separated value (e.g. "2025-08-03 17:16:48+00:00") is a real XSD
+# dateTime parse failure against Salesforce's Bulk API ("is not a valid
+# value for the type xsd:dateTime"), not merely non-canonical. This adapter
+# is process-global (every datetime.datetime written to sqlite3 anywhere in
+# this process goes through it), so getting the separator wrong here doesn't
+# just affect the two log tables it was written for -- it silently
+# corrupts any real datetime-typed business column too.
+sqlite3.register_adapter(datetime.datetime, lambda dt: dt.isoformat(sep="T"))
 sqlite3.register_adapter(datetime.date, lambda d: d.isoformat())
 
 

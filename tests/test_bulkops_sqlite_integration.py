@@ -267,3 +267,76 @@ def test_bulk_op_aggregates_successes_and_failures_across_multiple_jobs(sqlite_e
     succeeded = result.loc[result["Error"].isna(), "LegacyId__c"].tolist()
     assert sorted(succeeded) == ["A1", "A2", "A4", "A5"]
     assert result.loc[result["LegacyId__c"] == "A1", "Id"].notna().iloc[0]
+
+
+def test_bulk_op_default_fingerprint_breaks_when_salesforce_reformats_a_sent_column(sqlite_engine, tmp_path):
+    """Regression test for a real bug found via a live migration run: Bulk
+    API 2.0 echoed a sent datetime "2024-04-23T09:56:37+00:00" back as
+    "2024-04-23T09:56:37.000Z" -- same instant, different string. Since
+    the default fingerprint joins every sent column, that one reformatted
+    column broke matching for the WHOLE row -- confirmed here with a
+    minimal repro: fingerprinting by all sent columns (the default) fails
+    to match even though the "returned" data is for the exact same row."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1],
+        "LegacyId__c": ["A1"],
+        "SomeDate": ["2024-04-23T09:56:37+00:00"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    fields = describe_fields(["LegacyId__c", "SomeDate"])
+    sf = StubSF({"Account": fields}, {"Account": StubBulkHandler(
+        # Salesforce echoes SomeDate back reformatted -- everything else matches.
+        "LegacyId__c,SomeDate,sf__Id\nA1,2024-04-23T09:56:37.000Z,001XXXXXXXXXXXAAA\n", "",
+    )})
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    # The bug: neither succeeded nor failed -- the fingerprint just never matches.
+    assert summary["succeeded"] == 0
+    assert summary["failed"] == 0
+
+
+def test_bulk_op_fingerprint_columns_fixes_the_reformatted_column_case(sqlite_engine, tmp_path):
+    """Same scenario as the test above, but passing fingerprint_columns to
+    restrict matching to the migration key alone -- the fix."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1],
+        "LegacyId__c": ["A1"],
+        "SomeDate": ["2024-04-23T09:56:37+00:00"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    fields = describe_fields(["LegacyId__c", "SomeDate"])
+    sf = StubSF({"Account": fields}, {"Account": StubBulkHandler(
+        "LegacyId__c,SomeDate,sf__Id\nA1,2024-04-23T09:56:37.000Z,001XXXXXXXXXXXAAA\n", "",
+    )})
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+        fingerprint_columns=["LegacyId__c"],
+    )
+    assert summary["succeeded"] == 1
+    assert summary["failed"] == 0
+
+
+def test_bulk_op_fingerprint_columns_rejects_column_not_in_sent(sqlite_engine, tmp_path):
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({"LoadId": [1], "LegacyId__c": ["A1"], "Name": ["Row1"]})
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+    sf = _stub_sf(StubBulkHandler("LegacyId__c,Name,sf__Id\nA1,Row1,001X\n", ""))
+
+    with pytest.raises(ValueError, match="fingerprint_columns must be a subset"):
+        bo.bulk_op(
+            sf, engine, "Account", "insert", "Account_Load",
+            key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+            email_deliverability="no-access",
+            fingerprint_columns=["NotSentColumn"],
+        )

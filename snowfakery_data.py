@@ -39,6 +39,7 @@ docs alone):
     can be expressed via containment.
 """
 import os
+from datetime import datetime
 
 import pandas as pd
 import yaml
@@ -120,6 +121,32 @@ def _snowfakery_field(field):
         return {"fake": "Word"}
 
     return None
+
+
+def _fix_snowfakery_datetime_strings(df, mapped_fields):
+    """Snowfakery's own JSON output serializes a fake.DateTimeBetween value
+    via Python's default str(datetime) representation -- space-separated,
+    tz-aware (e.g. "2024-07-29 22:38:35+00:00") -- confirmed live: this is
+    a genuine XSD dateTime parse failure against Salesforce's Bulk API
+    ("is not a valid value for the type xsd:dateTime"), not merely
+    non-canonical, and it's baked into the raw JSON before pandas/
+    sql_dialect.py's own dtype-based normalize_datetime_columns() ever
+    gets a chance to see a real datetime64 column -- pandas reads it as a
+    plain string. Reformat every field the real describe() says is
+    "datetime" specifically (not a heuristic), via
+    datetime.fromisoformat() (accepts the space-separated form) round-
+    tripped through .isoformat() (defaults to 'T')."""
+    df = df.copy()
+    for field in mapped_fields:
+        if field["type"] != "datetime":
+            continue
+        name = field["name"]
+        if name not in df.columns:
+            continue
+        df[name] = df[name].map(
+            lambda v: datetime.fromisoformat(v).isoformat() if isinstance(v, str) and v else v
+        )
+    return df
 
 
 def object_field_schema(sf, object_name):
@@ -306,6 +333,7 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
         object_rows = object_rows.rename(columns={"id": "_MockRowId"})
 
         object_rows = truncate_to_field_lengths(object_rows, mapped_fields)
+        object_rows = _fix_snowfakery_datetime_strings(object_rows, mapped_fields)
 
         int_type = d.sf_type_to_sql({"type": "int"})
         extra_cols_sql = []
@@ -326,6 +354,7 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
                 cx.execute(text(f"DROP TABLE {qualified};"))
             cx.execute(text(f"CREATE TABLE {qualified} (\n    {cols_sql}\n);"))
 
+        object_rows = d.normalize_datetime_columns(object_rows)
         object_rows.to_sql(table_name, engine, schema=schema, if_exists="append", index=False)
         rows_written[name] = len(object_rows)
 

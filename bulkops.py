@@ -311,13 +311,32 @@ def _write_bulkops_log_row(engine, schema, row):
 
 
 def bulk_op(sf, engine, object_name, operation, source_table,
-            send_columns=None, external_id=None,
+            send_columns=None, external_id=None, fingerprint_columns=None,
             key_column="LoadId", id_column="Id", error_column="Error",
             ref_prefix="REF_", schema="dbo", stage_dir="_stage",
             email_deliverability=None, confirm_external_email_risk=False,
             batch_size="auto", run_book_path=None, run_book_tab=None):
-    """See this module's docstring for the full design. batch_size (ROADMAP
-    #15): "auto" (default) asks batch_advisor.recommend_batch_size() for a
+    """See this module's docstring for the full design.
+
+    fingerprint_columns (optional, must be a subset of the sent columns):
+    restrict RESULT MAPPING's fingerprint to just these columns instead of
+    every sent column. Confirmed live -- a real, previously-undiscovered
+    bug, not SQL-backend-specific: Bulk API 2.0 can echo a sent value back
+    in a different (but semantically identical) string representation than
+    what was submitted -- e.g. a sent datetime "2024-04-23T09:56:37+00:00"
+    comes back as "2024-04-23T09:56:37.000Z". _fingerprint() joins every
+    echoed column into one match key, so a single reformatted column
+    silently zeroes out matching for the ENTIRE row (every row reports as
+    neither succeeded nor failed, even though the real Salesforce DML
+    genuinely happened) -- not an "ambiguous" count, since the fingerprints
+    just never intersect at all between the submitted and returned sides.
+    Pass the migration key alone here (it's already required to be unique
+    by hard rule 4) whenever any OTHER sent column risks this -- datetime
+    fields are the confirmed case, but anything Salesforce might normalize
+    on echo is a candidate. Defaults to None: today's original behavior,
+    fingerprinting by every sent column, unchanged for any existing caller.
+
+    batch_size (ROADMAP #15): "auto" (default) asks batch_advisor.recommend_batch_size() for a
     ladder-rung recommendation and prints its rationale before the load runs;
     an int is honored verbatim (source "static") -- a scripted value always
     wins and stays, same as every other established migration tool's
@@ -442,6 +461,14 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     if missing:
         raise ValueError(f"Columns not in {source_table}: {missing}")
 
+    if fingerprint_columns is not None:
+        not_sent = [c for c in fingerprint_columns if c not in sent]
+        if not_sent:
+            raise ValueError(
+                f"fingerprint_columns must be a subset of the sent columns -- "
+                f"not sent: {not_sent}"
+            )
+
     preflight = _preflight_check(sf, object_name, operation, sent, id_column=id_column)
     fatal_details = []
     if preflight["not_a_real_field"]:
@@ -495,8 +522,12 @@ def bulk_op(sf, engine, object_name, operation, source_table,
                              ignore_index=True) if any(not f.empty for f in fail_frames) else pd.DataFrame()
 
         # Build fingerprint -> (Id, Error) using the sent business columns that are
-        # echoed back in the result files.
-        echo_cols = [c for c in sent if (
+        # echoed back in the result files -- or just fingerprint_columns, if given
+        # (see this function's own docstring for why that's sometimes necessary:
+        # a single echoed-back column that Salesforce reformats, e.g. a datetime
+        # field, otherwise breaks matching for the whole row).
+        fingerprint_source = fingerprint_columns if fingerprint_columns is not None else sent
+        echo_cols = [c for c in fingerprint_source if (
             (not successes.empty and c in successes.columns) or
             (not failures.empty and c in failures.columns)
         )]

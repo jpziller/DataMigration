@@ -18,6 +18,7 @@ one here.
 """
 from abc import ABC, abstractmethod
 
+import pandas as pd
 from sqlalchemy import text
 
 import type_map as mssql_type_map
@@ -46,6 +47,12 @@ class SqlDialect(ABC):
         ...
 
     @abstractmethod
+    def list_columns(self, engine, schema, table):
+        """Ordered [(column_name, data_type), ...] for an existing table --
+        the INFORMATION_SCHEMA.COLUMNS-shaped info mapping_doc.py/others need,
+        without assuming SQL Server's own INFORMATION_SCHEMA is available."""
+
+    @abstractmethod
     def create_table_as_select_sql(self, schema, new_table, columns_sql, rest_sql):
         """rest_sql is 'FROM ... [WHERE ...]', with table names already
         run through self.qualify(). columns_sql is the select-list, e.g. '*'."""
@@ -61,6 +68,12 @@ class SqlDialect(ABC):
     @abstractmethod
     def sf_type_to_sql(self, field):
         """Salesforce describe() field -> this backend's column type."""
+
+    @abstractmethod
+    def normalize_datetime_columns(self, df):
+        """Return df with any datetime64-dtype column converted to a
+        string representation safe for this backend's own to_sql() write
+        path -- see SqliteDialect's own docstring for why this exists."""
 
 
 class MssqlDialect(SqlDialect):
@@ -85,6 +98,17 @@ class MssqlDialect(SqlDialect):
                 text("SELECT COL_LENGTH(:t, :c)"), {"t": f"{schema}.{table}", "c": column}
             ).scalar() is not None
 
+    def list_columns(self, engine, schema, table):
+        with engine.connect() as cx:
+            rows = cx.execute(
+                text(
+                    "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table ORDER BY ORDINAL_POSITION"
+                ),
+                {"schema": schema, "table": table},
+            ).all()
+        return [(r[0], r[1]) for r in rows]
+
     def create_table_as_select_sql(self, schema, new_table, columns_sql, rest_sql):
         return f"SELECT {columns_sql} INTO {self.qualify(schema, new_table)} {rest_sql}"
 
@@ -96,6 +120,12 @@ class MssqlDialect(SqlDialect):
 
     def sf_type_to_sql(self, field):
         return mssql_type_map.sf_type_to_sql(field)
+
+    def normalize_datetime_columns(self, df):
+        # pyodbc's own native datetime handling already round-trips a real
+        # Python/pandas datetime object into DATETIME2 correctly -- no
+        # string-formatting step needed here.
+        return df
 
 
 class SqliteDialect(SqlDialect):
@@ -119,6 +149,12 @@ class SqliteDialect(SqlDialect):
         with engine.connect() as cx:
             rows = cx.execute(text(f'PRAGMA "{schema}".table_info("{table}")')).fetchall()
             return any(r[1] == column for r in rows)
+
+    def list_columns(self, engine, schema, table):
+        with engine.connect() as cx:
+            rows = cx.execute(text(f'PRAGMA "{schema}".table_info("{table}")')).fetchall()
+        # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+        return [(r[1], r[2]) for r in rows]
 
     def create_table_as_select_sql(self, schema, new_table, columns_sql, rest_sql):
         # No column affinity carries over from CTAS in SQLite (unlike SQL
@@ -149,6 +185,23 @@ class SqliteDialect(SqlDialect):
         # anything unrecognized: TEXT covers all of these (dates/datetimes
         # stored as ISO8601 text, SQLite's own convention).
         return "TEXT"
+
+    def normalize_datetime_columns(self, df):
+        # Confirmed live, a real bug: SQLAlchemy's own sqlite DateTime type
+        # (not sqlite3's own adapter -- pandas .to_sql() goes through
+        # SQLAlchemy's type system, bypassing sql_client.py's
+        # sqlite3.register_adapter() entirely) serializes a datetime64
+        # column as "YYYY-MM-DD HH:MM:SS.ffffff" -- a space separator, not
+        # 'T'. That's a genuine XSD dateTime parse failure against
+        # Salesforce's Bulk API ("is not a valid value for the type
+        # xsd:dateTime"), not merely non-canonical -- it broke every row
+        # of a real bulkops insert the first time a mocked datetime field
+        # (Contact.EmailBouncedDate) went through this path unconverted.
+        df = df.copy()
+        for col in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                df[col] = df[col].dt.strftime("%Y-%m-%dT%H:%M:%S").where(df[col].notna(), None)
+        return df
 
 
 _DIALECTS = {"mssql": MssqlDialect(), "sqlite": SqliteDialect()}

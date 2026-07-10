@@ -35,6 +35,8 @@ import re
 import openpyxl
 from sqlalchemy import text
 
+import sql_dialect
+
 _INSERT_INTO_RE = re.compile(
     r"INSERT\s+INTO\s+(?:\[?[\w]+\]?\.)?\[?(\w+)\]?\s*\(([^)]+)\)",
     re.IGNORECASE,
@@ -64,34 +66,27 @@ def _safe_sheet_name(name):
     return _INVALID_SHEET_CHARS.sub("_", name)[:31]
 
 
-def _table_exists(cx, schema, table):
-    return cx.execute(text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.{table}"}).scalar() is not None
-
-
 def generate_mapping_workbook(sf, target_object, output_path, engine, source_table, schema="dbo"):
-    with engine.connect() as cx:
-        source_cols = cx.execute(
-            text(
-                "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
-                "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table ORDER BY ORDINAL_POSITION"
-            ),
-            {"schema": schema, "table": source_table},
-        ).mappings().all()
+    d = sql_dialect.for_engine(engine)
+    source_cols = [{"COLUMN_NAME": name, "DATA_TYPE": dtype}
+                   for name, dtype in d.list_columns(engine, schema, source_table)]
 
-        if not source_cols:
-            raise ValueError(f"No such table: {schema}.{source_table}")
+    if not source_cols:
+        raise ValueError(f"No such table: {schema}.{source_table}")
 
-        profile_by_field = {}
-        if _table_exists(cx, schema, "FieldProfile"):
+    profile_by_field = {}
+    if d.table_exists(engine, schema, "FieldProfile"):
+        qualified = d.qualify(schema, "FieldProfile")
+        with engine.connect() as cx:
             profile_rows = cx.execute(
                 text(
                     f"SELECT FieldName, TotalRows, PopulatedCount, PopulatedPct "
-                    f"FROM [{schema}].[FieldProfile] "
+                    f"FROM {qualified} "
                     "WHERE ObjectOrTable = :table AND SourceType = 'sql_table'"
                 ),
                 {"table": source_table},
             ).mappings().all()
-            profile_by_field = {r["FieldName"]: r for r in profile_rows}
+        profile_by_field = {r["FieldName"]: r for r in profile_rows}
 
     sheet_name = _safe_sheet_name(target_object)
     if os.path.exists(output_path):

@@ -61,6 +61,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from sqlalchemy import text
 
+import sql_dialect
+
 _TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "docs", "MIGRATION_RUN_BOOK_TEMPLATE.md")
 _TRANSFORMS_DIR = os.path.join(os.path.dirname(__file__), "sql", "transformations")
 _REPO_ROOT = os.path.dirname(__file__)
@@ -184,10 +186,6 @@ def _parse_template(md_path):
         current["rows"].append(cells)
 
     return phases
-
-
-def _table_exists(cx, schema, table):
-    return cx.execute(text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.{table}"}).scalar() is not None
 
 
 def _save_workbook(wb, path):
@@ -402,20 +400,21 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
     in_scope = set(object_names)
     github_url = _github_url(git_info["remote_url"]) if git_info else None
 
+    d = sql_dialect.for_engine(engine)
+    if not d.table_exists(engine, schema, "ObjectLoadOrder"):
+        raise ValueError(
+            f"{schema}.ObjectLoadOrder doesn't exist yet -- run "
+            f"analyze-load-order {' '.join(object_names)} first, then retry."
+        )
     with engine.connect() as cx:
-        if not _table_exists(cx, schema, "ObjectLoadOrder"):
-            raise ValueError(
-                f"{schema}.ObjectLoadOrder doesn't exist yet -- run "
-                f"analyze-load-order {' '.join(object_names)} first, then retry."
-            )
         order_rows = cx.execute(
-            text(f"SELECT ObjectName, LoadLevel, LoadSequence FROM [{schema}].[ObjectLoadOrder]")
+            text(f"SELECT ObjectName, LoadLevel, LoadSequence FROM {d.qualify(schema, 'ObjectLoadOrder')}")
         ).mappings().all()
 
         edge_rows = []
-        if _table_exists(cx, schema, "ObjectDependency"):
+        if d.table_exists(engine, schema, "ObjectDependency"):
             edge_rows = cx.execute(
-                text(f"SELECT ChildObject, ParentObject FROM [{schema}].[ObjectDependency]")
+                text(f"SELECT ChildObject, ParentObject FROM {d.qualify(schema, 'ObjectDependency')}")
             ).mappings().all()
 
     order_rows = [r for r in order_rows if r["ObjectName"] in in_scope]
@@ -777,16 +776,17 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
 
     last_synced = ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2).value or 0
 
-    with engine.connect() as cx:
-        if not _table_exists(cx, schema, "BulkOpsLog"):
-            return {"synced": 0, "inserted": 0, "updated": 0,
-                    "message": f"{schema}.BulkOpsLog doesn't exist yet -- nothing to sync."}
+    d = sql_dialect.for_engine(engine)
+    if not d.table_exists(engine, schema, "BulkOpsLog"):
+        return {"synced": 0, "inserted": 0, "updated": 0,
+                "message": f"{schema}.BulkOpsLog doesn't exist yet -- nothing to sync."}
 
+    with engine.connect() as cx:
         new_rows = cx.execute(
             text(
                 f"SELECT LogId, ObjectName, Operation, TargetSchema, RecordsSubmitted, "
                 f"RecordsSucceeded, RecordsFailed, StartedAt, CompletedAt, RunBy, JobCount "
-                f"FROM [{schema}].[BulkOpsLog] WHERE LogId > :last ORDER BY LogId"
+                f"FROM {d.qualify(schema, 'BulkOpsLog')} WHERE LogId > :last ORDER BY LogId"
             ),
             {"last": last_synced},
         ).mappings().all()
@@ -855,15 +855,16 @@ def sync_source_ingestion_to_run_book(engine, path, tab_name, schema="dbo"):
 
     last_synced = ws.cell(row=_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID, column=2).value or 0
 
-    with engine.connect() as cx:
-        if not _table_exists(cx, schema, "SourceIngestionLog"):
-            return {"synced": 0, "inserted": 0, "updated": 0,
-                    "message": f"{schema}.SourceIngestionLog doesn't exist yet -- nothing to sync."}
+    d = sql_dialect.for_engine(engine)
+    if not d.table_exists(engine, schema, "SourceIngestionLog"):
+        return {"synced": 0, "inserted": 0, "updated": 0,
+                "message": f"{schema}.SourceIngestionLog doesn't exist yet -- nothing to sync."}
 
+    with engine.connect() as cx:
         new_rows = cx.execute(
             text(
-                f"SELECT LogId, TableName, Status, [RowCount], StartedAt, CompletedAt, RunBy, DriftDetails "
-                f"FROM [{schema}].[SourceIngestionLog] WHERE LogId > :last ORDER BY LogId"
+                f"SELECT LogId, TableName, Status, {d.quote_ident('RowCount')}, StartedAt, CompletedAt, RunBy, DriftDetails "
+                f"FROM {d.qualify(schema, 'SourceIngestionLog')} WHERE LogId > :last ORDER BY LogId"
             ),
             {"last": last_synced},
         ).mappings().all()
