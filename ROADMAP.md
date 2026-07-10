@@ -92,6 +92,7 @@ summarizes.
 | 54 | Chat-driven human-in-the-loop alerting/control (Slack/Teams) | Not built — roadmap idea per explicit request | — | Idea: outbound alerts to Slack/Teams instead of email (low-risk, near-term), and further out, driving a production run from Slack itself — the latter needs a real architecture decision (listener vs. polling) that would require revisiting `docs/SECURITY_OVERVIEW.md`'s current "no network listener" trust model. |
 | 55 | `REF_`-prefixed human-only audit columns, excluded from bulkops | **Built**, hard rule 13 | `--ref-prefix` (default `REF_`) | Raised directly from real DBAmp-era experience: a `REF_`-prefixed Load table column is a human-only SQL-side audit field, excluded from the auto-derived sent-column list and from the pre-flight "not a real field" check — never reaches the API, never aborts the load. |
 | 56 | Duplicate target-field detection (scripts + spreadsheets) | **Built**, hard rule 14 | `check-mapping-balance` (extended), `import-csv-directory` | Raised directly: a single `CREATE TABLE`/`INSERT INTO` column list, or a single mapping-doc sheet, must never target the same field twice — different scripts/sheets doing so is fine and expected. `check-mapping-balance` reports both `duplicate_target_fields` and `duplicate_implemented_columns`; `import-csv-directory` refuses a CSV whose own header already repeats a column. |
+| 57 | Data model ERD diagrams — source subject-area models + target model, SDMN-inspired | **Built** | `generate-target-data-model`, `generate-source-data-model` | Mermaid ERDs approximating Salesforce Data Model Notation (verified against the real SDMN guide — its per-entity color/border coding and diamond relationship symbol genuinely can't be reproduced in Mermaid; its solid-vs-dashed identifying/non-identifying line distinction can, and maps onto master-detail vs lookup). Target model relationships are real (`load_order.build_dependency_edges()`); source model relationships are a naming-convention guess only, always labeled and reported for review, never presented as confirmed. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -2733,6 +2734,69 @@ gained `_check_no_duplicate_columns()`, called from
 repeated CSV column name would otherwise fail with a confusing raw SQL
 Server "column name … specified more than once" error partway through a
 `CREATE TABLE`.
+
+## 57. Data model ERD diagrams — source subject-area models + target model, SDMN-inspired (built)
+
+Requested directly: generate Mermaid ERDs — one or more **source** models
+grouped by subject area, plus a **target** model of core + custom
+Salesforce objects — styled to approximate Salesforce's own official
+**Salesforce Data Model Notation (SDMN)**, importable into Lucid.
+
+**Verified against the real spec before promising anything**
+(`developer.salesforce.com`'s SDMN guide — `architect.salesforce.com`'s
+reference-diagrams intro 403'd; the Data Cloud data-model overview page
+just points back to the same SDMN doc rather than adding its own
+conventions): SDMN encodes real information in per-entity fill color and
+border style (solid/dashed/dotted/none, indicating license/extension
+status) and a **diamond symbol** specifically for master-detail vs a
+plain line for lookup vs a curved line for recursive relationships.
+Mermaid's `erDiagram` cannot reproduce per-entity fill/border styling or
+a diamond relationship symbol — genuine gaps, not cosmetic ones, disclosed
+up front rather than glossed over.
+
+**Real find, not a workaround**: Mermaid's identifying (`--`, solid) vs
+non-identifying (`..`, dashed) relationship-line distinction maps
+naturally onto master-detail vs lookup — confirmed against Mermaid's own
+current `erDiagram` syntax docs, not assumed. Asked directly, given the
+unavoidable gap: build the best Mermaid approximation now (solid/dashed
+lines, `PK`/`FK` labels, crow's-foot cardinality, relationship labels)
+rather than chase pixel-perfect SDMN fidelity — colors/borders get
+polished by hand in Lucid after import if that distinction matters.
+
+**What shipped**, new module `data_model_diagram.py`:
+- **Target model** (`generate_target_model_diagram`) — fully automatable,
+  no reimplementation needed: `load_order.build_dependency_edges()`
+  already returns real, `describe()`-driven relationships
+  (`is_master_detail`/`is_nillable`), reused directly. Attributes default
+  to Id/Name/required/reference fields; `--mapping-path` scopes them to
+  whatever's actually flagged `Migrate Data = Yes` instead.
+- **Source model(s)** (`generate_source_model_diagram`) — staging tables
+  carry no FK constraints and no describe()-equivalent metadata, so
+  relationships here are a **naming-convention heuristic only** (a
+  column matching `<table>_?[Ii]d$` against another table in scope),
+  always rendered dashed and labeled `"(guessed)"`, and printed as an
+  explicit review list by the CLI command — never presented with the
+  same confidence as the target model's real relationships. Subject
+  areas are an **explicit, human-provided grouping**
+  (`--subject-area "Name:Table1,Table2"`, repeatable), never
+  auto-clustered — there's no reliable signal to cluster source tables
+  on automatically, and guessing domain boundaries on someone else's
+  behalf is exactly what this framework avoids.
+- **A real bug found and fixed during live testing**: the FK-naming
+  heuristic initially labeled *any* column matching the `_id` pattern as
+  `FK` in the entity's own attribute list — including a table's own
+  primary key (e.g. `account_id` in `SourceAccounts` itself). Fixed by
+  adding a genuine SQL Server primary-key lookup
+  (`INFORMATION_SCHEMA.TABLE_CONSTRAINTS`/`KEY_COLUMN_USAGE` — real
+  ground truth, not a guess) and only labeling `FK` a column that
+  actually produced a guessed relationship, not merely one matching the
+  naming pattern.
+
+Both commands write a plain `.md` file with a fenced ` ```mermaid ` block
+— same "just emit Mermaid, GitHub/Lucid already handle the rest"
+convention #52 sketched (not yet built) for Migration Run Book
+flowcharts, no new file format invented. Read-only against
+Salesforce/SQL Server either way.
 
 ---
 

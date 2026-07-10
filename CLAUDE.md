@@ -150,6 +150,27 @@ venv may not be active in a fresh shell:
                 reference table, not automatic `bulkops` resolution — use a `LEFT JOIN` in the
                 transform so an unmatched `DeveloperName` surfaces as a visible `NULL`, since this
                 design has no automatic unresolved-value guard.)
+- Data model diagrams (roadmap #57): `.venv/Scripts/python.exe cli.py generate-target-data-model
+                Account Contact Opportunity --output target_model.md [--mapping-path ...]`
+                `.venv/Scripts/python.exe cli.py generate-source-data-model
+                --subject-area "Sales:SourceAccounts,SourceOpportunities" --output-dir models/ [--mapping-path ...]`
+                (Mermaid ERDs styled to approximate Salesforce Data Model Notation (SDMN) — verified
+                against `developer.salesforce.com`'s actual SDMN guide before building this, not
+                guessed: SDMN's per-entity fill color/border style and diamond-vs-line relationship
+                symbol genuinely can't be reproduced in Mermaid, so this is a best-effort
+                approximation, not a pixel-perfect clone. One real notation feature it does reuse
+                natively: Mermaid's identifying (solid) vs non-identifying (dashed) relationship-line
+                distinction maps onto master-detail vs lookup. **Target model**: relationships come
+                straight from live `describe()` via `load_order.build_dependency_edges()` — real,
+                never guessed. **Source model(s)**: staging tables carry no foreign keys, so
+                relationships are a naming-convention **guess only**, always labeled `(guessed)` in
+                the diagram and printed separately for explicit human review — never presented as
+                confirmed. Subject areas are an explicit, human-chosen grouping (`--subject-area
+                "Name:Table1,Table2"`, repeatable) — never auto-clustered. Both write plain `.md`
+                files with a fenced ` ```mermaid ` block — GitHub renders it natively, Lucid supports
+                paste-to-import, same "just emit plain Mermaid" convention `ROADMAP.md` #52 (not yet
+                built) already sketched for Migration Run Book flowcharts. Read-only, safe without
+                confirmation.)
 - Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
                 (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
                 get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)
@@ -365,7 +386,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
 `/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
 `/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
-`/compare-reference-record`, `/resolve-record-types`
+`/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
+`/generate-source-data-model`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -548,13 +570,14 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
   `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`,
-  `reference_record.py`, `record_types.py`
+  `reference_record.py`, `record_types.py`, `data_model_diagram.py`
   — the Data Architect toolbelt (load-order analysis, profiling, ad hoc
   query, single-object and relationship-aware mock data, mapping doc,
   auto-mapping, solution document generation, org automation risk analysis,
   Data Cloud/D360 query and status tooling, dynamic batch-size recommendations,
   the Migration Run Book, reference-record pull/compare — roadmap #51,
-  RecordType DeveloperName resolution — roadmap #36).
+  RecordType DeveloperName resolution — roadmap #36, SDMN-style Mermaid
+  data model ERDs — roadmap #57).
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always

@@ -24,6 +24,8 @@ Examples:
     python cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
     python cli.py import-parquet ./data/accounts.parquet SourceAccounts
 """
+import os
+
 import click
 import pandas as pd
 from rich.console import Console
@@ -52,6 +54,7 @@ import migration_run_book as mrb
 import source_ingestion as si
 import reference_record as rr
 import record_types as rt
+import data_model_diagram as dmd
 
 
 def _ctx():
@@ -367,6 +370,56 @@ def resolve_record_types_cmd(object_name, schema):
         click.echo(f"No RecordType rows found for {object_name} in this org -- nothing written.")
         return
     click.echo(f"Wrote {count} RecordType row(s) for {object_name} to {schema}.RecordTypeMap.")
+
+
+@cli.command("generate-target-data-model")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--output", "output_path", required=True, help="Output .md file path (contains a fenced ```mermaid``` block).")
+@click.option("--mapping-path", default=None, help="Scope each object's attribute list to fields flagged Migrate Data = Yes instead of the Id/Name/required/reference default.")
+def generate_target_data_model_cmd(object_names, output_path, mapping_path):
+    """Generate a Mermaid ERD (roadmap #57) for a target-org data model --
+    relationships come straight from live describe() via load_order.py,
+    never guessed. Master-detail renders as a solid line, lookup as
+    dashed -- the one real SDMN-style distinction Mermaid can express
+    natively."""
+    _, sf, _e = _ctx()
+    text_out = dmd.generate_target_model_diagram(sf, list(object_names), mapping_path=mapping_path)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write(text_out)
+    click.echo(f"Wrote {output_path} ({len(object_names)} object(s))")
+
+
+@cli.command("generate-source-data-model")
+@click.option("--subject-area", "subject_areas", multiple=True, required=True, help='Repeatable: "Name:Table1,Table2" -- an explicit, human-chosen grouping. Not auto-clustered.')
+@click.option("--output-dir", required=True, help="Directory to write one <Name>.md file per subject area into.")
+@click.option("--schema", default="dbo")
+@click.option("--mapping-path", default=None, help="Scope each table's attribute list to source fields flagged Migrate Data = Yes instead of showing every column.")
+def generate_source_data_model_cmd(subject_areas, output_dir, schema, mapping_path):
+    """Generate one Mermaid ERD per subject area (roadmap #57) for source
+    staging tables. Relationships are a NAMING-CONVENTION GUESS ONLY --
+    staging tables carry no foreign keys -- always labeled "(guessed)" and
+    printed here for explicit human review, never silently trusted."""
+    _, _, engine = _ctx()
+    os.makedirs(output_dir, exist_ok=True)
+
+    for area in subject_areas:
+        if ":" not in area:
+            raise click.BadParameter(f'--subject-area must be "Name:Table1,Table2", got: {area!r}')
+        name, tables_csv = area.split(":", 1)
+        table_names = [t.strip() for t in tables_csv.split(",") if t.strip()]
+
+        text_out, guesses = dmd.generate_source_model_diagram(engine, table_names, schema=schema, mapping_path=mapping_path)
+        out_path = os.path.join(output_dir, f"{name}.md")
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write(text_out)
+
+        click.echo(f"Wrote {out_path} ({len(table_names)} table(s))")
+        if guesses:
+            click.echo(f"  {len(guesses)} guessed relationship(s) -- review before trusting:")
+            for g in guesses:
+                click.echo(f"    {g['child']}.{g['field']} -> {g['parent']} (guessed)")
+        else:
+            click.echo("  No relationships guessed for this subject area.")
 
 
 def _print_profile_preview(engine, object_or_table, source_type, schema):
