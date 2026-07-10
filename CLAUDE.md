@@ -134,6 +134,11 @@ venv may not be active in a fresh shell:
 - Profile:      `.venv/Scripts/python.exe cli.py profile-salesforce Account` (live org, aggregate SOQL)
                 `.venv/Scripts/python.exe cli.py profile-sql-table Account` (any SQL Server table)
                 `.venv/Scripts/python.exe cli.py export-profile-excel profile.xlsx`
+                (roadmap #47: profiling is a first-pass activity — both commands check
+                `dbo.FieldProfile.AnalyzedDate` first and, by default, skip re-profiling an
+                object/table already profiled in this schema, printing the existing date and
+                still showing the current profile preview. `--reprofile` forces a real refresh
+                regardless of prior state.)
 - Load order:   `.venv/Scripts/python.exe cli.py analyze-load-order Account Contact Opportunity ...`
 - Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
                 (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
@@ -171,7 +176,12 @@ venv may not be active in a fresh shell:
                 "No"/"Review" if the source field is barely populated or has only one distinct value.
                 Writes suggestions into the mapping doc's Target block/Notes/Migrate Data columns,
                 but never overwrites a row where a human already filled in the Target field — see
-                `auto_mapper.py` for the full design rationale.)
+                `auto_mapper.py` for the full design rationale. Roadmap #47: a second run over the
+                same source/target pair (`dbo.SourceRegistry.AutoMappedDate` already records this,
+                no new state needed) is framed as a review pass — "N field(s) already decided by a
+                human, M still blank, freshly suggested" — rather than the first-pass summary, since
+                a later pass means reviewing existing work, not redrafting it. The underlying
+                behavior doesn't change either way; only the console framing does.)
 - Solution doc:  `.venv/Scripts/python.exe cli.py generate-solution-doc Solution.docx Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx`
                 (auto-drafts a migration solution/design Word document from load-order analysis,
                 a mapping doc, and profiling data — no binary template checked into git; the

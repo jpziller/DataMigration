@@ -266,6 +266,26 @@ def _profile_soql_distribution(sf, object_name, where_clause, field_name, top_n)
     return [(r[field_name], r["cnt"]) for r in records]
 
 
+def is_already_profiled(engine, object_or_table, source_type, schema="dbo"):
+    """(bool, last_analyzed_at_or_None) -- has this (object_or_table,
+    source_type) ever been profiled in this schema before (roadmap #47)?
+    Profiling is a first-pass activity; a later pass should default to
+    reviewing what's already known rather than silently re-running the
+    same SOQL/aggregate-query cost again. Cheap: FieldProfile.AnalyzedDate
+    already exists for exactly this purpose, no new state needed."""
+    with engine.connect() as cx:
+        if cx.execute(text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.FieldProfile"}).scalar() is None:
+            return (False, None)
+        last = cx.execute(
+            text(
+                f"SELECT MAX(AnalyzedDate) FROM [{schema}].[FieldProfile] "
+                "WHERE ObjectOrTable = :name AND SourceType = :st"
+            ),
+            {"name": object_or_table, "st": source_type},
+        ).scalar()
+    return (last is not None, last)
+
+
 def profile_salesforce_object(sf, engine, object_name, where=None, schema="dbo",
                                top_n_values=50, batch_size=12):
     """Profile a Salesforce object directly via aggregate SOQL queries."""

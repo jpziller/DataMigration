@@ -203,6 +203,28 @@ def _match_target(source_field_name, target_lookup, alias_to_concept):
     return None, None, 0.0
 
 
+def was_already_auto_mapped(engine, source_table, target_object, schema="dbo"):
+    """(bool, last_mapped_at_or_None) -- has this (source_table,
+    target_object) pair ever been auto-mapped before in this schema
+    (roadmap #47)? dbo.SourceRegistry.AutoMappedDate already tracks this
+    (upserted by _write_suggestions() every run) -- no new state needed,
+    just consult it. Used to frame the CLI summary as a review pass
+    ("what's still unmapped") rather than a first pass, not to change
+    suggest_mappings()'s own behavior -- apply_auto_map_suggestions()
+    already protects every human-decided row regardless."""
+    with engine.connect() as cx:
+        if cx.execute(text("SELECT OBJECT_ID(:t, 'U')"), {"t": f"{schema}.SourceRegistry"}).scalar() is None:
+            return (False, None)
+        last = cx.execute(
+            text(
+                f"SELECT AutoMappedDate FROM [{schema}].[SourceRegistry] "
+                "WHERE SourceTable = :s AND TargetObject = :t"
+            ),
+            {"s": source_table, "t": target_object},
+        ).scalar()
+    return (last is not None, last)
+
+
 def suggest_mappings(sf, engine, target_object, source_table, schema="dbo"):
     """Draft source -> target field suggestions for target_object from
     source_table's real columns. Returns the list of suggestion dicts (also

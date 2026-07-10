@@ -82,7 +82,7 @@ summarizes.
 | 44 | Native database connectors (SQL Server / MongoDB) as the Data Cloud source | Not built, needs research | — | Idea: let Data Cloud pull directly from the mirror DB (or MongoDB) via its own native connector types instead of this framework pushing data via API — no custom ingestion code needed, but network-reachability and schedule-vs-on-demand questions need answering first. |
 | 45 | Data Transform authoring as code | Researched, real progress — blocked on more real examples before writing generation code | — | Idea: generate a Data Transform's JSON definition programmatically instead of building it by hand in the drag-and-drop canvas. Confirmed real (export/import round-trip works, JSON shape partly mapped, 11-node taxonomy documented) — not yet buildable with confidence since only one real example (3 of ~11 node types) has been seen. |
 | 46 | Source directory ingestion + cross-pass structure validation | **Built** | `import-csv-directory <dir> --ticket <ref>` (+ `--rebuild`, `--run-book`) | Generalizes a real client's proven hand-built convention (all-`NVARCHAR(MAX)` staging via `BULK INSERT`, typed later via T-SQL) into a bulk, directory-wide command: generates a numbered, git-committed script per new file, reuses it unchanged on every later pass, and hard-stops a file (not the whole batch) if its CSV's current column list no longer matches the script's — comparing the full *ordered* list, since `BULK INSERT` maps columns positionally. Syncs into the Migration Run Book's Pre-Migration phase. |
-| 47 | Pass-aware mapping/profiling workflow state | Not built | — | Idea: track whether an object's mapping has already been done for this project, so a first pass gets full profiling + auto-map and a later pass (UAT, mock go-live) gets review-and-polish of the existing doc instead of starting over. |
+| 47 | Pass-aware mapping/profiling workflow state | **Built** | `--reprofile` (profiling), automatic review-pass framing (`auto-map`) | Consults timestamp state that already existed (`FieldProfile.AnalyzedDate`, `SourceRegistry.AutoMappedDate`) rather than inventing new tracking: profiling now skips by default on an already-profiled object/table, and `auto-map` frames a second run as a review pass (already-decided vs. freshly-suggested counts) instead of a first-pass summary. |
 | 48 | Auto-map autonomy boundary (real vs. mock data) + learning feedback loop | Boundary confirmed **Hard Rule 11**; learning-loop tooling not built | — | On real client data, auto-map only ever produces a first pass (profile/document/auto-map/notes) — humans finish it via workshop, always. On self-generated mock data, a full mapping can be completed autonomously for practice. Separately: after a human finishes a *real* mapping, ask (every time, never assumed) whether to contribute what was learned to the shared synonym thesaurus — staged for a human to review and commit later, never auto-written. |
 | 49 | Migrate-flagged-but-unmapped field detection + suggestion | Not built, refines #3/#10 | — | Idea: catch a mapping-doc row flagged `Migrate Data = Yes` with no Target Field chosen yet, alert the architect, and attempt a `describe()`-driven suggestion rather than just flagging the gap. |
 | 50 | Migration-key/External ID field validation against live describe() | **Built**, hardens rules 4/7 | `validate-external-id <Object> <Field>` (hard rule 12) | Confirms a named target field is genuinely `externalId`+`unique` in the live org's describe() before it's trusted as a migration key — explicit object+field parameters (same convention as `CheckLoadTableDuplicateKeys`/`--external-id`), not auto-detected from the mapping doc. Read-only, exits nonzero on failure so it can gate a script. Not this framework's job to create that field, just to gate on it being correctly in place. |
@@ -2426,7 +2426,7 @@ idea did — real precedent overriding a speculative earlier framing.
   the Load phase, with its own independent watermark so the two syncs
   never interfere.
 
-## 47. Pass-aware mapping/profiling workflow state (not built)
+## 47. Pass-aware mapping/profiling workflow state (built)
 
 Raised directly: mapping and profiling are **first-pass** activities,
 not repeated every time. A second or third pass (UAT, a mock go-live,
@@ -2435,13 +2435,26 @@ newly-arrived source data — confirming it's still accurate — not
 generating a new one from scratch, and profiling (#7) by default only
 happens once unless the architect explicitly asks for it again.
 
-Nothing today tracks "has this object's mapping already been done for
-this project" — that's the actual gap. Needs a small piece of durable,
-per-project state (a natural extension of the same idea `migration_run_
-book.py`'s per-tab watermark already established for sync state) so the
-right behavior — first-pass full treatment vs. later-pass review-only —
-can be chosen automatically instead of a human having to remember and
-say so every time.
+**Key finding from building this: no new state table was needed.**
+"Has this object's mapping already been done for this project" already
+existed implicitly — `dbo.FieldProfile.AnalyzedDate` (set by every
+`profile-salesforce`/`profile-sql-table` run) and
+`dbo.SourceRegistry.AutoMappedDate` (already upserted by every `auto-map`
+run) — it just wasn't ever *consulted* to change default behavior. A much
+smaller fix than inventing new tracking.
+
+**What shipped**: `profiling.is_already_profiled()` and
+`auto_mapper.was_already_auto_mapped()`, each a cheap read of the existing
+timestamp. `profile-salesforce`/`profile-sql-table` now skip re-profiling
+by default when one already exists for that object/table in the schema
+(printing the date, still showing the current profile preview) —
+`--reprofile` forces a refresh. `auto-map` checks the state *before*
+calling `suggest_mappings()` (so the check reflects prior runs, not this
+one) and frames a second pass as a review — "N field(s) already decided by
+a human, M still blank, freshly suggested" — instead of the first-pass
+summary. The underlying safety net (`apply_auto_map_suggestions()` never
+overwriting a human-filled Target field) is unchanged either way; only the
+console framing differs.
 
 ## 48. Auto-map autonomy boundary (real vs. mock data) + learning feedback loop, gated behind explicit consent (not built, builds on #10; boundary is now Hard Rule 11)
 

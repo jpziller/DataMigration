@@ -369,8 +369,15 @@ def _print_profile_preview(engine, object_or_table, source_type, schema):
 @click.option("--where", default=None, help="SOQL WHERE clause (no 'WHERE').")
 @click.option("--schema", default="dbo")
 @click.option("--top-n-values", default=50, help="Max distinct values to keep per low-cardinality field.")
-def profile_salesforce_cmd(object_name, where, schema, top_n_values):
+@click.option("--reprofile", is_flag=True, help="Force a fresh profile even if this object was already profiled in this schema (roadmap #47). Default: skip and show the existing profile.")
+def profile_salesforce_cmd(object_name, where, schema, top_n_values, reprofile):
     s, sf, engine = _ctx()
+    if not reprofile:
+        already, last_at = pf.is_already_profiled(engine, object_name, "salesforce", schema=schema)
+        if already:
+            click.echo(f"Already profiled on {last_at} -- pass --reprofile to force a refresh.")
+            _print_profile_preview(engine, object_name, "salesforce", schema)
+            return
     profiles, distributions = pf.profile_salesforce_object(
         sf, engine, object_name, where=where, schema=schema, top_n_values=top_n_values
     )
@@ -385,8 +392,15 @@ def profile_salesforce_cmd(object_name, where, schema, top_n_values):
 @click.option("--schema", default="dbo")
 @click.option("--top-n-values", default=50, help="Max distinct values to keep per low-cardinality column.")
 @click.option("--distinct-threshold", default=50, help="Columns with more distinct values than this skip value-distribution capture.")
-def profile_sql_table_cmd(table_name, schema, top_n_values, distinct_threshold):
+@click.option("--reprofile", is_flag=True, help="Force a fresh profile even if this table was already profiled in this schema (roadmap #47). Default: skip and show the existing profile.")
+def profile_sql_table_cmd(table_name, schema, top_n_values, distinct_threshold, reprofile):
     _, _, engine = _ctx()
+    if not reprofile:
+        already, last_at = pf.is_already_profiled(engine, table_name, "sql_table", schema=schema)
+        if already:
+            click.echo(f"Already profiled on {last_at} -- pass --reprofile to force a refresh.")
+            _print_profile_preview(engine, table_name, "sql_table", schema)
+            return
     profiles, distributions = pf.profile_sql_table(
         engine, table_name, schema=schema, top_n_values=top_n_values, distinct_threshold=distinct_threshold
     )
@@ -637,6 +651,8 @@ def check_mapping_balance_cmd(object_name, mapping_path, transform_sql_path, loa
 @click.option("--schema", default="dbo")
 def auto_map_cmd(object_name, mapping_path, source_table, schema):
     s, sf, engine = _ctx()
+    is_review_pass, last_mapped_at = am.was_already_auto_mapped(engine, source_table, object_name, schema=schema)
+
     suggestions = am.suggest_mappings(sf, engine, object_name, source_table, schema=schema)
     result = mpd.apply_auto_map_suggestions(mapping_path, object_name, object_name, suggestions)
 
@@ -645,10 +661,22 @@ def auto_map_cmd(object_name, mapping_path, source_table, schema):
     no = sum(1 for s_ in suggestions if s_["migrate_recommended"] == "No")
     review = sum(1 for s_ in suggestions if s_["migrate_recommended"] == "Review")
 
-    click.echo(f"Suggested {matched} of {len(suggestions)} source field(s) on {source_table} -> {object_name}")
-    click.echo(f"  Recommended: {yes} Yes, {no} No, {review} Review")
-    click.echo(f"Applied to {mapping_path}: {result['applied']} row(s) written, "
-               f"{result['skipped_human_filled']} skipped (already had a human-filled Target field)")
+    if is_review_pass:
+        # Roadmap #47: a later pass over the same source/target pair is a
+        # review, not a first draft -- lead with what's actually useful to
+        # know reviewing existing work (what a human already decided vs.
+        # what's freshly suggested for the fields still blank), not the
+        # first-pass-style single combined count.
+        click.echo(f"Reviewing existing mapping (last auto-mapped {last_mapped_at}) for "
+                   f"{source_table} -> {object_name}")
+        click.echo(f"  {result['skipped_human_filled']} field(s) already decided by a human -- untouched")
+        click.echo(f"  {result['applied']} field(s) still blank -- freshly suggested this pass "
+                   f"({yes} Yes, {no} No, {review} Review)")
+    else:
+        click.echo(f"Suggested {matched} of {len(suggestions)} source field(s) on {source_table} -> {object_name}")
+        click.echo(f"  Recommended: {yes} Yes, {no} No, {review} Review")
+        click.echo(f"Applied to {mapping_path}: {result['applied']} row(s) written, "
+                   f"{result['skipped_human_filled']} skipped (already had a human-filled Target field)")
     click.echo(f"Results also in {schema}.AutoMapSuggestions / {schema}.SourceRegistry")
 
 
