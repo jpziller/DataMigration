@@ -109,6 +109,28 @@ venv may not be active in a fresh shell:
                 by default; `--append` adds to an existing compatible table instead. A second
                 entry point into the mirror DB alongside `replicate`, for source data that starts
                 as a file rather than a live org.)
+- Import CSV directory (bulk, roadmap #46): `.venv/Scripts/python.exe cli.py import-csv-directory
+                path/to/client_files --ticket PROJ-123 [--rebuild TableName ...] [--run-book path.xlsx --run-book-tab Dev1]`
+                (generalizes a proven real-world convention: every `*.csv` in the directory gets
+                staged as an all-`NVARCHAR(MAX)` table via `BULK INSERT` — no type sniffing, typed
+                later via `sql/transformations/*.sql` like every other source, same "stage raw, type
+                explicitly" philosophy. Deliberately different from `import-parquet`: generates a
+                numbered, git-committed `.sql` script per file under `sql/source_ingestion/`
+                (`--ticket` required, hard rule 10) rather than loading directly in Python — the
+                script is the real artifact of record, reused unchanged on every later pass, never
+                silently regenerated. On a later pass, the current CSV's header is checked against
+                what the existing script expects — **the full ordered column list, not just set
+                membership**, since `BULK INSERT` maps columns positionally and a same-name reorder
+                is exactly as dangerous as a rename. Any drift hard-stops that one file (the rest of
+                the batch still runs) until `--rebuild <table>` explicitly regenerates the script —
+                never automatic. `--run-book`/`--run-book-tab` auto-syncs results into that tab's
+                **Pre-Migration** phase, same opt-in shape as `bulkops`' own run-book flags.)
+                `.venv/Scripts/python.exe cli.py enable-source-ingestion-logging --schema dbo`
+                (creates `<schema>.SourceIngestionLog` — same opt-in, presence-is-the-switch
+                convention as `enable-bulkops-logging`. A drift-blocked run is logged too, so it
+                shows up in the Migration Run Book as an `Issue` with the exact diff, not just a
+                console message.)
+                `.venv/Scripts/python.exe cli.py disable-source-ingestion-logging --schema dbo`
 - Profile:      `.venv/Scripts/python.exe cli.py profile-salesforce Account` (live org, aggregate SOQL)
                 `.venv/Scripts/python.exe cli.py profile-sql-table Account` (any SQL Server table)
                 `.venv/Scripts/python.exe cli.py export-profile-excel profile.xlsx`
@@ -279,7 +301,12 @@ venv may not be active in a fresh shell:
                 `Error Details` text isn't populated (would need the separate `_Result` writeback
                 table too). Also available as an opt-in automatic step on `bulkops` itself via
                 `--run-book`/`--run-book-tab` (same underlying sync, called right after that load's
-                own `BulkOpsLog` row is written) instead of running this separately.)
+                own `BulkOpsLog` row is written) instead of running this separately. Since roadmap
+                #46, this same command **also** pulls new `dbo.SourceIngestionLog` rows into that
+                tab's **Pre-Migration** phase in the same call, via its own independent "Last Synced
+                Source Ingestion Log Id" watermark — the two syncs never interfere with each other.
+                Also available as an opt-in automatic step on `import-csv-directory` itself via its
+                own `--run-book`/`--run-book-tab`.)
 - Validate migration key: `.venv/Scripts/python.exe cli.py validate-external-id Account Legacy_Id__c`
                 (confirms the named field is genuinely externalId+unique in the live org's
                 describe() before it's trusted as a migration key — rule 12. Read-only, no
@@ -298,7 +325,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
 `/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
-`/validate-external-id`
+`/validate-external-id`, `/import-csv-directory`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -357,14 +384,16 @@ available even when there's no dedicated skill for it.
    needs `--confirm-external-email-risk`, since that's the one state that
    can send real mail to real external contacts — don't pass it
    speculatively "to get past the check."
-10. Every new file under `sql/transformations/` must have its ticket
-    reference (JIRA story/bug key, or whichever ticketing system this
-    project actually uses) hardcoded in a comment near the top when the
-    script is first built. Never invent a ticket number — if one hasn't
-    been given for the work at hand, ask for it before writing the header
-    comment, or state explicitly that this project isn't using a ticket
-    system. This is a consistency/traceability rule (not a safety-critical
-    one like 1-9), but still every project, every script.
+10. Every new file under `sql/transformations/` **or `sql/source_ingestion/`**
+    must have its ticket reference (JIRA story/bug key, or whichever
+    ticketing system this project actually uses) hardcoded in a comment
+    near the top when the script is first built — `import-csv-directory`'s
+    `--ticket` enforces this for generated ingestion scripts the same way.
+    Never invent a ticket number — if one hasn't been given for the work at
+    hand, ask for it before writing the header comment, or state explicitly
+    that this project isn't using a ticket system. This is a
+    consistency/traceability rule (not a safety-critical one like 1-9), but
+    still every project, every script.
 11. **Auto-mapping (and any similar first-draft tool) only ever produces a
     first pass on real client data — never a finished mapping.** Profile,
     document, auto-map, add notes, then stop. The workshop process and the
@@ -440,6 +469,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   movement and SF type mapping.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
+- `source_ingestion.py` — bulk CSV-directory ingestion into the mirror DB
+  (roadmap #46): generates/reuses numbered `BULK INSERT` scripts under
+  `sql/source_ingestion/`, cross-pass structure drift detection, and the
+  opt-in `SourceIngestionLog`. A third flat-file entry point alongside
+  `replicate.py`/`parquet_import.py`, for the "client hands over a whole
+  directory of CSVs" starting point specifically.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
   `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`
@@ -471,6 +506,14 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   heuristics, but Markdown here since the structure itself is meant to be
   read directly, not hidden behind Python constants.
 - `sql/transformations/*.sql` — the migration logic (numbered; run in order).
+- `sql/source_ingestion/*.sql` — generated `BULK INSERT` scripts, one per
+  client-provided CSV file (`import-csv-directory`, roadmap #46). Numbered
+  like `sql/transformations/`, but conceptually upstream of it: these stage
+  a raw file into an all-`NVARCHAR(MAX)` table; typing/transforming that
+  data is `sql/transformations/`'s job, not this folder's. Reused unchanged
+  across every pass — never hand-edited or silently regenerated; only
+  `--rebuild` replaces one, and only after a reported structure drift has
+  been reviewed.
 - `sql/functions/` — reusable T-SQL function library (see its own README).
 - `force-app/` — Salesforce metadata deployed via `sf project deploy`
   (custom fields, profile FLS grants).
@@ -508,6 +551,15 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
     in place if it predates the batch-size columns — history is
     preserved, not discarded. `disable-bulkops-logging` drops it and its
     history entirely.
+  - `<schema>.SourceIngestionLog` — **opt-in only, never created
+    automatically**, same convention as `BulkOpsLog`.
+    `enable-source-ingestion-logging --schema <schema>` creates it; from
+    then on every `import-csv-directory` call against that schema logs
+    itself (table, csv path, script path, status, row count, start/end/
+    duration, OS user) — including a drift-blocked attempt, with the exact
+    column diff, so it's visible in the Migration Run Book as an `Issue`
+    row rather than only a console message. `disable-source-ingestion-logging`
+    drops it and its history entirely.
 - `docs/` — reference material: `MIGRATION_PLAYBOOK.md` (methodology),
   `SOQL_QUERY_LIBRARY.md` (Tooling API queries), `SECURITY_OVERVIEW.md`
   (credential inventory, trust boundaries, what's code-enforced vs.

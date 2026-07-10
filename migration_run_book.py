@@ -123,7 +123,11 @@ _HEADER_ROW_COMMIT = 5
 _HEADER_ROW_SCRIPTS_LINK = 6
 _HEADER_ROW_TICKET = 7
 _HEADER_ROW_LAST_SYNCED_LOG_ID = 8
-_TABLE_HEADER_ROW = 10   # rows 1-8 breadcrumb + row 9 blank spacer
+_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID = 9   # previously a blank spacer row --
+# repurposed for SourceIngestionLog's own independent watermark (roadmap #46)
+# rather than shifting _TABLE_HEADER_ROW/_FIRST_DATA_ROW, which would
+# desync any already-generated workbook's existing row layout.
+_TABLE_HEADER_ROW = 10
 _FIRST_DATA_ROW = 11
 
 _GITHUB_HTTPS_RE = re.compile(r"^https?://github\.com/([^/]+)/(.+?)(\.git)?/?$")
@@ -262,6 +266,7 @@ def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, t
         (_HEADER_ROW_SCRIPTS_LINK, "Scripts (as of this commit)", scripts_url, scripts_url),
         (_HEADER_ROW_TICKET, f"{ticket_label} Project", ticket_url, ticket_url),
         (_HEADER_ROW_LAST_SYNCED_LOG_ID, "Last Synced Log Id", None, None),
+        (_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID, "Last Synced Source Ingestion Log Id", None, None),
     ]
     for row_idx, label, value, hyperlink in rows:
         ws.cell(row=row_idx, column=1, value=label).font = _HEADER_FONT
@@ -609,13 +614,15 @@ def add_migration_run_book_pass(path, from_tab, to_tab, template_path=_TEMPLATE_
     return path
 
 
-def _iter_load_phase_rows(ws):
+def _iter_load_phase_rows(ws, phase_prefix="load"):
     """Yield (row_idx, object_value) for every real data row currently
-    belonging to a phase whose name starts with "load" (case-insensitive)
-    -- the same scoping _write_phase() uses to decide which phase gets
-    load_order.py's auto-fill. A banner row (Object blank, Stage/label
-    cell set) updates which phase subsequent rows belong to; it's never
-    itself yielded."""
+    belonging to a phase whose name starts with phase_prefix (case-
+    insensitive) -- the same scoping _write_phase() uses to decide which
+    phase gets load_order.py's auto-fill. Default "load" matches "Load
+    Steps"; "pre" matches "Pre-Migration Steps" (roadmap #46's source-
+    ingestion sync). A banner row (Object blank, Stage/label cell set)
+    updates which phase subsequent rows belong to; it's never itself
+    yielded."""
     object_col = _COLUMNS.index("Object") + 1
     current_phase = None
     row = _FIRST_DATA_ROW
@@ -627,7 +634,7 @@ def _iter_load_phase_rows(ws):
                 current_phase = label
             row += 1
             continue
-        if current_phase and current_phase.lower().startswith("load"):
+        if current_phase and current_phase.lower().startswith(phase_prefix):
             yield row, object_value
         row += 1
 
@@ -656,8 +663,8 @@ def _object_matches(object_name, object_value):
     ) is not None
 
 
-def _find_pending_load_row(ws, object_name):
-    """A Load-phase row whose Object refers to object_name (see
+def _find_pending_load_row(ws, object_name, phase_prefix="load"):
+    """A phase_prefix-matching row whose Object refers to object_name (see
     _object_matches), whose Status is still unresolved (blank or the
     auto-fill default "Not Started" -- _load_order_rows() sets that
     explicitly, it isn't blank text), and whose Total Records is blank --
@@ -669,7 +676,7 @@ def _find_pending_load_row(ws, object_name):
     status_col = _COLUMNS.index("Status") + 1
     records_col = _COLUMNS.index("Total Records") + 1
     token_match = None
-    for row_idx, object_value in _iter_load_phase_rows(ws):
+    for row_idx, object_value in _iter_load_phase_rows(ws, phase_prefix=phase_prefix):
         if not _object_matches(object_name, object_value):
             continue
         if ws.cell(row=row_idx, column=status_col).value not in _UNRESOLVED_STATUS_VALUES:
@@ -683,16 +690,16 @@ def _find_pending_load_row(ws, object_name):
     return token_match
 
 
-def _insert_load_row(ws, object_name):
-    """Insert a brand-new row for object_name right after the Load
-    phase's last existing row (before whatever phase follows it) --
-    never overwrites anything, used when no pending placeholder matches
-    (e.g. a retry, or an object that was never pre-populated). Raises if
-    this tab has no phase named "Load..." at all -- nowhere safe to
-    insert into."""
+def _insert_load_row(ws, object_name, phase_prefix="load"):
+    """Insert a brand-new row for object_name right after the
+    phase_prefix-matching phase's last existing row (before whatever phase
+    follows it) -- never overwrites anything, used when no pending
+    placeholder matches (e.g. a retry, or an object/file that was never
+    pre-populated). Raises if this tab has no matching phase at all --
+    nowhere safe to insert into."""
     object_col = _COLUMNS.index("Object") + 1
-    last_load_row = None
-    load_banner_row = None
+    last_match_row = None
+    banner_row = None
     current_phase = None
     row = _FIRST_DATA_ROW
     while row <= ws.max_row:
@@ -701,22 +708,22 @@ def _insert_load_row(ws, object_name):
             label = ws.cell(row=row, column=1).value
             if label:
                 current_phase = label
-                if current_phase.lower().startswith("load"):
-                    load_banner_row = row
+                if current_phase.lower().startswith(phase_prefix):
+                    banner_row = row
             row += 1
             continue
-        if current_phase and current_phase.lower().startswith("load"):
-            last_load_row = row
+        if current_phase and current_phase.lower().startswith(phase_prefix):
+            last_match_row = row
         row += 1
 
-    if last_load_row is not None:
-        insert_at = last_load_row + 1
-    elif load_banner_row is not None:
-        insert_at = load_banner_row + 1
+    if last_match_row is not None:
+        insert_at = last_match_row + 1
+    elif banner_row is not None:
+        insert_at = banner_row + 1
     else:
         raise ValueError(
-            "No phase named 'Load...' found in this tab -- add one (e.g. via "
-            "docs/MIGRATION_RUN_BOOK_TEMPLATE.md) before syncing."
+            f"No phase starting with '{phase_prefix}' found in this tab -- add one "
+            "(e.g. via docs/MIGRATION_RUN_BOOK_TEMPLATE.md) before syncing."
         )
 
     ws.insert_rows(insert_at)
@@ -798,5 +805,82 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
         _apply_log_result(ws, target_row, log_row)
 
     ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["LogId"])
+    _save_workbook(wb, path)
+    return {"synced": len(new_rows), "inserted": inserted, "updated": updated}
+
+
+def _apply_source_ingestion_result(ws, row_idx, log_row, schema):
+    row_count = log_row["RowCount"]
+    is_blocked = log_row["Status"] == "drift_blocked"
+
+    values = {
+        "Status": "Issue" if is_blocked else "Completed",
+        "Person Responsible": log_row["RunBy"],
+        "Begin Time": log_row["StartedAt"],
+        "End Time": log_row["CompletedAt"],
+        "Notes": f"Auto-synced from {schema}.SourceIngestionLog #{log_row['LogId']} ({log_row['Status']}).",
+    }
+    if not is_blocked:
+        values["Total Records"] = row_count
+        values["Success Records"] = row_count
+        values["Failed Records"] = 0
+    if is_blocked and log_row["DriftDetails"]:
+        values["Error Details"] = log_row["DriftDetails"]
+
+    for col_name, value in values.items():
+        col_idx = _COLUMNS.index(col_name) + 1
+        ws.cell(row=row_idx, column=col_idx, value=value)
+
+    if not is_blocked and row_count:
+        pct_idx = _COLUMNS.index("Success Percent") + 1
+        cell = ws.cell(row=row_idx, column=pct_idx, value=1.0)
+        cell.number_format = "0.00%"
+
+
+def sync_source_ingestion_to_run_book(engine, path, tab_name, schema="dbo"):
+    """Pull dbo.SourceIngestionLog (roadmap #46) rows not yet reflected in
+    this tab into its Pre-Migration phase (matched via phase_prefix="pre")
+    -- same fill-placeholder-or-insert, watermarked, idempotent mechanism
+    as sync_run_book_from_log(), just targeting a different log table and
+    phase, with its own independent watermark
+    (_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID) so the two syncs never
+    interfere with each other. A drift-blocked run is still logged (see
+    source_ingestion.import_directory) and lands here as Status="Issue"
+    with the exact column diff in Error Details -- visible in the audit
+    trail, not just a console message."""
+    wb = openpyxl.load_workbook(path)
+    if tab_name not in wb.sheetnames:
+        raise ValueError(f"No tab named '{tab_name}' in {path}")
+    ws = wb[tab_name]
+
+    last_synced = ws.cell(row=_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID, column=2).value or 0
+
+    with engine.connect() as cx:
+        if not _table_exists(cx, schema, "SourceIngestionLog"):
+            return {"synced": 0, "inserted": 0, "updated": 0,
+                    "message": f"{schema}.SourceIngestionLog doesn't exist yet -- nothing to sync."}
+
+        new_rows = cx.execute(
+            text(
+                f"SELECT LogId, TableName, Status, [RowCount], StartedAt, CompletedAt, RunBy, DriftDetails "
+                f"FROM [{schema}].[SourceIngestionLog] WHERE LogId > :last ORDER BY LogId"
+            ),
+            {"last": last_synced},
+        ).mappings().all()
+
+    if not new_rows:
+        return {"synced": 0, "inserted": 0, "updated": 0}
+
+    inserted, updated = 0, 0
+    for log_row in new_rows:
+        target_row = _find_pending_load_row(ws, log_row["TableName"], phase_prefix="pre")
+        if target_row is None:
+            target_row = _insert_load_row(ws, log_row["TableName"], phase_prefix="pre")
+            inserted += 1
+        else:
+            updated += 1
+        _apply_source_ingestion_result(ws, target_row, log_row, schema)
+
+    ws.cell(row=_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID, column=2, value=new_rows[-1]["LogId"])
     _save_workbook(wb, path)
     return {"synced": len(new_rows), "inserted": inserted, "updated": updated}

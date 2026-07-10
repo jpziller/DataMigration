@@ -77,11 +77,11 @@ summarizes.
 | 39 | Ticket system (JIRA or equivalent) read/comment integration | Not built, needs API research | — | Idea: post comments to a specific JIRA (or equivalent) ticket directly (e.g. load results), and cross-reference GitHub commits/PRs tied to that ticket — deeper than the Migration Run Book header's static project link (#16). |
 | 40 | Configuration Workbook drift detection | Not built — blocked on a real template | — | Idea: read a team's existing "Configuration Workbook" (how developers document their build) and cross-check it against the actual deployed metadata — the same category of problem `check-mapping-balance` (#3) solves for mapping docs, applied to build documentation instead. Waiting on a real example template before this gets designed. |
 | 41 | Per-object record counts via the recordCount API | **Built** | `record-counts` | One HTTP call for many objects' record counts instead of a SOQL COUNT() per object — fast rough triage across many objects, confirmed live to be an approximate/cached snapshot (can lag real inserts by more than a few seconds), so not a substitute for `profile-salesforce`'s exact count when validating a load actually landed. |
-| 42 | Unit tests + CI for the pure-logic modules | **Built** | `tests/*.py` (pytest) + `.github/workflows/tests.yml` | 43 pytest cases over the no-org-required logic (batch-size ladder math, load-order toposort/cycle grouping, run-book template parsing + `_object_matches()`'s Order/OrderItem regression, mapping-doc INSERT-INTO regex, auto-mapper name normalization/matching, plus #50's `validate_external_id_field`), run automatically on every push/PR via GitHub Actions. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
+| 42 | Unit tests + CI for the pure-logic modules | **Built** | `tests/*.py` (pytest) + `.github/workflows/tests.yml` | 53 pytest cases over the no-org-required logic (batch-size ladder math, load-order toposort/cycle grouping, run-book template parsing + `_object_matches()`'s Order/OrderItem regression, mapping-doc INSERT-INTO regex, auto-mapper name normalization/matching, #50's `validate_external_id_field`, #46's script-column parsing/drift comparison), run automatically on every push/PR via GitHub Actions. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
 | 43 | Salesforce GraphQL API | **Researched — not pursued (out of scope)** | — | Nested relationship traversal and small-batch mutations in one call — genuinely useful for a UI making many round-trips, but this framework's actual needs (bulk extraction, bulk DML) are already better served by SOQL/Bulk API 2.0. See write-up for the specific reasoning. |
 | 44 | Native database connectors (SQL Server / MongoDB) as the Data Cloud source | Not built, needs research | — | Idea: let Data Cloud pull directly from the mirror DB (or MongoDB) via its own native connector types instead of this framework pushing data via API — no custom ingestion code needed, but network-reachability and schedule-vs-on-demand questions need answering first. |
 | 45 | Data Transform authoring as code | Researched, real progress — blocked on more real examples before writing generation code | — | Idea: generate a Data Transform's JSON definition programmatically instead of building it by hand in the drag-and-drop canvas. Confirmed real (export/import round-trip works, JSON shape partly mapped, 11-node taxonomy documented) — not yet buildable with confidence since only one real example (3 of ~11 node types) has been seen. |
-| 46 | Source directory ingestion + cross-pass structure validation | Not built | — | Idea: read a whole client-provided directory of CSVs into a Source SQL Server database in one step, and on a later pass, validate new files against what's already there — alert the architect if the structure has drifted, before silently breaking existing mappings. |
+| 46 | Source directory ingestion + cross-pass structure validation | **Built** | `import-csv-directory <dir> --ticket <ref>` (+ `--rebuild`, `--run-book`) | Generalizes a real client's proven hand-built convention (all-`NVARCHAR(MAX)` staging via `BULK INSERT`, typed later via T-SQL) into a bulk, directory-wide command: generates a numbered, git-committed script per new file, reuses it unchanged on every later pass, and hard-stops a file (not the whole batch) if its CSV's current column list no longer matches the script's — comparing the full *ordered* list, since `BULK INSERT` maps columns positionally. Syncs into the Migration Run Book's Pre-Migration phase. |
 | 47 | Pass-aware mapping/profiling workflow state | Not built | — | Idea: track whether an object's mapping has already been done for this project, so a first pass gets full profiling + auto-map and a later pass (UAT, mock go-live) gets review-and-polish of the existing doc instead of starting over. |
 | 48 | Auto-map autonomy boundary (real vs. mock data) + learning feedback loop | Boundary confirmed **Hard Rule 11**; learning-loop tooling not built | — | On real client data, auto-map only ever produces a first pass (profile/document/auto-map/notes) — humans finish it via workshop, always. On self-generated mock data, a full mapping can be completed autonomously for practice. Separately: after a human finishes a *real* mapping, ask (every time, never assumed) whether to contribute what was learned to the shared synonym thesaurus — staged for a human to review and commit later, never auto-written. |
 | 49 | Migrate-flagged-but-unmapped field detection + suggestion | Not built, refines #3/#10 | — | Idea: catch a mapping-doc row flagged `Migrate Data = Yes` with no Target Field chosen yet, alert the architect, and attempt a `describe()`-driven suggestion rather than just flagging the gap. |
@@ -2374,28 +2374,57 @@ real exported DTs (ideally exercising Join/Filter/Aggregate/Writeback),
 reviewed for structure only same as this one, before any generation code
 gets written.
 
-## 46. Source directory ingestion + cross-pass structure validation (not built)
+## 46. Source directory ingestion + cross-pass structure validation (built)
 
 Raised directly as the actual start of a real project: a client hands
 over a directory of CSV files (or this is a later pass — e.g. a UAT
-reload — of a directory shaped like one seen before). Nothing today reads
-a whole directory at once and turns it into a Source SQL Server database
-in one step; `import-parquet` (#12) handles one file at a time.
+reload — of a directory shaped like one seen before). Nothing read a whole
+directory at once and turned it into a Source SQL Server database in one
+step; `import-parquet` (#12) only ever handled one file at a time.
 
-Two cases, and they need different handling:
-- **New scripts / first pass**: infer schema per file (extending
-  `import-parquet`'s typed-inference approach from Parquet's own schema
-  to CSV, where types have to be sniffed rather than read off the file
-  itself), build one SQL Server table per file, following this project's
-  established naming convention.
-- **Existing scripts / a later pass** (a second test round, UAT, etc.):
-  before loading anything, **validate the new files against what's
-  already there** — same file names, same column structure. If they've
-  drifted (a column renamed, added, removed, reordered in a way that
-  matters), **alert the architect explicitly** rather than silently
-  loading something that will quietly break existing mappings and
-  transforms downstream. Only load once confirmed safe (or once the
-  architect has acknowledged the drift and decided how to handle it).
+**Design pivot from the original idea, based on a real, separate client
+engagement's proven convention** (reviewed for technique only — no
+client-specific names, paths, or field names carried in): the original
+framing above (extending `import-parquet`'s typed-inference approach from
+Parquet's own schema to CSV, "types have to be sniffed") turned out to be
+the wrong instinct. A real client's hand-built migration scripts
+consistently stage every CSV column as `NVARCHAR(MAX)` via `BULK INSERT`
+and type/transform it later via T-SQL — deliberately never sniffing types
+off ambiguous CSV text (a leading-zero id, an ambiguous date format, a
+numeric-looking string are exactly what naive inference gets wrong). That
+matches this framework's own established philosophy (`replicate.py`
+already needs an explicit `type_map.py` coercion step for Bulk API 2.0's
+text CSV extracts, rather than inferring) more closely than the original
+idea did — real precedent overriding a speculative earlier framing.
+
+**What shipped** (`source_ingestion.py`, `cli.py import-csv-directory`):
+- **New file**: derive the table name from the sanitized filename, read
+  only the CSV's header row (column names, no data scan), generate a
+  numbered `BULK INSERT` script under `sql/source_ingestion/` — git-
+  committed, human-readable, independently `sqlcmd -i`-runnable, the real
+  artifact of record for the project (hard rule 10 — `--ticket` required).
+- **Existing file, later pass**: the script is **reused unchanged, never
+  silently regenerated**. Its current CSV's header is checked against the
+  script's declared column list before anything loads — comparing the
+  **full ordered list, not just set membership**, since `BULK INSERT` maps
+  columns positionally, so a same-name column reorder is exactly as
+  dangerous as a rename and has to be caught the same way. Any drift hard-
+  stops *that file* (the rest of the directory's batch still proceeds) —
+  only `--rebuild <table>` explicitly regenerates the script, always a
+  deliberate architect decision, never automatic.
+- **Bulk by design**: one directory, one command, however many files —
+  the actual ask ("dozens of files... be prepared for this to be a bulk
+  process").
+- **Timed and auditable**: an opt-in `SourceIngestionLog` (same
+  `enable-bulkops-logging`-style convention) records every run — including
+  a drift-blocked one, with the exact diff — and syncs into the Migration
+  Run Book's existing **Pre-Migration** phase (not "Source Download and
+  Load Steps" as originally assumed; corrected directly by the user).
+  `migration_run_book.py`'s phase-matching helpers were generalized to a
+  `phase_prefix` parameter so this reuses the same fill-placeholder-or-
+  insert sync mechanism `sync_run_book_from_log` already established for
+  the Load phase, with its own independent watermark so the two syncs
+  never interfere.
 
 ## 47. Pass-aware mapping/profiling workflow state (not built)
 

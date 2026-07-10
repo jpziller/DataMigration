@@ -49,6 +49,7 @@ import solution_doc as sd
 import risk_analyzer as ra
 import parquet_import as pqi
 import migration_run_book as mrb
+import source_ingestion as si
 
 
 def _ctx():
@@ -156,6 +157,74 @@ def import_parquet_cmd(parquet_path, table_name, schema, append):
     n = pqi.import_parquet(engine, parquet_path, table_name, schema=schema, append=append)
     click.echo(f"Imported {n} row(s) into {schema}.{table_name}"
                f"{' (appended)' if append else ' (table recreated)'}")
+
+
+@cli.command("import-csv-directory")
+@click.argument("csv_dir")
+@click.option("--schema", default="dbo")
+@click.option("--sql-dir", default=None, help="Where generated scripts live (defaults to sql/source_ingestion).")
+@click.option("--ticket", default=None, help="Ticket reference for any newly generated or --rebuild'd script (hard rule 10) -- required only when a script doesn't exist yet, or is being rebuilt.")
+@click.option("--rebuild", "rebuild_tables", multiple=True, help="Table name(s) to explicitly regenerate the script for, after reviewing a reported drift. Never automatic.")
+@click.option("--run-book", "run_book_path", default=None, help="Migration Run Book workbook path -- with --run-book-tab, auto-syncs this batch's SourceIngestionLog rows into that tab's Pre-Migration phase right after it's written.")
+@click.option("--run-book-tab", default=None, help="Migration Run Book tab name to sync into -- requires --run-book.")
+def import_csv_directory_cmd(csv_dir, schema, sql_dir, ticket, rebuild_tables, run_book_path, run_book_tab):
+    """Bulk-ingest every *.csv in csv_dir (roadmap #46): generates a numbered
+    BULK INSERT script per new file, reuses an existing script unchanged on
+    a later pass, and hard-stops (without touching that table) if the CSV's
+    current structure no longer matches what its script expects."""
+    if bool(run_book_path) != bool(run_book_tab):
+        raise click.BadParameter("--run-book and --run-book-tab must be given together.")
+    _, _, engine = _ctx()
+    kwargs = {
+        "schema": schema, "ticket": ticket, "rebuild": list(rebuild_tables),
+        "run_book_path": run_book_path, "run_book_tab": run_book_tab,
+    }
+    if sql_dir:
+        kwargs["sql_dir"] = sql_dir
+    results = si.import_directory(engine, csv_dir, **kwargs)
+
+    if not results:
+        click.echo(f"No *.csv files found in {csv_dir}.")
+        return
+
+    for r in results:
+        if "run_book_sync_error" in r:
+            click.echo(f"Migration Run Book sync failed (load results above are unaffected): {r['run_book_sync_error']}")
+        elif r["status"] == "drift_blocked":
+            d = r["drift"]
+            parts = []
+            if d["added"]:
+                parts.append(f"added: {', '.join(d['added'])}")
+            if d["removed"]:
+                parts.append(f"removed: {', '.join(d['removed'])}")
+            if d["reordered"]:
+                parts.append("column order changed")
+            click.echo(f"BLOCKED  {r['csv']} -> {r['table']}: {'; '.join(parts)} "
+                       f"(script: {r['script']}) -- review and pass --rebuild {r['table']} once confirmed safe.")
+        else:
+            click.echo(f"{r['status'].upper():9} {r['csv']} -> {schema}.{r['table']} "
+                       f"({r['rows']} rows, {r['duration_seconds']:.1f}s) [{r['script']}]")
+
+    blocked = sum(1 for r in results if r["status"] == "drift_blocked")
+    if blocked:
+        click.echo(f"\n{blocked} of {len(results)} file(s) blocked on structure drift -- see above.")
+
+
+@cli.command("enable-source-ingestion-logging")
+@click.option("--schema", default="dbo", help="Schema to enable logging for -- each schema is opted in independently.")
+def enable_source_ingestion_logging_cmd(schema):
+    _, _, engine = _ctx()
+    si.enable_source_ingestion_logging(engine, schema=schema)
+    click.echo(f"Source ingestion logging enabled for schema '{schema}' -- {schema}.SourceIngestionLog created.")
+    click.echo("Every import-csv-directory call against this schema will now log automatically.")
+
+
+@cli.command("disable-source-ingestion-logging")
+@click.option("--schema", default="dbo", help="Schema to disable logging for.")
+def disable_source_ingestion_logging_cmd(schema):
+    _, _, engine = _ctx()
+    si.disable_source_ingestion_logging(engine, schema=schema)
+    click.echo(f"Source ingestion logging disabled for schema '{schema}' -- {schema}.SourceIngestionLog dropped, history discarded.")
 
 
 @cli.command("bulkops")
@@ -672,9 +741,16 @@ def update_migration_run_book_cmd(path, tab_name, schema):
     result = mrb.sync_run_book_from_log(engine, path, tab_name, schema=schema)
     if result.get("message"):
         click.echo(result["message"])
-        return
-    click.echo(f"Synced {result['synced']} new {schema}.BulkOpsLog row(s) into '{tab_name}': "
-               f"{result['updated']} filled in, {result['inserted']} inserted.")
+    else:
+        click.echo(f"Synced {result['synced']} new {schema}.BulkOpsLog row(s) into '{tab_name}': "
+                   f"{result['updated']} filled in, {result['inserted']} inserted.")
+
+    source_result = mrb.sync_source_ingestion_to_run_book(engine, path, tab_name, schema=schema)
+    if source_result.get("message"):
+        click.echo(source_result["message"])
+    else:
+        click.echo(f"Synced {source_result['synced']} new {schema}.SourceIngestionLog row(s) into '{tab_name}': "
+                   f"{source_result['updated']} filled in, {source_result['inserted']} inserted.")
 
 
 @cli.command("analyze-org-risk")
