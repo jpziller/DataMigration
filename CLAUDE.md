@@ -140,6 +140,16 @@ venv may not be active in a fresh shell:
                 still showing the current profile preview. `--reprofile` forces a real refresh
                 regardless of prior state.)
 - Load order:   `.venv/Scripts/python.exe cli.py analyze-load-order Account Contact Opportunity ...`
+- Resolve RecordTypes: `.venv/Scripts/python.exe cli.py resolve-record-types Account`
+                (roadmap #36, hard rule 15 — RecordType Ids are org-specific and never portable
+                across orgs. Queries the target org's real RecordType rows for the object and
+                writes them into `dbo.RecordTypeMap` (shared across every object in the project,
+                like `dbo.FieldProfile`) — the transform then `JOIN`s against it by `DeveloperName`
+                to populate `RecordTypeId`, instead of ever hand-copying a raw source Id. Read-only
+                against Salesforce, writes only to the mirror DB. Deliberately a plain T-SQL
+                reference table, not automatic `bulkops` resolution — use a `LEFT JOIN` in the
+                transform so an unmatched `DeveloperName` surfaces as a visible `NULL`, since this
+                design has no automatic unresolved-value guard.)
 - Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
                 (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
                 get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)
@@ -355,7 +365,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
 `/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
 `/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
-`/compare-reference-record`
+`/compare-reference-record`, `/resolve-record-types`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -461,6 +471,15 @@ available even when there's no dedicated skill for it.
     transform's own column list repeating a name), and
     `import-csv-directory` refuses to stage a CSV whose own header row
     already has a repeated column. See `ROADMAP.md` #56.
+15. Any Load table populating a `RecordTypeId` must resolve the target
+    org's real RecordTypes first via `resolve-record-types <Object>` —
+    RecordType Ids are org-specific and never portable across orgs. The
+    transform's own SQL should `JOIN dbo.RecordTypeMap` by `DeveloperName`
+    (a real, portable identifier) to populate `RecordTypeId`, never
+    hand-copy a raw Id from the source. This design deliberately has no
+    automatic unresolved-value guard — use a `LEFT JOIN` so an unmatched
+    `DeveloperName` surfaces as a visible `NULL RecordTypeId`, and verify
+    no row is left unresolved before loading. See `ROADMAP.md` #36.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
@@ -478,18 +497,22 @@ don't jump straight to writing T-SQL:
    on a field that instinctively looks mappable, as worth a second look.
 3. **Confirm target field API names** with `describe`/`dump-describe`
    (rule 5) — never guess a field name from the mapping doc alone.
-4. **Build the transform** under `sql/transformations/`, producing the
+4. **Resolve RecordTypes first, if this object carries a `RecordTypeId`**
+   — `resolve-record-types <Object>` (rule 15), so the transform can
+   `JOIN dbo.RecordTypeMap` by `DeveloperName` rather than ever hand-
+   copying a raw, org-specific Id from the source.
+5. **Build the transform** under `sql/transformations/`, producing the
    `*_Load` table. Include the ticket reference in a header comment
    (rule 10) — ask for it if it hasn't been given.
-5. **Sort it** — `AddBulkLoadSortColumn` against the object's parent key
+6. **Sort it** — `AddBulkLoadSortColumn` against the object's parent key
    (rule 6), if it has one.
-6. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
+7. **Dupe-check it** — `CheckLoadTableDuplicateKeys` against the migration
    key (rule 7). Resolve anything it flags.
-7. **Validate the migration key live** — `validate-external-id <Object>
+8. **Validate the migration key live** — `validate-external-id <Object>
    <Field>` against the actual target field (rule 12). Do not proceed
    until it reports OK; fixing a failing field is another team's job, not
    something to work around here.
-8. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2)
+9. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2)
    and, for insert/upsert, Email Deliverability checked and passed (rule 9).
    Leave `--batch-size` at its `auto` default unless you already know a
    pinned value from a prior run of this same project — a scripted
@@ -525,12 +548,13 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
   `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`,
-  `reference_record.py`
+  `reference_record.py`, `record_types.py`
   — the Data Architect toolbelt (load-order analysis, profiling, ad hoc
   query, single-object and relationship-aware mock data, mapping doc,
   auto-mapping, solution document generation, org automation risk analysis,
   Data Cloud/D360 query and status tooling, dynamic batch-size recommendations,
-  the Migration Run Book, reference-record pull/compare — roadmap #51).
+  the Migration Run Book, reference-record pull/compare — roadmap #51,
+  RecordType DeveloperName resolution — roadmap #36).
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always
@@ -574,6 +598,11 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
     `profile-sql-table` results.
   - `dbo.ObjectDependency`, `dbo.ObjectLoadOrder` — `analyze-load-order`
     results.
+  - `dbo.RecordTypeMap` — `resolve-record-types` output (roadmap #36):
+    the target org's real RecordType Id/DeveloperName/Name per object,
+    shared across every object in the project like `dbo.FieldProfile` —
+    a transform `JOIN`s against this by `DeveloperName` to populate
+    `RecordTypeId`, never a raw hand-copied source Id.
   - `dbo.SourceRegistry`, `dbo.AutoMapSuggestions` — `auto-map` state
     (which source tables have been auto-mapped against which target
     objects, and the suggestions themselves — match method, score, migrate

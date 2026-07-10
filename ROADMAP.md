@@ -71,7 +71,7 @@ summarizes.
 | 33 | Scratch org lifecycle + auto-seeded test data | Not built, deliberately deferred | — | Idea: let this framework spin up a disposable Salesforce scratch org and automatically fill it with mock data, instead of assuming an org already exists. |
 | 34 | Relationship-consistent subset replication | Not built, builds on #2 | — | Idea: pull a small, realistic *slice* of an org — e.g. 50 pilot Accounts and everything genuinely related to them — instead of either replicating everything or hand-coordinating a `--where` filter across every object yourself. |
 | 35 | Relative date shifting utility | Not built | — | Idea: a helper that shifts old dates forward so migrated data still makes sense relative to today — e.g. a contract end date that's already in the past wouldn't make sense to a Flow expecting a future date. |
-| 36 | RecordType DeveloperName resolution for cross-org migration | Not built | — | Idea: correctly translate a `RecordTypeId` from the source into the *right* RecordType in the target org. RecordType Ids are org-specific and never match across orgs, so this is a common, easy-to-miss real-migration mistake if not handled. |
+| 36 | RecordType DeveloperName resolution for cross-org migration | **Built**, hard rule 15 | `resolve-record-types <Object>` | Queries the target org's real RecordType rows and writes them into `dbo.RecordTypeMap`, a plain reference table the transform `JOIN`s against by `DeveloperName` to populate `RecordTypeId` — never a raw, org-specific Id hand-copied from the source. Deliberately a T-SQL reference table (chosen directly over automatic `bulkops` resolution), matching `AddBulkLoadSortColumn`'s convention. |
 | 37 | CLI alternative to Data Cloud's Profile Explorer | **Built** — same command as #18's Unified Profile finding | `data-cloud-profile` | Look up Unified Profile data (a specific person's attributes) via one command instead of Data Cloud Setup's own multi-click Profile Explorer (pick a Data Space, then an entity, then an attribute, repeatedly) — no Data Space parameter needed at all, confirmed live. |
 | 38 | Real-data anonymization for demos/scratch orgs | Not built | — | Idea: take a real client org's actual data and scramble the sensitive fields (names, emails, phones) into realistic-looking fakes — same relationships/volume, no real PII — for client demos or scratch-org seeding. Different from #6, which generates synthetic data from scratch rather than replacing real values. |
 | 39 | Ticket system (JIRA or equivalent) read/comment integration | Not built, needs API research | — | Idea: post comments to a specific JIRA (or equivalent) ticket directly (e.g. load results), and cross-reference GitHub commits/PRs tied to that ticket — deeper than the Migration Run Book header's static project link (#16). |
@@ -1998,7 +1998,7 @@ architect decides per-object/per-field whether relative-date
 preservation is actually the right call for that migration, since some
 fields genuinely should stay historically accurate.
 
-## 36. RecordType DeveloperName resolution for cross-org migration (not built)
+## 36. RecordType DeveloperName resolution for cross-org migration (built, hard rule 15)
 
 Problem: a `RecordTypeId` column carried over from a source system (or a
 different org entirely) almost never matches the *target* org's real
@@ -2011,19 +2011,35 @@ mistake, not a hypothetical one.
 
 Surfaced reviewing CumulusCI's data-mapping docs — it resolves this
 automatically by `DeveloperName` whenever `RecordTypeId` is in its
-mapping. A well-established migration pattern in general, just not yet
-built here.
+mapping. A well-established migration pattern in general, just not built
+here yet at the time this was raised.
 
-Idea, likely the single most broadly applicable thing surfaced by this
-review, real-migration-relevant rather than a testing convenience: a
-helper (a `resolve-record-types`-style CLI verb, or a pre-flight-check-
-adjacent step) that queries the target org's real `RecordType` object
-(`SELECT Id, DeveloperName, SobjectType FROM RecordType`) and lets a
-transform/mapping doc reference a RecordType by its `DeveloperName` (a
-real, portable identifier) instead of a raw Id — resolved to the correct
-target Id at load time, the same "resolve to a real Id via a query
-first" pattern `_resolve_external_ids_to_sf_id` already established for
-delete-by-external-id (#11).
+**Design decision, asked directly**: the idea originally floated two
+designs — automatic resolution inside `bulk_op()` (matching CumulusCI's
+own approach, the same "resolve to a real Id via a query first" pattern
+`_resolve_external_ids_to_sf_id` already established for delete-by-
+external-id, #11), or a plain T-SQL reference table the architect JOINs
+against directly (matching `AddBulkLoadSortColumn`/
+`CheckLoadTableDuplicateKeys`'s convention of a utility the transform
+calls explicitly, not new automatic `bulkops` behavior). **Chosen: the
+T-SQL reference table** — simpler, at the accepted cost of no built-in
+unresolved-value guard; catching an unmatched `DeveloperName` is the
+transform's own responsibility (a `LEFT JOIN` surfacing it as a visible
+`NULL`, not an `INNER JOIN` silently dropping the row).
+
+**What shipped**: new module `record_types.py`,
+`resolve_record_types(sf, engine, object_name, schema="dbo")` — queries
+the target org's real `RecordType` rows for the object
+(`SELECT Id, DeveloperName, Name, IsActive FROM RecordType WHERE
+SobjectType = '<object>'`) and writes them into a shared
+`dbo.RecordTypeMap` table (one table across every object in the project,
+like `dbo.FieldProfile` — not a `<Object>_Mock`-style per-object table),
+replacing only that object's prior rows. Wired up as `cli.py
+resolve-record-types <Object>` — read-only against Salesforce, writes
+only to the mirror DB, no confirmation gate needed. New **hard rule 15**
+requires this before building any transform that populates
+`RecordTypeId`, added as a new step in the Standard Workflow (between
+confirming target field names and building the transform).
 
 ## 37. CLI alternative to Data Cloud's Profile Explorer — BUILT (`data_cloud.py`)
 

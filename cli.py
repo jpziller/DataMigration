@@ -51,6 +51,7 @@ import parquet_import as pqi
 import migration_run_book as mrb
 import source_ingestion as si
 import reference_record as rr
+import record_types as rt
 
 
 def _ctx():
@@ -349,6 +350,23 @@ def analyze_load_order_cmd(object_names, schema):
             click.echo(f"  {', '.join(group)}")
 
     click.echo(f"\nWritten to {schema}.ObjectDependency and {schema}.ObjectLoadOrder")
+
+
+@cli.command("resolve-record-types")
+@click.argument("object_name")
+@click.option("--schema", default="dbo")
+def resolve_record_types_cmd(object_name, schema):
+    """Query the target org's real RecordType rows for object_name and
+    write them into [schema].[RecordTypeMap] (roadmap #36, hard rule 15)
+    -- a plain reference table to JOIN against by DeveloperName when
+    building a transform that populates RecordTypeId, instead of ever
+    hand-copying a raw, org-specific Id from the source."""
+    _, sf, engine = _ctx()
+    count = rt.resolve_record_types(sf, engine, object_name, schema=schema)
+    if count == 0:
+        click.echo(f"No RecordType rows found for {object_name} in this org -- nothing written.")
+        return
+    click.echo(f"Wrote {count} RecordType row(s) for {object_name} to {schema}.RecordTypeMap.")
 
 
 def _print_profile_preview(engine, object_or_table, source_type, schema):
