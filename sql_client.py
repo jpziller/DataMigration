@@ -54,6 +54,22 @@ def _make_mssql_engine(s: Settings) -> Engine:
     )
 
 
+def _validate_sql_identifier_safe(value, what):
+    # Both the schema name and the resolved file path get interpolated
+    # directly into the ATTACH DATABASE statement text below (schema names
+    # can't be bind parameters in SQL at all; SQLite's own ATTACH syntax
+    # has no parameterized form either). A stray quote character in either
+    # would break out of the quoted literal -- SQL_SQLITE_SCHEMAS/
+    # SQL_SQLITE_DIR are developer-configured, not runtime/attacker input,
+    # but a typo or copy-paste mistake should fail loudly here, not produce
+    # confusing broken SQL three lines down.
+    if "'" in value or '"' in value:
+        raise ValueError(
+            f"{what} {value!r} contains a quote character, which can't be used "
+            "safely as part of an ATTACH DATABASE statement -- remove it."
+        )
+
+
 def _make_sqlite_engine(s: Settings) -> Engine:
     # One <schema>.db file per declared schema (SQL_SQLITE_SCHEMAS,
     # comma-separated) under SQL_SQLITE_DIR, each ATTACHed under its own
@@ -66,6 +82,9 @@ def _make_sqlite_engine(s: Settings) -> Engine:
     # ambiguity; every schema, dbo included, is attached symmetrically.
     os.makedirs(s.sql_sqlite_dir, exist_ok=True)
     schemas = [x.strip() for x in s.sql_sqlite_schemas.split(",") if x.strip()]
+    _validate_sql_identifier_safe(s.sql_sqlite_dir, "SQL_SQLITE_DIR")
+    for schema in schemas:
+        _validate_sql_identifier_safe(schema, "A schema name in SQL_SQLITE_SCHEMAS")
     bootstrap_path = os.path.join(s.sql_sqlite_dir, "_bootstrap.db")
 
     engine = create_engine(f"sqlite:///{bootstrap_path}")
@@ -82,6 +101,11 @@ def _make_sqlite_engine(s: Settings) -> Engine:
         # for real speed, an acceptable tradeoff for a migration staging DB.
         cx.execute("PRAGMA journal_mode=WAL")
         cx.execute("PRAGMA synchronous=NORMAL")
+        # Without this, any write contention (even just two connections in
+        # the same process) raises "database is locked" immediately instead
+        # of waiting briefly and retrying -- 5s is generous for a local
+        # single-machine migration tool, not a high-concurrency server.
+        cx.execute("PRAGMA busy_timeout=5000")
         cx.close()
 
     return engine

@@ -337,7 +337,21 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     audit field -- excluded from the actual API payload and from
     _preflight_check, so it's never a false "not a real field" abort. An
     explicit send_columns list is never filtered this way -- naming a
-    REF_ column there is a deliberate override."""
+    REF_ column there is a deliberate override.
+
+    AUTO-EXCLUDED LOCAL COLUMNS (auto-derived list only, same override rule
+    as ref_prefix above -- an explicit send_columns is never filtered):
+    [Sort] (hard rule 6, matched case-insensitively like ref_prefix) and
+    key_column are never real Salesforce fields, just this framework's own
+    load-table bookkeeping, and are excluded on every operation. id_column
+    is the one exception -- update/upsert must still send it (Salesforce
+    needs it to identify the record); only insert excludes it, since the
+    record doesn't have one yet. A real bug found via a live volume test:
+    this exclusion was missing entirely for [Sort] on every operation, and
+    missing for key_column specifically on update/upsert -- either gap
+    makes _preflight_check fail outright ("not a real field") the moment a
+    load table actually has that column, which every Sort-column load
+    table always does."""
     operation = operation.lower()
     if operation not in ("insert", "update", "upsert", "delete"):
         raise ValueError(f"Unsupported operation: {operation}")
@@ -396,26 +410,31 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     # excluded the same way on every operation -- confirmed live: a load
     # table with a real [Sort] column previously failed _preflight_check
     # outright ("not a real field: ['Sort']") on its very first bulk_op()
-    # call, since nothing excluded it. key_column (e.g. "LoadId") is
+    # call, since nothing excluded it. Matched case-insensitively, same as
+    # ref_prefix -- add_bulk_load_sort_column() always creates it as
+    # exactly "Sort", but there's no reason a differently-cased variant
+    # should silently reintroduce this bug. key_column (e.g. "LoadId") is
     # likewise never a real Salesforce field and must be excluded for
     # update/upsert too, not just insert -- it was already correctly
     # excluded there but missing here, the same class of bug. Only applies
     # to the auto-derived list -- an explicit send_columns is never
     # second-guessed.
-    _auto_excluded = {error_column, "Sort"}
+    _auto_excluded_exact = {error_column}
     if operation == "delete":
         sent = [id_column]
     elif operation == "insert":
         sent = send_columns or [
             c for c in df.columns
-            if c not in (_auto_excluded | {id_column, key_column})
+            if c not in (_auto_excluded_exact | {id_column, key_column})
+            and c.upper() != "SORT"
             and not c.upper().startswith(ref_prefix.upper())
         ]
     else:  # update / upsert -- id_column IS sent (Salesforce needs it to
         # identify the record); key_column/Sort are not.
         sent = send_columns or [
             c for c in df.columns
-            if c not in (_auto_excluded | {key_column})
+            if c not in (_auto_excluded_exact | {key_column})
+            and c.upper() != "SORT"
             and not c.upper().startswith(ref_prefix.upper())
         ]
 

@@ -152,3 +152,118 @@ def test_check_load_table_duplicate_keys_flags_dupes_and_missing(sqlite_engine):
     duplicates, missing = ltp.check_load_table_duplicate_keys(engine, "Account_Load2", "Migrated_Id__c", schema="dbo")
     assert duplicates == [{"DuplicateKey": "X1", "Occurrences": 2}]
     assert missing == 1
+
+
+def test_bulk_op_excludes_sort_and_key_column_from_sent_payload(sqlite_engine, tmp_path):
+    """Regression test for the bug found via the Snowfakery volume run:
+    bulk_op() previously sent [Sort] (hard rule 6) and, on update/upsert,
+    key_column to Salesforce -- both are local/framework-only auxiliary
+    columns, never real fields, and would fail _preflight_check() with
+    "not a real field" the moment a load table actually had a Sort column."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2, 3],
+        "LegacyId__c": ["A1", "A2", "A3"],
+        "Name": ["Row1", "Row2", "Row3"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+    bad_ranges = ltp.add_bulk_load_sort_column(engine, "Account_Load", "LegacyId__c", schema="dbo")
+    assert bad_ranges == []
+
+    sf = _stub_sf(StubBulkHandler(echo_cols=["LegacyId__c", "Name"]))
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["succeeded"] == 3
+    assert summary["failed"] == 0
+
+
+def test_bulk_op_excludes_sort_column_case_insensitively(sqlite_engine, tmp_path):
+    """The Sort exclusion is matched case-insensitively, same as ref_prefix
+    -- a differently-cased Sort-like column (never produced by
+    add_bulk_load_sort_column() itself, but not guaranteed never to exist
+    by some other route) must not silently reintroduce the bug above."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2],
+        "LegacyId__c": ["A1", "A2"],
+        "Name": ["Row1", "Row2"],
+        "sort": [1, 2],  # lowercase, unlike add_bulk_load_sort_column()'s own "Sort"
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    sf = _stub_sf(StubBulkHandler(echo_cols=["LegacyId__c", "Name"]))
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["succeeded"] == 2
+    assert summary["failed"] == 0
+
+
+def test_bulk_op_update_excludes_key_column_but_still_sends_id(sqlite_engine, tmp_path):
+    """The key_column exclusion gap was specific to update/upsert (insert
+    already excluded it correctly) -- a separate regression test since
+    it's a distinct code branch from the insert test above. Id must still
+    be sent on update (Salesforce needs it to identify the record); only
+    the local LoadId tracking column must not be."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2],
+        "Id": ["001000000000000001", "001000000000000002"],
+        "Name": ["Row1Updated", "Row2Updated"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    sf = _stub_sf(StubBulkHandler(echo_cols=["Id", "Name"]))
+    summary = bo.bulk_op(
+        sf, engine, "Account", "update", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+    )
+    assert summary["succeeded"] == 2
+    assert summary["failed"] == 0
+
+
+def test_bulk_op_aggregates_successes_and_failures_across_multiple_jobs(sqlite_engine, tmp_path):
+    """bulk_op() concatenates success/failure records across every job a
+    real Bulk API submission can split into (see its own docstring's
+    RESULT MAPPING section) -- nothing in this repo exercised that loop
+    with more than one job until now. 6 rows, split into 2 jobs of 3, with
+    one failure per job (rows 3 and 6), confirms the aggregation genuinely
+    spans job boundaries rather than only ever seeing job 1."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2, 3, 4, 5, 6],
+        "LegacyId__c": [f"A{n}" for n in range(1, 7)],
+        "Name": [f"Row{n}" for n in range(1, 7)],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    sf = StubSF(
+        {"Account": _FIELDS},
+        {"Account": StubBulkHandler(
+            echo_cols=["LegacyId__c", "Name"], job_count=2, fail_every_n=3,
+        )},
+    )
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["submitted"] == 6
+    assert summary["succeeded"] == 4
+    assert summary["failed"] == 2
+    assert summary["ambiguous"] == 0
+
+    result = pd.read_sql('SELECT * FROM "dbo"."Account_Load" ORDER BY LoadId', engine)
+    # Row 3 (job 1's 3rd row) and row 6 (job 2's 3rd row) failed -- both
+    # jobs' failures must show up, not just whichever job is processed first.
+    assert result.loc[result["LegacyId__c"] == "A3", "Error"].notna().iloc[0]
+    assert result.loc[result["LegacyId__c"] == "A6", "Error"].notna().iloc[0]
+    succeeded = result.loc[result["Error"].isna(), "LegacyId__c"].tolist()
+    assert sorted(succeeded) == ["A1", "A2", "A4", "A5"]
+    assert result.loc[result["LegacyId__c"] == "A1", "Id"].notna().iloc[0]

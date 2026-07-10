@@ -44,57 +44,122 @@ def describe_fields(columns, id_field="Id"):
     return fields
 
 
+def _chunk_dataframe(df, n_chunks):
+    """Split df into n_chunks roughly-equal, order-preserving pieces --
+    plain Python/pandas, no numpy dependency added just for this."""
+    if n_chunks <= 1 or len(df) == 0:
+        return [df]
+    chunk_size = -(-len(df) // n_chunks)  # ceil division
+    return [df.iloc[i:i + chunk_size] for i in range(0, len(df), chunk_size)]
+
+
 class StubBulkHandler:
-    """A stub for one Salesforce object's sf.bulk2.<Object> handler.
+    """A stub for one Salesforce object's sf.bulk2.<Object> handler --
+    insert/update/upsert/delete all share the same simulation logic (Bulk
+    API 2.0 shapes every operation's request/response the same way: submit
+    a CSV, get back job ids, fetch success/failure records per job).
+
+    **One instance is good for exactly one submission** -- real handlers
+    aren't reused across bulk_op() calls either, and reuse would silently
+    mix up which submission a stored result belongs to. Calling
+    insert/update/upsert/delete a second time on the same instance raises.
 
     Two ways to use it:
     - **Fixed outcome** (precise unit tests -- exact control over which
-      rows succeed/fail): pass success_csv/failure_csv directly, already
-      shaped like bulk_op()'s _read_result_csv() expects (echo columns +
-      sf__Id, or echo columns + sf__Error).
+      rows succeed/fail, including simulating more than one Bulk API job):
+      pass `jobs` -- a list of (success_csv, failure_csv) tuples, one per
+      simulated job, each already shaped like bulk_op()'s
+      _read_result_csv() expects (echo columns + sf__Id, or echo columns +
+      sf__Error). `success_csv`/`failure_csv` remain as shorthand for the
+      common single-job case (`jobs=[(success_csv, failure_csv)]`).
     - **Dynamic outcome** (volume/stress tests -- realistic-shaped fake
       Ids at whatever scale, with a real failure rate to exercise
-      retry/error-tracking too): pass echo_cols and fail_every_n instead.
-      Every row succeeds with an auto-generated sequential fake Id
-      (id_prefix + a zero-padded counter, e.g. "001000000000000001") except
-      every fail_every_n'th row, which fails with a canned error message.
+      retry/error-tracking too): pass echo_cols (required) and, optionally,
+      fail_every_n and job_count. Every row succeeds with an
+      auto-generated sequential fake Id (id_prefix + a zero-padded
+      counter, e.g. "001000000000000001") except every fail_every_n'th
+      row, which fails with a canned error message. job_count > 1 splits
+      the submitted rows across that many simulated jobs, in submission
+      order -- the only way anything in this repo exercises bulk_op()'s
+      own cross-job success/failure aggregation loop.
     """
-    def __init__(self, success_csv=None, failure_csv=None,
-                 echo_cols=None, fail_every_n=None, id_prefix="001",
+    def __init__(self, success_csv=None, failure_csv=None, jobs=None,
+                 echo_cols=None, fail_every_n=None, job_count=1, id_prefix="001",
                  failure_message="DUPLICATE_VALUE:deliberately failed for this test"):
-        self._success_csv = success_csv
-        self._failure_csv = failure_csv
+        if jobs is not None and (success_csv is not None or failure_csv is not None):
+            raise ValueError("Pass either jobs=[...] or success_csv/failure_csv, not both.")
+        if success_csv is not None or failure_csv is not None:
+            jobs = [(success_csv or "", failure_csv or "")]
+
+        if jobs is None and not echo_cols:
+            raise ValueError(
+                "StubBulkHandler needs either jobs=[...] / success_csv+failure_csv "
+                "(fixed mode) or echo_cols (dynamic mode) -- got neither."
+            )
+
+        self._fixed_jobs = jobs
         self._echo_cols = echo_cols
         self._fail_every_n = fail_every_n
+        self._job_count = job_count
         self._id_prefix = id_prefix
         self._failure_message = failure_message
         self._next_id = 1
+        self._results_by_job = None  # set by insert(); reuse guard
 
     def insert(self, csv_path, batch_size=None):
-        if self._success_csv is not None or self._failure_csv is not None:
-            return [{"job_id": "JOB1"}]  # fixed mode -- nothing to compute
+        return self._submit(csv_path)
+
+    def update(self, csv_path, batch_size=None):
+        return self._submit(csv_path)
+
+    def upsert(self, csv_path, external_id_field, batch_size=None):
+        return self._submit(csv_path)
+
+    def delete(self, csv_path, batch_size=None):
+        return self._submit(csv_path)
+
+    def _submit(self, csv_path):
+        if self._results_by_job is not None:
+            raise RuntimeError(
+                "This StubBulkHandler already had a submission -- construct "
+                "a fresh instance per bulk_op() call (real handlers aren't "
+                "reused across calls either, and reuse would silently mix "
+                "up which submission a stored result belongs to)."
+            )
+        self._results_by_job = {}
+
+        if self._fixed_jobs is not None:
+            job_ids = []
+            for i, (succ, fail) in enumerate(self._fixed_jobs):
+                job_id = f"JOB{i + 1}"
+                self._results_by_job[job_id] = (succ, fail)
+                job_ids.append(job_id)
+            return [{"job_id": j} for j in job_ids]
 
         df = pd.read_csv(csv_path, dtype=str, keep_default_na=False, na_values=[""])
-        succ_rows, fail_rows = [], []
-        for i, row in df.iterrows():
-            if self._fail_every_n and (i + 1) % self._fail_every_n == 0:
-                fail_rows.append(list(row[self._echo_cols]) + [self._failure_message])
-            else:
-                fake_id = f"{self._id_prefix}{self._next_id:015d}"
-                self._next_id += 1
-                succ_rows.append(list(row[self._echo_cols]) + [fake_id])
+        job_ids = []
+        for i, chunk_df in enumerate(_chunk_dataframe(df, self._job_count)):
+            job_id = f"JOB{i + 1}"
+            succ_rows, fail_rows = [], []
+            for row_i, row in chunk_df.iterrows():
+                if self._fail_every_n and (row_i + 1) % self._fail_every_n == 0:
+                    fail_rows.append(list(row[self._echo_cols]) + [self._failure_message])
+                else:
+                    fake_id = f"{self._id_prefix}{self._next_id:015d}"
+                    self._next_id += 1
+                    succ_rows.append(list(row[self._echo_cols]) + [fake_id])
 
-        succ_df = pd.DataFrame(succ_rows, columns=list(self._echo_cols) + ["sf__Id"])
-        fail_df = pd.DataFrame(fail_rows, columns=list(self._echo_cols) + ["sf__Error"])
-        self._success_csv = succ_df.to_csv(index=False)
-        self._failure_csv = fail_df.to_csv(index=False)
-        return [{"job_id": "JOB1"}]
+            succ_df = pd.DataFrame(succ_rows, columns=list(self._echo_cols) + ["sf__Id"])
+            fail_df = pd.DataFrame(fail_rows, columns=list(self._echo_cols) + ["sf__Error"])
+            self._results_by_job[job_id] = (succ_df.to_csv(index=False), fail_df.to_csv(index=False))
+            job_ids.append(job_id)
+        return [{"job_id": j} for j in job_ids]
 
     def get_successful_records(self, job_id):
-        return self._success_csv or ""
+        return self._results_by_job[job_id][0] or ""
 
     def get_failed_records(self, job_id):
-        return self._failure_csv or ""
+        return self._results_by_job[job_id][1] or ""
 
 
 class StubBulk2:

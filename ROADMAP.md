@@ -1920,6 +1920,22 @@ default datetime adapter — fixed by registering explicit ones in
 `sql_client.py` rather than letting a future Python version silently break
 `BulkOpsLog`/`SourceIngestionLog`'s timestamp columns.
 
+**A more significant pair of bugs, found in a later real-volume test, not
+SQLite-specific**: running a genuine end-to-end load (Snowfakery-generated
+mock data, 1000+ Accounts through Contacts through Opportunities) surfaced
+that `bulk_op()` never excluded the `[Sort]` column (hard rule 6) from
+what gets sent to Salesforce — any real load table with a Sort column
+would fail pre-flight on its very first insert with "not a real field:
+['Sort']", on **either** backend, not just SQLite. `key_column` (e.g.
+`LoadId`) had the identical gap on update/upsert — already correctly
+excluded on insert, but not there. Both fixed, and each now has its own dedicated regression test in
+`tests/test_bulkops_sqlite_integration.py` — one builds a real Sort column
+via `add_bulk_load_sort_column()` then confirms `bulk_op()` insert still
+succeeds; the other confirms an update sends `Id` but not `key_column`.
+Worth calling out on its own: this is a correctness bug in `bulk_op()`
+itself, unrelated to the SQL backend work that happened to be underway
+when it was found.
+
 **Verification**: a real end-to-end flow (`replicate.create_table()` →
 load table → `bulk_op()` against a stub Salesforce client → writeback
 confirmed via a fresh connection → `build_retry_table()` → hard rules 6/7)
