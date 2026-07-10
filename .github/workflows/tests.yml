@@ -15,4 +15,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run tests
-        run: pytest tests/ -v
+        # python -m pytest, not bare `pytest` -- `-m` adds the cwd (repo
+        # root) to sys.path, which is what lets tests/*.py import this
+        # repo's own root-level modules (load_order.py etc.) at all. The
+        # bare `pytest` console script doesn't do that insertion, which is
+        # why every CI run failed with ModuleNotFoundError until this fix
+        # (confirmed by reproducing the exact failure locally).
+        run: python -m pytest tests/ -v
