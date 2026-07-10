@@ -154,23 +154,30 @@ venv may not be active in a fresh shell:
                 Account Contact Opportunity --output target_model.md [--mapping-path ...]`
                 `.venv/Scripts/python.exe cli.py generate-source-data-model
                 --subject-area "Sales:SourceAccounts,SourceOpportunities" --output-dir models/ [--mapping-path ...]`
-                (Mermaid ERDs styled to approximate Salesforce Data Model Notation (SDMN) — verified
-                against `developer.salesforce.com`'s actual SDMN guide before building this, not
-                guessed: SDMN's per-entity fill color/border style and diamond-vs-line relationship
-                symbol genuinely can't be reproduced in Mermaid, so this is a best-effort
-                approximation, not a pixel-perfect clone. One real notation feature it does reuse
-                natively: Mermaid's identifying (solid) vs non-identifying (dashed) relationship-line
-                distinction maps onto master-detail vs lookup. **Target model**: relationships come
-                straight from live `describe()` via `load_order.build_dependency_edges()` — real,
-                never guessed. **Source model(s)**: staging tables carry no foreign keys, so
-                relationships are a naming-convention **guess only**, always labeled `(guessed)` in
-                the diagram and printed separately for explicit human review — never presented as
-                confirmed. Subject areas are an explicit, human-chosen grouping (`--subject-area
-                "Name:Table1,Table2"`, repeatable) — never auto-clustered. Both write plain `.md`
-                files with a fenced ` ```mermaid ` block — GitHub renders it natively, Lucid supports
-                paste-to-import, same "just emit plain Mermaid" convention `ROADMAP.md` #52 (not yet
-                built) already sketched for Migration Run Book flowcharts. Read-only, safe without
-                confirmation.)
+                (Mermaid `classDiagram` ERDs styled to approximate Salesforce Data Model Notation
+                (SDMN) — verified against `developer.salesforce.com`'s actual SDMN guide before
+                building this, not guessed. Renders as `classDiagram` rather than `erDiagram`/
+                `flowchart` — confirmed against Mermaid's own docs to be the one diagram type that
+                gets real UML composition (`*--`, filled diamond) vs aggregation (`o--`, hollow
+                diamond) for master-detail vs lookup (a closer match to SDMN's own diamond-on-the-
+                parent-side convention), real per-class fill/border color via `classDef`/`:::`
+                styling (something `erDiagram` can't do at all — palette reused verbatim from
+                `forcedotcom/sf-skills`' `external-diagram-mermaid-generate` skill's own validated
+                Standard/Custom/External convention, not invented here), and attribute lists with
+                `"1" *-- "1..*"`-style cardinality strings, all at once. **Target model**:
+                relationships come straight from live `describe()` via
+                `load_order.build_dependency_edges()` — real, never guessed; object-type coloring
+                comes from `describe()`'s own `custom` flag and `__x` API-name suffix, also real.
+                **Source model(s)**: staging tables carry no foreign keys, so relationships are a
+                naming-convention **guess only**, always rendered as the weaker aggregation form and
+                labeled `(guessed)`, printed separately for explicit human review, and never
+                color-coded (no Standard/Custom/External axis exists for a plain SQL table). Subject
+                areas are an explicit, human-chosen grouping (`--subject-area "Name:Table1,Table2"`,
+                repeatable) — never auto-clustered. Both write plain `.md` files with a fenced
+                ` ```mermaid ` block — GitHub renders it natively, Lucid supports paste-to-import,
+                same "just emit plain Mermaid" convention `ROADMAP.md` #52 (not yet built) already
+                sketched for Migration Run Book flowcharts. Read-only, safe without confirmation. See
+                `ROADMAP.md` #57 for the full `sf-skills` cross-reference.)
 - Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
                 (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
                 get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)

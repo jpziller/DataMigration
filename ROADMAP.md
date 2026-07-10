@@ -93,6 +93,7 @@ summarizes.
 | 55 | `REF_`-prefixed human-only audit columns, excluded from bulkops | **Built**, hard rule 13 | `--ref-prefix` (default `REF_`) | Raised directly from real DBAmp-era experience: a `REF_`-prefixed Load table column is a human-only SQL-side audit field, excluded from the auto-derived sent-column list and from the pre-flight "not a real field" check — never reaches the API, never aborts the load. |
 | 56 | Duplicate target-field detection (scripts + spreadsheets) | **Built**, hard rule 14 | `check-mapping-balance` (extended), `import-csv-directory` | Raised directly: a single `CREATE TABLE`/`INSERT INTO` column list, or a single mapping-doc sheet, must never target the same field twice — different scripts/sheets doing so is fine and expected. `check-mapping-balance` reports both `duplicate_target_fields` and `duplicate_implemented_columns`; `import-csv-directory` refuses a CSV whose own header already repeats a column. |
 | 57 | Data model ERD diagrams — source subject-area models + target model, SDMN-inspired | **Built** | `generate-target-data-model`, `generate-source-data-model` | Mermaid ERDs approximating Salesforce Data Model Notation (verified against the real SDMN guide — its per-entity color/border coding and diamond relationship symbol genuinely can't be reproduced in Mermaid; its solid-vs-dashed identifying/non-identifying line distinction can, and maps onto master-detail vs lookup). Target model relationships are real (`load_order.build_dependency_edges()`); source model relationships are a naming-convention guess only, always labeled and reported for review, never presented as confirmed. |
+| 58 | Bidirectional convert: Data Transform JSON ↔ Code Extension Python | Not built — depends on #45 | — | Idea: JSON→Python translates the canvas Data Transform's `nodes`/`ui` export into an `entrypoint.py` against the `datacustomcode` SDK, for the node types #45 already confirmed (`load`/`formula`/`outputD360`) — safe today, since it's known structure to known SDK calls. Python→JSON is the harder direction: it inherits #45's own generation blocker (8/11 node types still unconfirmed) and only ever recognizes a constrained, canvas-representable subset of Python, refusing whatever falls outside it rather than guessing. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -1457,6 +1458,25 @@ levels) than the other findings' test artifacts did. No CLI command
 wired up for it yet for that reason — code exists, hasn't earned "real
 command" status by this module's own dogfooding standard.
 
+**Note (not a reason to redo any of the above)**: `forcedotcom/sf-skills`
+(Salesforce's official Agent Skills library, discovered while building
+#57) has a `data360-query` skill covering similar Retrieve-phase ground
+via an external `sf data360` CLI plugin. `data_cloud.py` here talks to
+the REST APIs directly — a different, already-working, already-verified
+approach for this framework's own use, not something to swap out.
+
+**A new, genuinely low-effort candidate found the same way**: unlike the
+rest of the `data360-*` family, `data360-schema-get` does **not** wrap
+the external plugin at all — it hits plain SSOT REST endpoints (`GET
+/services/data/v64.0/ssot/data-lake-objects` and `/data-model-objects`),
+same no-external-dependency shape `data_cloud.py` already uses
+everywhere else. It gives something `describe()` doesn't today: category,
+status, and record count for **every** DLO/DMO in one call, the same
+"one call for many objects" value `record-counts` already provides on
+the CRM side (see the canonical-commands note on that command). Not
+built yet — a plausible `list-dlos`/`list-dmos` command, same shape as
+`list-data-graphs` above, whenever this gets picked up.
+
 ## 19. Data Cloud semantic model reference (not built, depends on #18)
 
 Idea: understand and expose the semantic model (the layer that gives DMOs
@@ -1477,6 +1497,29 @@ returns only the static shell); when it's actually time to review these,
 either ask for an exported collection JSON or go straight to
 developer.salesforce.com's own docs/blog posts for the same API, which
 is what worked cleanly for #22's Ingestion API research.
+
+**Check `forcedotcom/sf-skills` before building this** (Salesforce's
+official Agent Skills library, discovered while building #57) — its
+`data360-harmonize` skill (DMOs, mappings, relationships, identity
+resolution, unified profiles, data graphs) and `data360-schema-get`
+(DLO/DMO schema via the SSOT REST API) may already cover a meaningful
+chunk of this item's own scope. Requires an external `sf data360` CLI
+plugin (not vendored, a different dependency model than this framework's
+own direct-REST-API approach in `data_cloud.py`) — worth weighing that
+before treating it as a drop-in replacement rather than a reference.
+
+**Concrete schema found, not just a pointer to check later** — read in
+full: `data360-orchestrate`'s `assets/definitions/relationship.template.json`
+gives the actual DMO relationship shape the semantic model is built from:
+a `relationships[]` array of `sourceObjectName`/`targetObjectName`/
+`cardinality` (e.g. `ManyToOne`)/`sourceFieldName`/`targetFieldName`/
+`relationshipOwner`. That's real, usable ground truth for what "the
+relationship layer" actually looks like as data — closer to answering
+this item's own question than the earlier "check the skill" note was.
+`dmo.template.json` (developerName/label/category/`fields[]`) is the DMO
+definition shape those relationships connect. Still gated on the same
+external-plugin dependency question above before deciding whether to
+consume this via that plugin or reverse it into `data_cloud.py` directly.
 
 ## 20. DSO refresh/error monitoring — BUILT (`data_cloud.py`)
 
@@ -1529,6 +1572,34 @@ approach (thesaurus + fuzzy matching + a data-quality gate) to suggest
 DSO→DLO mappings is a natural, well-precedented next step — the matching
 *logic* built for CRM field mapping should mostly transfer; what's unknown
 is only the metadata read/write surface on the Data Cloud side.
+
+**Check `forcedotcom/sf-skills` before doing the API research above** —
+`data360-prepare` (streams, DLOs, transforms) is described as owning
+exactly this DSO→DLO territory. Same external-plugin-dependency caveat as
+noted on #19.
+
+**Partial answer found, via the plugin's own command surface** — reading
+`data360-harmonize`'s full skill content (not just its frontmatter) shows
+it wraps real `sf data360 dmo mapping-list` and `dmo map-to-canonical`
+subcommands, and `data360-orchestrate`'s `assets/definitions/
+mapping.template.json` gives the concrete field-mapping payload shape
+those commands read/write: `sourceObjectName`/`targetObjectName`/
+`fieldMappings[]` of `sourceFieldName`/`targetFieldName` pairs. That's a
+real, positive signal that this mapping layer **is** readable and
+writable — just through the external `sf data360` plugin's own command
+surface, not yet confirmed as a directly-callable REST endpoint this
+framework's own `data_cloud.py` could hit without that plugin installed.
+The plugin-vs-direct-REST distinction from #19 is the remaining open
+question, not "is this possible at all" anymore.
+
+**`data360-prepare`'s own gotchas, read in full, are relevant here too**:
+it explicitly owns "the handoff from connector setup into a live
+stream" and DLO/transform management, and separately confirms (matching
+what's already noted on #44 rather than contradicting it) that "some
+external database connectors can be created via API while stream
+creation still requires UI flow" — the same known partial-automation
+gap, now corroborated from a second, independent source rather than
+resting on this framework's own research alone.
 
 ## 22. SQL-Server-backed local DSO ingestion — DEAD END for the actual ask; a heavier alternative exists but isn't being pursued
 
@@ -1643,6 +1714,10 @@ reviewable structure, not a wall of raw metadata. Depends on #18/#19
 existing first (need real Data Cloud metadata access before there's
 anything to document).
 
+**Check `forcedotcom/sf-skills` first** — `data360-orchestrate` explicitly
+covers "data spaces and data kit management" as part of its cross-phase
+scope. Same external-plugin caveat as #19.
+
 ## 24. Calculated Insight scripting + testing + CI/CD (not built, depends on #18)
 
 Idea, raised directly: script Calculated Insight definitions (DMQL) here
@@ -1655,6 +1730,12 @@ actually run the "query tests" part; the CI/CD deployment side would need
 its own research into how Calculated Insight metadata is deployed
 programmatically (Metadata API component type, if one exists, vs. Setup UI
 only today).
+
+**Check `forcedotcom/sf-skills` first** — `data360-segment` explicitly
+covers "manages calculated insights" already. Same external-plugin
+caveat as #19; the CI/CD-pipeline half of this idea (git-versioned,
+tested like code) still looks like a genuine gap even if their skill
+covers the interactive scripting side.
 
 ## 25. Web UI for less-technical users (not built)
 
@@ -2303,6 +2384,14 @@ as a stated trust-model fact (§7) about this framework itself, a real
 inbound-reachable SQL Server requirement on Data Cloud's side would be a
 genuinely new consideration worth surfacing there too if this gets built.
 
+**Checked `forcedotcom/sf-skills` — this one is a genuine gap, not
+redundant.** `data360-connect` manages *existing* connections/connectors
+(discovery, testing, browsing) — it doesn't add a new native connector
+*type*. Building SQL-Server-as-a-Data-Cloud-source specifically is still
+this item's own, real work; the official skill is prior art for the
+*workflow* (how connector setup/testing is normally scripted), not a
+substitute for the missing connector itself.
+
 ## 45. Data Transform authoring as code (researched, real progress — blocked on more real examples)
 
 Raised directly, alongside the same pain point for Calculated Insights
@@ -2392,6 +2481,42 @@ exactly the mistake #22's research was built to avoid. **Next step**: more
 real exported DTs (ideally exercising Join/Filter/Aggregate/Writeback),
 reviewed for structure only same as this one, before any generation code
 gets written.
+
+**Check `forcedotcom/sf-skills` before gathering more examples the hard
+way** — `data360-prepare` explicitly owns "transforms," and
+`data360-code-extension-generate` is a full init/run/scan/deploy workflow
+for **Python Code Extensions** (custom DLO/DMO transformations) specifically.
+Neither is confirmed to solve the exact blocker here (the other 8 DT
+canvas node types' JSON shape) — Code Extensions may be a parallel
+authoring surface to canvas-based Data Transforms rather than the same
+thing wearing a different name — but this is real, current, official
+material worth reading closely before spending more effort reverse-
+engineering exports by hand. Same external-plugin caveat as #19.
+
+**Confirmed, from reading the full `data360-code-extension-generate`
+skill: Code Extensions are a genuinely separate, parallel authoring
+surface, not the same JSON format under another name.** No `nodes`/`ui`
+canvas DAG at all — instead a Python project (`payload/entrypoint.py`)
+against a real SDK (`datacustomcode.Client`: `read_dlo`/`write_to_dlo`/
+`read_dmo`/`write_to_dmo`), scaffolded and deployed through the plugin's
+own `script init` → `scan` (auto-detects DLO/DMO read/write permissions
+from the code itself) → `run` (tests locally against real, not mocked,
+Data Cloud data) → `deploy` (needs Docker; ships a versioned, rollback-
+able deployment) workflow. Own dependency stack, on top of the `sf
+data360` plugin already noted elsewhere: SF CLI plugin
+`@salesforce/plugin-data-codeextension`, Python 3.11 specifically, and
+the `salesforce-data-customcode` PyPI package.
+
+**Practical implication for this item's actual blocker**: this doesn't
+solve "generate the canvas JSON for Join/Filter/Append/Aggregate/
+Hierarchy/Slice/Forecast/Writeback" — it sidesteps it. A transform too
+complex or too undocumented to safely reverse-engineer from one example
+can be written as plain Python instead of guessed-at canvas JSON. Worth
+keeping both paths open rather than treating this as the same research
+track: keep gathering real DT exports for the canvas-JSON path (per the
+"next step" above), but Code Extensions are already a viable escape
+hatch today, with a real, documented workflow, for anything currently
+blocked on missing canvas node examples.
 
 ## 46. Source directory ingestion + cross-pass structure validation (built)
 
@@ -2750,18 +2875,30 @@ conventions): SDMN encodes real information in per-entity fill color and
 border style (solid/dashed/dotted/none, indicating license/extension
 status) and a **diamond symbol** specifically for master-detail vs a
 plain line for lookup vs a curved line for recursive relationships.
-Mermaid's `erDiagram` cannot reproduce per-entity fill/border styling or
-a diamond relationship symbol — genuine gaps, not cosmetic ones, disclosed
-up front rather than glossed over.
 
-**Real find, not a workaround**: Mermaid's identifying (`--`, solid) vs
-non-identifying (`..`, dashed) relationship-line distinction maps
-naturally onto master-detail vs lookup — confirmed against Mermaid's own
-current `erDiagram` syntax docs, not assumed. Asked directly, given the
-unavoidable gap: build the best Mermaid approximation now (solid/dashed
-lines, `PK`/`FK` labels, crow's-foot cardinality, relationship labels)
-rather than chase pixel-perfect SDMN fidelity — colors/borders get
-polished by hand in Lucid after import if that distinction matters.
+**Design evolution — v1 (`erDiagram`) superseded by v2 (`classDiagram`),
+same session**: v1 shipped with Mermaid's `erDiagram` and solid/dashed
+relationship lines for master-detail/lookup, having concluded per-entity
+color coding was unreachable in Mermaid at all. That conclusion was
+**wrong for `erDiagram` specifically, not for Mermaid generally** —
+discovered by finding `forcedotcom/sf-skills` (Salesforce's own official
+Agent Skills library, `github.com/forcedotcom/sf-skills`), whose
+`external-diagram-mermaid-generate` skill solves the identical problem
+using `flowchart` + `style`/`classDef` to get real per-entity fill color
+for Standard/Custom/External objects. Investigating further (their own
+skill still uses `erDiagram` for field-level detail, `flowchart` only for
+color, an explicit tradeoff in their design) found a genuinely better
+single answer: Mermaid's **`classDiagram`** supports attribute lists
+*and* `classDef`/`:::` per-class color styling *and* UML composition
+(`*--`, filled diamond) vs aggregation (`o--`, hollow diamond) — all
+three at once, confirmed directly against Mermaid's own current docs, not
+assumed. Composition/aggregation is a closer match to SDMN's own
+diamond-on-the-parent-side master-detail convention than either v1's
+solid/dashed lines or sf-skills' own thin/thick flowchart arrows. **v2
+rebuilt `data_model_diagram.py` around `classDiagram`** rather than
+patching v1, and reused sf-skills' own validated Standard/Custom/External
+hex palette rather than inventing a new one — no reason to pick different
+colors for the same axis someone already tested.
 
 **What shipped**, new module `data_model_diagram.py`:
 - **Target model** (`generate_target_model_diagram`) — fully automatable,
@@ -2769,15 +2906,19 @@ polished by hand in Lucid after import if that distinction matters.
   already returns real, `describe()`-driven relationships
   (`is_master_detail`/`is_nillable`), reused directly. Attributes default
   to Id/Name/required/reference fields; `--mapping-path` scopes them to
-  whatever's actually flagged `Migrate Data = Yes` instead.
+  whatever's actually flagged `Migrate Data = Yes` instead. Each object is
+  colored Standard/Custom/External from `describe()`'s own `custom` flag
+  and `__x` API-name suffix — also real, not guessed.
 - **Source model(s)** (`generate_source_model_diagram`) — staging tables
   carry no FK constraints and no describe()-equivalent metadata, so
   relationships here are a **naming-convention heuristic only** (a
   column matching `<table>_?[Ii]d$` against another table in scope),
-  always rendered dashed and labeled `"(guessed)"`, and printed as an
-  explicit review list by the CLI command — never presented with the
-  same confidence as the target model's real relationships. Subject
-  areas are an **explicit, human-provided grouping**
+  always rendered as the weaker aggregation form and labeled
+  `"(guessed)"`, and printed as an explicit review list by the CLI
+  command — never presented with the same confidence as the target
+  model's real relationships, and never color-coded (no Standard/Custom/
+  External axis exists for a plain SQL table). Subject areas are an
+  **explicit, human-provided grouping**
   (`--subject-area "Name:Table1,Table2"`, repeatable), never
   auto-clustered — there's no reliable signal to cluster source tables
   on automatically, and guessing domain boundaries on someone else's
@@ -2790,13 +2931,98 @@ polished by hand in Lucid after import if that distinction matters.
   (`INFORMATION_SCHEMA.TABLE_CONSTRAINTS`/`KEY_COLUMN_USAGE` — real
   ground truth, not a guess) and only labeling `FK` a column that
   actually produced a guessed relationship, not merely one matching the
-  naming pattern.
+  naming pattern. Re-verified live after the v2 rewrite, same result.
 
 Both commands write a plain `.md` file with a fenced ` ```mermaid ` block
 — same "just emit Mermaid, GitHub/Lucid already handle the rest"
 convention #52 sketched (not yet built) for Migration Run Book
 flowcharts, no new file format invented. Read-only against
 Salesforce/SQL Server either way.
+
+**Relationship to `sf-skills`, not a replacement for it**: their skill is
+a general-purpose Salesforce architecture diagrammer (OAuth flows,
+sequence diagrams, system landscape, pre-built reference ERDs for
+standard clouds) with no concept of a migration project's own source
+staging tables, mapping doc, or load-order data — genuinely out of scope
+for it, not a gap. This item stays narrow and project-specific on
+purpose; no reason to rebuild their general diagramming capability here.
+
+---
+
+## 58. Bidirectional convert between a Data Transform's exported JSON and a Code Extension's Python (not built, depends on #45)
+
+Raised directly, off the back of #45's own research this session:
+`data360-code-extension-generate` confirmed Code Extensions are a real,
+separate authoring surface for Data Cloud transforms — a Python project
+(`payload/entrypoint.py`) against the `datacustomcode` SDK
+(`client.read_dlo`/`read_dmo`/`write_to_dlo`/`write_to_dmo`), not the
+same JSON format as the drag-and-drop Data Transform canvas wearing a
+different name. The idea, extended from a first framing of "JSON →
+Python only" to **both directions**: author in whichever surface is more
+convenient for the task at hand, then convert to the other — canvas JSON
+to a working `entrypoint.py`, or a Code Extension's Python back into a
+canvas-importable JSON — instead of being locked into whichever surface
+the transform happened to start in.
+
+**The two directions have genuinely different risk profiles — this is
+two features sharing one roadmap item, not one feature with a `--reverse`
+flag.**
+
+- **JSON → Python (the safer direction, unchanged from the original
+  framing).** #45 is stuck generating *into* the canvas JSON format — 8
+  of 11 node types still unconfirmed, no public schema reference, real
+  risk of guessing wrong. Converting *out of* that JSON into Python
+  doesn't carry the same risk for whatever node types *are* already
+  confirmed: a `load` node maps mechanically to a
+  `client.read_dlo()`/`read_dmo()` call with the same field list, a
+  `formula` node's `expressionType: "SQL"` expression to a pandas column
+  assignment, `outputD360` to `client.write_to_dlo()`/`write_to_dmo()`
+  with the same field mapping. Translating known structure to known SDK
+  calls is safer ground than inventing structure to match an undocumented
+  format.
+
+- **Python → JSON (the harder direction — inherits #45's original
+  blocker, doesn't route around it).** This is generation *into* the
+  same undocumented canvas format #45 already flagged as too risky to
+  build against from one example — bidirectionality doesn't change that;
+  it just means this direction stays gated on the same "more real DT
+  exports first" condition #45 is already waiting on, for every node
+  type beyond the 3 confirmed. It also adds a second constraint JSON→Python
+  doesn't have: arbitrary Python has no canvas equivalent at all — a
+  hand-written `entrypoint.py` using pandas/numpy freely can express
+  things none of the 11 documented canvas node types can represent. This
+  direction can only ever recognize a **constrained subset** of Code
+  Extension Python that maps cleanly onto canvas node semantics (a
+  `client.read_dlo()` call, a recognizable `.merge()`/`.groupby().agg()`/
+  boolean-mask filter, a `client.write_to_dlo()` call at the end) — it
+  should say so explicitly and refuse to convert whatever falls outside
+  that subset, never silently drop or misrepresent logic the canvas can't
+  express.
+
+**Scope this the same way #45 already committed to**: build JSON→Python
+for the 3 node types already confirmed from one real example (`load`,
+`formula`, `outputD360`) first, ship that as genuinely useful today.
+Python→JSON stays research, not implementation, until #45 itself has
+enough real examples to trust generating the other 8 node types — the
+same "more real examples before more generation code" discipline #45
+already applies, not a reason to wait and build nothing on the JSON→Python
+side. Either direction's output is a starting point for human review
+(JSON→Python before `script scan`/`run`/`deploy`; Python→JSON before
+import into a canvas DT), same spirit as `auto_mapper.py`'s mapping
+suggestions or `snowfakery_data.py`'s recipe generation — never assumed
+correct and deployed/imported unreviewed.
+
+**Open design question, not yet resolved**: whether this ships as real
+CLI commands in this repo (`cli.py convert-transform-to-code-extension
+transform.json --output payload/` and the reverse, matching this
+framework's own established "deterministic generation gets a real
+command + slash-command wrapper" convention — #36, #57 both did this) or
+as a Claude Skill of its own (a documented conversion workflow, closer to
+how `sf-skills`' own `data360-*` family is shaped) — or both, a skill
+that wraps the CLI commands the way this repo's existing
+`.claude/commands/` already wrap every other verb. Decide when actually
+building this, once enough real DT exports exist to know the converter
+is worth shipping at all.
 
 ---
 

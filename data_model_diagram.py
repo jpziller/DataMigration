@@ -5,22 +5,37 @@ in Mermaid, for import into Lucid.
 Verified against developer.salesforce.com's actual SDMN guide before
 building this: SDMN encodes real information in per-entity fill color,
 border style (solid/dashed/dotted/none), and a diamond-vs-line-vs-curve
-relationship symbol (master-detail/lookup/recursive) -- none of which
-Mermaid's erDiagram can reproduce. What Mermaid *can* do natively, not as
-a workaround: its identifying (`--`, solid) vs non-identifying (`..`,
-dashed) relationship-line distinction maps genuinely onto master-detail
-vs lookup. That's the one real notation feature this reuses; everything
-else (PK/FK labels, crow's-foot cardinality, relationship labels) is
-Mermaid's own convention, not a literal SDMN reproduction.
+relationship symbol (master-detail/lookup/recursive).
+
+Renders as Mermaid `classDiagram`, not `erDiagram` or `flowchart` --
+confirmed against Mermaid's own current docs to be the one diagram type
+that gets all three SDMN-relevant features at once:
+  - UML composition (`*--`, filled diamond) vs aggregation (`o--`, hollow
+    diamond) for master-detail vs lookup -- a genuinely closer visual match
+    to SDMN's own diamond-on-the-parent-side convention than erDiagram's
+    solid/dashed lines or flowchart's thin/thick arrows.
+  - Real per-class fill/border color via `classDef`/`:::` styling --
+    something erDiagram cannot do at all. Palette reused from
+    forcedotcom/sf-skills' own `external-diagram-mermaid-generate` skill
+    (Standard=sky blue, Custom=orange, External=green) rather than
+    inventing a new one -- their skill already validated this pattern,
+    no reason to pick different colors for the same STD/CUST/EXT axis.
+  - Attribute lists per class (PK/FK marked as trailing text -- Mermaid
+    has no native key-stereotype syntax for individual attributes) plus
+    `"1" *-- "1..*"`-style cardinality strings on each relationship end.
 
 Target model: fully automatable. load_order.build_dependency_edges()
 already returns real, describe()-driven relationships
 (is_master_detail/is_nillable) -- reused directly, not reimplemented.
+Object-type color coding (Standard/Custom/External) comes from describe()
+itself (the `custom` flag, and the `__x` API-name suffix for external
+objects) -- also real, not guessed.
 
 Source model(s): staging tables carry no FK constraints and no
 describe()-equivalent relationship metadata, so relationships here are a
-naming-convention HEURISTIC ONLY, always labeled "(guessed)" and never
-rendered the same way as the target model's confirmed relationships --
+naming-convention HEURISTIC ONLY, always labeled "(guessed)", always
+rendered as the weaker aggregation form, and never colored by object type
+(there's no Standard/Custom/External axis for a plain SQL table) --
 matching this framework's "auto-map suggests, human decides" discipline
 (hard rule 11's spirit). Subject-area grouping is an explicit, human-
 supplied input, never auto-clustered -- there's no reliable signal to
@@ -37,38 +52,65 @@ from risk_analyzer import fields_in_scope_from_mapping
 
 _FK_HEURISTIC_RE = re.compile(r"^(.+?)_?[Ii]d$")
 
+# Reused verbatim from forcedotcom/sf-skills' external-diagram-mermaid-generate
+# skill's own color palette -- an already-validated STD/CUST/EXT convention,
+# not a new one invented here.
+_OBJECT_TYPE_CLASS_DEFS = {
+    "standardObject": "fill:#bae6fd,stroke:#0369a1,color:#1f2937",
+    "customObject": "fill:#fed7aa,stroke:#c2410c,color:#1f2937",
+    "externalObject": "fill:#a7f3d0,stroke:#047857,color:#1f2937",
+}
 
-def _mermaid_attribute_lines(attributes):
-    lines = []
+
+def _object_type_css_class(object_name, is_custom):
+    if object_name.endswith("__x"):
+        return "externalObject"
+    if is_custom:
+        return "customObject"
+    return "standardObject"
+
+
+def _render_class(entity_name, attributes):
+    lines = [f"    class {entity_name} {{"]
     for field_type, field_name, key_label in attributes:
         key_part = f" {key_label}" if key_label else ""
-        lines.append(f"        {field_type} {field_name}{key_part}")
-    return lines
-
-
-def _render_entity(entity_name, attributes):
-    lines = [f"    {entity_name} {{"]
-    lines.extend(_mermaid_attribute_lines(attributes))
+        lines.append(f"        +{field_type} {field_name}{key_part}")
     lines.append("    }")
     return "\n".join(lines)
 
 
 def _render_relationship(parent, child, label, is_master_detail, is_nillable, guessed=False):
-    """Mermaid erDiagram relationship line: `PARENT ||--o{ CHILD : "label"`.
-    Solid (--) = identifying = master-detail; dashed (..) = non-identifying
-    = lookup. Child-side cardinality is one-or-more (|{) when the field is
-    required (not nillable), zero-or-more (o{) otherwise. guessed=True
-    appends " (guessed)" to the label -- source-side heuristic
-    relationships must never look identical to a confirmed one."""
-    line_token = "--" if is_master_detail else ".."
-    child_card = "|{" if not is_nillable else "o{"
+    """Mermaid classDiagram relationship: `Parent "1" *-- "1..*" Child : "label"`.
+    Composition (*--, filled diamond) = master-detail; aggregation (o--,
+    hollow diamond) = lookup -- SDMN itself uses a diamond specifically for
+    master-detail, so this is a closer match than a plain line-style
+    distinction. Child-side cardinality is "1..*" when the field is
+    required (not nillable), "0..*" otherwise. guessed=True appends
+    " (guessed)" to the label and always renders as aggregation, regardless
+    of is_master_detail -- a guess should never visually claim the
+    stronger, more confident relationship type."""
+    arrow = "o--" if (guessed or not is_master_detail) else "*--"
+    child_card = "1..*" if not is_nillable else "0..*"
     display_label = f"{label} (guessed)" if guessed else label
-    return f'    {parent} ||{line_token}{child_card} {child} : "{display_label}"'
+    return f'    {parent} "1" {arrow} "{child_card}" {child} : "{display_label}"'
 
 
-def _wrap_diagram(title, entity_blocks, relationship_lines, notes=None):
-    parts = [f"# {title}", "", "```mermaid", "erDiagram"]
-    parts.extend(entity_blocks)
+def _wrap_diagram(title, class_blocks, relationship_lines, css_classes_by_entity=None, notes=None):
+    parts = [f"# {title}", "", "```mermaid", "classDiagram"]
+
+    used_defs = sorted(set((css_classes_by_entity or {}).values()))
+    for css_class in used_defs:
+        parts.append(f"    classDef {css_class} {_OBJECT_TYPE_CLASS_DEFS[css_class]}")
+    if used_defs:
+        parts.append("")
+
+    parts.extend(class_blocks)
+
+    if css_classes_by_entity:
+        parts.append("")
+        for entity_name, css_class in css_classes_by_entity.items():
+            parts.append(f"    class {entity_name}:::{css_class}")
+
     if relationship_lines:
         parts.append("")
         parts.extend(relationship_lines)
@@ -80,18 +122,21 @@ def _wrap_diagram(title, entity_blocks, relationship_lines, notes=None):
 
 
 def generate_target_model_diagram(sf, object_names, mapping_path=None):
-    """Mermaid ERD for a target-org data model (core + custom objects).
-    Relationships come straight from load_order.build_dependency_edges()
-    -- real, describe()-driven, not guessed. Attributes default to
-    Id/Name/required/reference fields; --mapping-path scopes each object's
-    attribute list to whatever's actually flagged Migrate Data = Yes for
-    it instead. Returns the full .md file text (title + fenced mermaid
-    block)."""
+    """Mermaid classDiagram ERD for a target-org data model (core + custom
+    objects). Relationships come straight from
+    load_order.build_dependency_edges() -- real, describe()-driven, not
+    guessed. Attributes default to Id/Name/required/reference fields;
+    --mapping-path scopes each object's attribute list to whatever's
+    actually flagged Migrate Data = Yes for it instead. Each object is
+    colored by its real describe()-derived type (Standard/Custom/External).
+    Returns the full .md file text (title + fenced mermaid block)."""
     scoped_fields = fields_in_scope_from_mapping(mapping_path, object_names) if mapping_path else {}
 
-    entity_blocks = []
+    class_blocks = []
+    css_classes_by_entity = {}
     for object_name in object_names:
         desc = getattr(sf, object_name).describe()
+        css_classes_by_entity[object_name] = _object_type_css_class(object_name, desc.get("custom", False))
         allowed = scoped_fields.get(object_name)
         attributes = []
         for f in desc["fields"]:
@@ -109,7 +154,7 @@ def generate_target_model_diagram(sf, object_names, mapping_path=None):
                     continue
             key_label = "PK" if name == "Id" else ("FK" if f["type"] == "reference" else None)
             attributes.append((f["type"], name, key_label))
-        entity_blocks.append(_render_entity(object_name, attributes))
+        class_blocks.append(_render_class(object_name, attributes))
 
     edges = build_dependency_edges(sf, object_names)
     relationship_lines = [
@@ -117,7 +162,10 @@ def generate_target_model_diagram(sf, object_names, mapping_path=None):
         for e in edges
     ]
 
-    return _wrap_diagram(f"Target data model: {', '.join(object_names)}", entity_blocks, relationship_lines)
+    return _wrap_diagram(
+        f"Target data model: {', '.join(object_names)}",
+        class_blocks, relationship_lines, css_classes_by_entity=css_classes_by_entity,
+    )
 
 
 def _source_table_columns(engine, schema, table_name):
@@ -200,10 +248,12 @@ def _guess_fk_relationships(table_names, columns_by_table):
 
 
 def generate_source_model_diagram(engine, table_names, schema="dbo", mapping_path=None):
-    """Mermaid ERD for one subject-area's source tables. Relationships are
-    a naming-convention guess only (see _guess_fk_relationships) -- always
-    rendered as dashed/non-identifying (a guessed relationship is never
-    presented as a confirmed master-detail) and labeled "(guessed)".
+    """Mermaid classDiagram ERD for one subject-area's source tables.
+    Relationships are a naming-convention guess only (see
+    _guess_fk_relationships) -- always rendered as aggregation (the
+    weaker, non-owning relationship type) and labeled "(guessed)". No
+    object-type color coding here -- Standard/Custom/External is a
+    Salesforce-object concept with no equivalent for a plain SQL table.
     Returns (file_text, guessed_relationships) so the caller can print the
     guesses for explicit human review."""
     columns_by_table = {t: _source_table_columns(engine, schema, t) for t in table_names}
@@ -217,7 +267,7 @@ def generate_source_model_diagram(engine, table_names, schema="dbo", mapping_pat
     for g in guesses:
         guessed_fk_columns_by_table[g["child"]].add(g["field"])
 
-    entity_blocks = []
+    class_blocks = []
     for table_name in table_names:
         allowed = _source_fields_in_scope(mapping_path, table_name)
         attributes = []
@@ -231,7 +281,7 @@ def generate_source_model_diagram(engine, table_names, schema="dbo", mapping_pat
             else:
                 key_label = None
             attributes.append((dtype, col_name, key_label))
-        entity_blocks.append(_render_entity(table_name, attributes))
+        class_blocks.append(_render_class(table_name, attributes))
 
     relationship_lines = [
         _render_relationship(g["parent"], g["child"], g["field"],
@@ -243,5 +293,5 @@ def generate_source_model_diagram(engine, table_names, schema="dbo", mapping_pat
         "> Relationships in this source model are a **naming-convention guess only** "
         "(no foreign keys exist on staging tables) -- verify every one before relying on it.",
     ]
-    file_text = _wrap_diagram(f"Source data model: {', '.join(table_names)}", entity_blocks, relationship_lines, notes)
+    file_text = _wrap_diagram(f"Source data model: {', '.join(table_names)}", class_blocks, relationship_lines, notes=notes)
     return file_text, guesses
