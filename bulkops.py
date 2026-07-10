@@ -391,20 +391,32 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     # rule 13) is a human-only, SQL-side audit field -- excluded here the
     # same way id_column/error_column/key_column already are, so it never
     # reaches _preflight_check (never a false "not_a_real_field" abort) and
-    # never appears in the actual API payload. Only applies to the
-    # auto-derived list -- an explicit send_columns is never second-guessed.
+    # never appears in the actual API payload. [Sort] (hard rule 6) is the
+    # same kind of local/framework-only auxiliary column and must be
+    # excluded the same way on every operation -- confirmed live: a load
+    # table with a real [Sort] column previously failed _preflight_check
+    # outright ("not a real field: ['Sort']") on its very first bulk_op()
+    # call, since nothing excluded it. key_column (e.g. "LoadId") is
+    # likewise never a real Salesforce field and must be excluded for
+    # update/upsert too, not just insert -- it was already correctly
+    # excluded there but missing here, the same class of bug. Only applies
+    # to the auto-derived list -- an explicit send_columns is never
+    # second-guessed.
+    _auto_excluded = {error_column, "Sort"}
     if operation == "delete":
         sent = [id_column]
     elif operation == "insert":
         sent = send_columns or [
             c for c in df.columns
-            if c not in (id_column, error_column, key_column)
+            if c not in (_auto_excluded | {id_column, key_column})
             and not c.upper().startswith(ref_prefix.upper())
         ]
-    else:  # update / upsert
+    else:  # update / upsert -- id_column IS sent (Salesforce needs it to
+        # identify the record); key_column/Sort are not.
         sent = send_columns or [
             c for c in df.columns
-            if c != error_column and not c.upper().startswith(ref_prefix.upper())
+            if c not in (_auto_excluded | {key_column})
+            and not c.upper().startswith(ref_prefix.upper())
         ]
 
     missing = [c for c in sent if c not in df.columns]

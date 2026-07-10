@@ -46,8 +46,9 @@ from snowfakery import generate_data
 from sqlalchemy import text
 
 import load_order as lo
+import sql_dialect
 from mock_data import _UNSUPPORTED_TYPES, _DATA_DOT_COM_FIELDS, truncate_to_field_lengths
-from type_map import is_compound, sf_type_to_sql
+from type_map import is_compound
 
 _NAME_HINTS = [
     (("firstname",), "FirstName"),
@@ -288,6 +289,8 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
     all_records = pd.read_json(json_path)
     rows_written = {}
 
+    d = sql_dialect.for_engine(engine)
+
     for name in object_names:
         table_name = f"{name}_Mock"
         object_rows = all_records[all_records["_table"] == name].copy()
@@ -304,23 +307,24 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
 
         object_rows = truncate_to_field_lengths(object_rows, mapped_fields)
 
+        int_type = d.sf_type_to_sql({"type": "int"})
         extra_cols_sql = []
         if "_MockRowId" in object_rows.columns:
-            extra_cols_sql.append("[_MockRowId] INT NULL")
+            extra_cols_sql.append(f"{d.quote_ident('_MockRowId')} {int_type} NULL")
         if "_ParentMockRef" in object_rows.columns:
-            extra_cols_sql.append("[_ParentMockRef] INT NULL")
+            extra_cols_sql.append(f"{d.quote_ident('_ParentMockRef')} {int_type} NULL")
         for secondary_col in [c for c in object_rows.columns if c.startswith("_SecondaryParentRef_")]:
-            extra_cols_sql.append(f"[{secondary_col}] INT NULL")
+            extra_cols_sql.append(f"{d.quote_ident(secondary_col)} {int_type} NULL")
 
         cols_sql = ",\n    ".join(
-            [f'[{f["name"]}] {sf_type_to_sql(f)} NULL' for f in mapped_fields] + extra_cols_sql
+            [f'{d.quote_ident(f["name"])} {d.sf_type_to_sql(f)} NULL' for f in mapped_fields] + extra_cols_sql
         )
+        qualified = d.qualify(schema, table_name)
+        already_exists = d.table_exists(engine, schema, table_name)
         with engine.begin() as cx:
-            cx.execute(text(
-                f"IF OBJECT_ID('{schema}.{table_name}', 'U') IS NOT NULL "
-                f"DROP TABLE [{schema}].[{table_name}];"
-            ))
-            cx.execute(text(f"CREATE TABLE [{schema}].[{table_name}] (\n    {cols_sql}\n);"))
+            if already_exists:
+                cx.execute(text(f"DROP TABLE {qualified};"))
+            cx.execute(text(f"CREATE TABLE {qualified} (\n    {cols_sql}\n);"))
 
         object_rows.to_sql(table_name, engine, schema=schema, if_exists="append", index=False)
         rows_written[name] = len(object_rows)

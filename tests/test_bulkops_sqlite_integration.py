@@ -15,54 +15,13 @@ import load_table_prep as ltp
 import replicate as rep
 import sql_client
 from config import Settings
+from stub_salesforce import StubBulkHandler, StubSF, describe_fields
 
-_FIELDS = [
-    {"name": "Id", "type": "id", "length": 18, "createable": False, "updateable": False, "nillable": True},
-    {"name": "Name", "type": "string", "length": 255, "createable": True, "updateable": True,
-     "nillable": False, "defaultedOnCreate": False},
-    {"name": "LegacyId__c", "type": "string", "length": 255, "createable": True, "updateable": True,
-     "nillable": True, "defaultedOnCreate": False},
-]
+_FIELDS = describe_fields(["Name", "LegacyId__c"])
 
 
-class _StubObjectDescribe:
-    def __init__(self, fields):
-        self._fields = fields
-
-    def describe(self):
-        return {"fields": self._fields}
-
-
-class _StubBulk2:
-    def __init__(self, handler):
-        self._handler = handler
-
-    def __getattr__(self, name):
-        return self._handler
-
-
-class _StubBulkHandler:
-    def __init__(self, success_csv, failure_csv):
-        self._success_csv = success_csv
-        self._failure_csv = failure_csv
-
-    def insert(self, csv_path, batch_size=None):
-        return [{"job_id": "JOB1"}]
-
-    def get_successful_records(self, job_id):
-        return self._success_csv
-
-    def get_failed_records(self, job_id):
-        return self._failure_csv
-
-
-class _StubSF:
-    def __init__(self, fields, handler):
-        self._fields = fields
-        self.bulk2 = _StubBulk2(handler)
-
-    def __getattr__(self, name):
-        return _StubObjectDescribe(self._fields)
+def _stub_sf(handler):
+    return StubSF({"Account": _FIELDS}, {"Account": handler})
 
 
 @pytest.fixture
@@ -87,7 +46,7 @@ def test_create_table_replicate_bulk_op_writeback_roundtrip(sqlite_engine, tmp_p
     })
     df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
 
-    sf = _StubSF(_FIELDS, _StubBulkHandler(
+    sf = _stub_sf(StubBulkHandler(
         "LegacyId__c,Name,sf__Id\nA1,Row1,001XXXXXXXXXXXAAA\nA3,Row3,001XXXXXXXXXXXCCC\n",
         "LegacyId__c,Name,sf__Error\nA2,Row2,SOME_ERROR:deliberately failed for this test\n",
     ))
@@ -122,7 +81,7 @@ def test_build_retry_table_captures_only_failed_rows(sqlite_engine, tmp_path):
     })
     df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
 
-    sf = _StubSF(_FIELDS, _StubBulkHandler(
+    sf = _stub_sf(StubBulkHandler(
         "LegacyId__c,Name,sf__Id\nA1,Row1,001XXXXXXXXXXXAAA\nA3,Row3,001XXXXXXXXXXXCCC\n",
         "LegacyId__c,Name,sf__Error\nA2,Row2,SOME_ERROR:deliberately failed for this test\n",
     ))
@@ -147,7 +106,7 @@ def test_two_schema_logging_isolation(sqlite_engine, tmp_path):
 
     df = pd.DataFrame({"LoadId": [1], "LegacyId__c": ["B1"], "Name": ["RowB1"]})
     df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
-    sf = _StubSF(_FIELDS, _StubBulkHandler(
+    sf = _stub_sf(StubBulkHandler(
         "LegacyId__c,Name,sf__Id\nB1,RowB1,001XXXXXXXXXXXDDD\n", ""
     ))
     summary = bo.bulk_op(
