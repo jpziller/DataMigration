@@ -75,6 +75,20 @@ def _read_csv_header(csv_path):
         return next(csv.reader(fh))
 
 
+def _check_no_duplicate_columns(columns, csv_path):
+    """Hard rule 14: a CSV header with a repeated column name would make
+    generate_import_script()'s CREATE TABLE fail outright ("column name ...
+    specified more than once") -- catch it here with a clear message
+    instead of a raw SQL Server error partway through a run."""
+    duplicates = sorted({c for c in columns if columns.count(c) > 1})
+    if duplicates:
+        raise ValueError(
+            f"{csv_path}'s header has duplicate column name(s): {duplicates} -- "
+            "fix the source file before it can be staged (a CREATE TABLE can't "
+            "have the same column twice)."
+        )
+
+
 def _next_script_number(sql_dir):
     if not os.path.isdir(sql_dir):
         return 10
@@ -105,6 +119,7 @@ def generate_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_
     is the only explicit path that replaces one."""
     os.makedirs(sql_dir, exist_ok=True)
     columns = _read_csv_header(csv_path)
+    _check_no_duplicate_columns(columns, csv_path)
     abs_csv_path = os.path.abspath(csv_path)
 
     number = _next_script_number(sql_dir)

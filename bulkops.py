@@ -287,7 +287,7 @@ def _write_bulkops_log_row(engine, schema, row):
 def bulk_op(sf, engine, object_name, operation, source_table,
             send_columns=None, external_id=None,
             key_column="LoadId", id_column="Id", error_column="Error",
-            schema="dbo", stage_dir="_stage",
+            ref_prefix="REF_", schema="dbo", stage_dir="_stage",
             email_deliverability=None, confirm_external_email_risk=False,
             batch_size="auto", run_book_path=None, run_book_tab=None):
     """See this module's docstring for the full design. batch_size (ROADMAP
@@ -304,7 +304,14 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     migration_run_book.sync_run_book_from_log() against that tab right
     after -- the "end of the bulk job" moment the sync is meant for. Not
     automatic by default; bulkops shouldn't silently touch a spreadsheet
-    file unless asked to."""
+    file unless asked to.
+
+    ref_prefix (hard rule 13): any auto-derived-list column whose name
+    starts with this prefix (case-insensitive) is a human-only, SQL-side
+    audit field -- excluded from the actual API payload and from
+    _preflight_check, so it's never a false "not a real field" abort. An
+    explicit send_columns list is never filtered this way -- naming a
+    REF_ column there is a deliberate override."""
     operation = operation.lower()
     if operation not in ("insert", "update", "upsert", "delete"):
         raise ValueError(f"Unsupported operation: {operation}")
@@ -356,16 +363,25 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         skip_mask = df[id_column].isna()
         not_found_count = int(skip_mask.sum())
 
-    # Which columns get sent to Salesforce.
+    # Which columns get sent to Salesforce. A REF_-prefixed column (hard
+    # rule 13) is a human-only, SQL-side audit field -- excluded here the
+    # same way id_column/error_column/key_column already are, so it never
+    # reaches _preflight_check (never a false "not_a_real_field" abort) and
+    # never appears in the actual API payload. Only applies to the
+    # auto-derived list -- an explicit send_columns is never second-guessed.
     if operation == "delete":
         sent = [id_column]
     elif operation == "insert":
         sent = send_columns or [
             c for c in df.columns
             if c not in (id_column, error_column, key_column)
+            and not c.upper().startswith(ref_prefix.upper())
         ]
     else:  # update / upsert
-        sent = send_columns or [c for c in df.columns if c != error_column]
+        sent = send_columns or [
+            c for c in df.columns
+            if c != error_column and not c.upper().startswith(ref_prefix.upper())
+        ]
 
     missing = [c for c in sent if c not in df.columns]
     if missing:

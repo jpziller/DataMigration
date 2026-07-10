@@ -77,19 +77,21 @@ summarizes.
 | 39 | Ticket system (JIRA or equivalent) read/comment integration | Not built, needs API research | — | Idea: post comments to a specific JIRA (or equivalent) ticket directly (e.g. load results), and cross-reference GitHub commits/PRs tied to that ticket — deeper than the Migration Run Book header's static project link (#16). |
 | 40 | Configuration Workbook drift detection | Not built — blocked on a real template | — | Idea: read a team's existing "Configuration Workbook" (how developers document their build) and cross-check it against the actual deployed metadata — the same category of problem `check-mapping-balance` (#3) solves for mapping docs, applied to build documentation instead. Waiting on a real example template before this gets designed. |
 | 41 | Per-object record counts via the recordCount API | **Built** | `record-counts` | One HTTP call for many objects' record counts instead of a SOQL COUNT() per object — fast rough triage across many objects, confirmed live to be an approximate/cached snapshot (can lag real inserts by more than a few seconds), so not a substitute for `profile-salesforce`'s exact count when validating a load actually landed. |
-| 42 | Unit tests + CI for the pure-logic modules | **Built** | `tests/*.py` (pytest) + `.github/workflows/tests.yml` | 53 pytest cases over the no-org-required logic (batch-size ladder math, load-order toposort/cycle grouping, run-book template parsing + `_object_matches()`'s Order/OrderItem regression, mapping-doc INSERT-INTO regex, auto-mapper name normalization/matching, #50's `validate_external_id_field`, #46's script-column parsing/drift comparison), run automatically on every push/PR via GitHub Actions. Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
+| 42 | Unit tests + CI for the pure-logic modules | **Built** | `tests/*.py` (pytest) + `.github/workflows/tests.yml` | 59 pytest cases over the no-org-required logic (batch-size ladder math, load-order toposort/cycle grouping, run-book template parsing + `_object_matches()`'s Order/OrderItem regression, mapping-doc INSERT-INTO regex + #56's duplicate-field detection, auto-mapper name normalization/matching, #50's `validate_external_id_field`, #46's script-column parsing/drift comparison + #56's duplicate-header check), run automatically on every push/PR via GitHub Actions (fixed to invoke via `python -m pytest`, not bare `pytest`, after every prior run silently failed on `ModuleNotFoundError`). Live org verification stays the standard for org-touching paths; this covers the logic underneath. |
 | 43 | Salesforce GraphQL API | **Researched — not pursued (out of scope)** | — | Nested relationship traversal and small-batch mutations in one call — genuinely useful for a UI making many round-trips, but this framework's actual needs (bulk extraction, bulk DML) are already better served by SOQL/Bulk API 2.0. See write-up for the specific reasoning. |
 | 44 | Native database connectors (SQL Server / MongoDB) as the Data Cloud source | Not built, needs research | — | Idea: let Data Cloud pull directly from the mirror DB (or MongoDB) via its own native connector types instead of this framework pushing data via API — no custom ingestion code needed, but network-reachability and schedule-vs-on-demand questions need answering first. |
 | 45 | Data Transform authoring as code | Researched, real progress — blocked on more real examples before writing generation code | — | Idea: generate a Data Transform's JSON definition programmatically instead of building it by hand in the drag-and-drop canvas. Confirmed real (export/import round-trip works, JSON shape partly mapped, 11-node taxonomy documented) — not yet buildable with confidence since only one real example (3 of ~11 node types) has been seen. |
 | 46 | Source directory ingestion + cross-pass structure validation | **Built** | `import-csv-directory <dir> --ticket <ref>` (+ `--rebuild`, `--run-book`) | Generalizes a real client's proven hand-built convention (all-`NVARCHAR(MAX)` staging via `BULK INSERT`, typed later via T-SQL) into a bulk, directory-wide command: generates a numbered, git-committed script per new file, reuses it unchanged on every later pass, and hard-stops a file (not the whole batch) if its CSV's current column list no longer matches the script's — comparing the full *ordered* list, since `BULK INSERT` maps columns positionally. Syncs into the Migration Run Book's Pre-Migration phase. |
 | 47 | Pass-aware mapping/profiling workflow state | **Built** | `--reprofile` (profiling), automatic review-pass framing (`auto-map`) | Consults timestamp state that already existed (`FieldProfile.AnalyzedDate`, `SourceRegistry.AutoMappedDate`) rather than inventing new tracking: profiling now skips by default on an already-profiled object/table, and `auto-map` frames a second run as a review pass (already-decided vs. freshly-suggested counts) instead of a first-pass summary. |
 | 48 | Auto-map autonomy boundary (real vs. mock data) + learning feedback loop | Boundary confirmed **Hard Rule 11**; learning-loop tooling not built | — | On real client data, auto-map only ever produces a first pass (profile/document/auto-map/notes) — humans finish it via workshop, always. On self-generated mock data, a full mapping can be completed autonomously for practice. Separately: after a human finishes a *real* mapping, ask (every time, never assumed) whether to contribute what was learned to the shared synonym thesaurus — staged for a human to review and commit later, never auto-written. |
-| 49 | Migrate-flagged-but-unmapped field detection + suggestion | Not built, refines #3/#10 | — | Idea: catch a mapping-doc row flagged `Migrate Data = Yes` with no Target Field chosen yet, alert the architect, and attempt a `describe()`-driven suggestion rather than just flagging the gap. |
+| 49 | Migrate-flagged-but-unmapped field detection + suggestion | **Built**, refines #3/#10 | `check-required-mappings <Object> <MappingPath>` | Flags every mapping-doc row marked `Migrate Data = Yes` with no Target Field chosen, and attempts a `describe()`-driven suggestion via the same matching `auto-map` uses. Read-only — never writes into the doc; that's `auto-map`'s job. |
 | 50 | Migration-key/External ID field validation against live describe() | **Built**, hardens rules 4/7 | `validate-external-id <Object> <Field>` (hard rule 12) | Confirms a named target field is genuinely `externalId`+`unique` in the live org's describe() before it's trusted as a migration key — explicit object+field parameters (same convention as `CheckLoadTableDuplicateKeys`/`--external-id`), not auto-detected from the mapping doc. Read-only, exits nonzero on failure so it can gate a script. Not this framework's job to create that field, just to gate on it being correctly in place. |
-| 51 | Reference-record pull/compare tool | Not built | — | Idea: pull an architect-hand-created record by Id and diff it field-by-field against what this project's own load script would have produced, instead of eyeballing two field lists side by side. |
+| 51 | Reference-record pull/compare tool | **Built** | `compare-reference-record <Object> <LoadTable> <RecordId> --migration-key <Field>` | Diffs a live, hand-created reference record against the Load table row its migration key corresponds to — matched by migration key (read off the live record), not `Id`, since a hand-created record was never loaded via `bulkops`. Read-only review aid; never writes back. |
 | 52 | Mermaid process-flow diagrams from the Migration Run Book | Not built — new feature, explicitly requested | — | Idea: generate a Mermaid flowchart from a run-book tab's Stage/Object/Dependency structure as a `.md` file — renders natively on GitHub, and is already the right input format for a Lucid Chart import later. |
 | 53 | Supervised end-to-end load orchestrator | Not built — needs a collaborative design pass, UAT/PROD-only, aspirational | — | Idea: for UAT/PROD passes only (never dev/test), run the full load order with less per-step confirmation — but only ever with a strong bias to stop and ask over "plow ahead," since backing data out of a live org is worse than waiting for approval. An aspiration to earn over many projects, not a switch to flip; the actual warn/pause/stop signal framework needs to be designed together, not scoped solo. |
 | 54 | Chat-driven human-in-the-loop alerting/control (Slack/Teams) | Not built — roadmap idea per explicit request | — | Idea: outbound alerts to Slack/Teams instead of email (low-risk, near-term), and further out, driving a production run from Slack itself — the latter needs a real architecture decision (listener vs. polling) that would require revisiting `docs/SECURITY_OVERVIEW.md`'s current "no network listener" trust model. |
+| 55 | `REF_`-prefixed human-only audit columns, excluded from bulkops | **Built**, hard rule 13 | `--ref-prefix` (default `REF_`) | Raised directly from real DBAmp-era experience: a `REF_`-prefixed Load table column is a human-only SQL-side audit field, excluded from the auto-derived sent-column list and from the pre-flight "not a real field" check — never reaches the API, never aborts the load. |
+| 56 | Duplicate target-field detection (scripts + spreadsheets) | **Built**, hard rule 14 | `check-mapping-balance` (extended), `import-csv-directory` | Raised directly: a single `CREATE TABLE`/`INSERT INTO` column list, or a single mapping-doc sheet, must never target the same field twice — different scripts/sheets doing so is fine and expected. `check-mapping-balance` reports both `duplicate_target_fields` and `duplicate_implemented_columns`; `import-csv-directory` refuses a CSV whose own header already repeats a column. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -2498,17 +2500,27 @@ non-negotiable:
   database still existing), not written into `reference/field_synonyms.
   json` directly.
 
-## 49. Migrate-flagged-but-unmapped field detection + describe()-driven suggestion (not built, refines #3/#10)
+## 49. Migrate-flagged-but-unmapped field detection + describe()-driven suggestion (built, refines #3/#10)
 
 Partially covered already — `check-mapping-balance` (#3) already flags a
 transform that populates an undocumented field, or documents a field the
 transform doesn't populate, and cross-checks both against live
-`describe()` for `not_a_real_field`. What it doesn't do yet: catch this
-**in the mapping doc itself, before any transform is written** — a row
-where `Migrate Data = Yes` but the Target Field cell is still blank.
-Raised directly: when found, alert the architect and attempt a
-`describe()`-driven suggestion (reusing `auto_mapper.py`'s existing
-matching logic) rather than just flagging the gap and stopping there.
+`describe()` for `not_a_real_field`. What it didn't do: catch this **in
+the mapping doc itself, before any transform is written** — a row where
+`Migrate Data = Yes` but the Target Field cell is still blank.
+
+**What shipped**: `mapping_doc.find_unmapped_required_fields(mapping_path,
+object_name)` reads the sheet directly for exactly that gap.
+`auto_mapper.py`'s target-lookup-building loop (describe() → createable/
+non-compound fields → normalized-name/label dict) was extracted into a
+shared `_build_target_lookup()` so the new
+`suggest_for_unmapped_required_fields()` reuses the exact same
+exact/thesaurus/fuzzy matching `suggest_mappings()` already uses, rather
+than duplicating it. Wired up as `cli.py check-required-mappings <Object>
+<MappingPath>` — deliberately **read-only**, same spirit as
+`check-mapping-balance`: it alerts and suggests, but never writes into
+the mapping doc itself (that's `auto-map`'s job, and it already has its
+own human-decision protections).
 
 ## 50. Migration-key / External ID field validation against live describe() (built, hardens rules 4/7)
 
@@ -2545,17 +2557,36 @@ missing** — that's a different team's responsibility; this is a
 pre-flight gate that blocks a load until someone else has fixed it, not a
 tool that fixes it itself.
 
-## 51. Reference-record pull/compare tool for architect-provided known-good Ids (not built)
+## 51. Reference-record pull/compare tool for architect-provided known-good Ids (built)
 
 Raised directly: sometimes an architect creates a record by hand through
 the Salesforce UI (to see how the org's real automation shapes a record)
 and can hand over its Id for review. Already possible today in an ad hoc
-way via `query` — the gap is a dedicated command that pulls that record
+way via `query` — the gap was a dedicated command that pulls that record
 and **diffs it field-by-field against what this project's own load
-script would have produced** from the matching source row, instead of a
-human eyeballing two field lists side by side every time. Treat these
-records purely as review/debugging input for fixing the SQL transform,
-never as something this framework writes back to.
+script would have produced**, instead of a human eyeballing two field
+lists side by side every time.
+
+**Design decision**: the Load table's own `Id` column (`bulk_op()`'s
+writeback) only ever gets populated for records actually loaded through
+`bulkops` — a hand-created reference record was never loaded, so it can't
+be matched by `Id`. It's matched by the **migration key** instead (e.g.
+`Legacy_Id__c`), read directly off the live record rather than asked for
+separately — the architect only needs to have set that field when
+creating the record by hand, which is a natural, deliberate thing to do
+specifically to enable this comparison.
+
+**What shipped**: new module `reference_record.py`,
+`compare_reference_record(sf, engine, object_name, load_table, record_id,
+migration_key_field, ...)` — reads the Load table's real columns
+(`INFORMATION_SCHEMA.COLUMNS`, same pattern as
+`mapping_doc.generate_mapping_workbook`), validates every one against
+live `describe()` first (same pre-flight discipline `bulk_op()` already
+uses, applied here to a read), pulls the live record, extracts the
+migration key's value, finds the matching Load table row, and diffs field
+by field. Wired up as `cli.py compare-reference-record <Object>
+<LoadTable> <RecordId> --migration-key <Field>` — read-only, a review/
+debugging aid; never writes anything back.
 
 ## 52. Mermaid process-flow diagrams from the Migration Run Book (not built — new feature, explicitly requested)
 
@@ -2637,6 +2668,55 @@ consider"):
 
 Capability 1 is a much smaller, safer first step and could ship well
 before any version of capability 2 is even designed.
+
+## 55. `REF_`-prefixed human-only audit columns, excluded from bulkops (built, hard rule 13)
+
+Raised directly from real DBAmp-era experience: the user's own
+established convention is adding `REF_`-prefixed columns to a Load table
+for SQL-side human auditing during a build — tracking things that were
+never meant to reach Salesforce. Under DBAmp, an unmatched column like
+this got a warning but never failed the load. Confirmed this framework's
+own pre-flight check (`bulkops.py`'s `_preflight_check`) would instead
+treat any `REF_` column as `not_a_real_field` and **abort the whole
+call** — the opposite of the desired behavior.
+
+**What shipped**: `bulk_op()` gains `ref_prefix="REF_"` (overridable,
+case-insensitive), excluded from the auto-derived `sent` column list in
+both the insert and update/upsert branches — the exact same treatment
+`id_column`/`error_column`/`key_column` already get. A `REF_` column
+therefore never reaches `_preflight_check` (never a false
+`not_a_real_field` abort) and never appears in the actual Bulk API
+payload. Only applies to the auto-derived list — an explicit
+`send_columns` naming a `REF_` column is a deliberate override, never
+second-guessed. `cli.py bulkops` gains `--ref-prefix`.
+
+## 56. Duplicate target-field detection — scripts and spreadsheets (built, hard rule 14)
+
+Raised directly: a mapping doc or a transform script could end up
+assigning the same target field twice. The exact line to draw, in the
+user's own words: it's fine for *different* scripts/sheets to target the
+same field (two source systems both feeding `Account.Name`, say) — the
+problem is one **single** `CREATE TABLE`/`INSERT INTO` column list, or
+one single mapping-doc sheet, naming the same target field twice.
+
+**What shipped**: `check_mapping_balance()` (already parsing exactly the
+two pieces needed) gained two new finding categories, captured before
+the existing code collapsed either set of names to a `set()` and
+discarded the duplicate information:
+- `duplicate_target_fields`: `{target_field: [source_field, ...]}` for
+  every Target Field API value chosen by more than one row **within one
+  sheet**.
+- `duplicate_implemented_columns`: column names appearing more than once
+  in **one transform's own** `extract_insert_columns()` result.
+
+`cli.py check-mapping-balance` reports both, the column-list one first
+(it breaks the actual SQL outright, the softer spreadsheet-level one
+doesn't). Also caught at the CSV-ingestion boundary: `source_ingestion.py`
+gained `_check_no_duplicate_columns()`, called from
+`generate_import_script()` right after reading a CSV's header — a
+repeated CSV column name would otherwise fail with a confusing raw SQL
+Server "column name … specified more than once" error partway through a
+`CREATE TABLE`.
 
 ---
 

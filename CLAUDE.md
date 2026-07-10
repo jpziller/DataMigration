@@ -166,7 +166,13 @@ venv may not be active in a fresh shell:
                 Populated On/%" from existing profiling data for that source table, if any.)
                 `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql`
                 (diffs a filled-in doc's Target block against the transform's real INSERT INTO list,
-                both directions, plus flags any referenced field that doesn't actually exist on the object.)
+                both directions, plus flags any referenced field that doesn't actually exist on the object.
+                Also flags rule 14 duplicates: the same Target Field chosen by two+ rows in one sheet,
+                or the transform's own column list naming the same column twice.)
+- Unmapped required fields: `.venv/Scripts/python.exe cli.py check-required-mappings Account mapping/Migration_Mapping.xlsx`
+                (roadmap #49: flags every row flagged `Migrate Data = Yes` with no Target Field ever
+                chosen, and attempts a `describe()`-driven suggestion for each via the same matching
+                `auto-map` uses — read-only, never writes into the doc itself; that's `auto-map`'s job.)
 - Auto-map:     `.venv/Scripts/python.exe cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts`
                 (requires the source table to already be profiled — raises a clear error otherwise.
                 Suggests a Target field per source field via exact/normalized name match, then a
@@ -202,7 +208,10 @@ venv may not be active in a fresh shell:
                 the API is ever called — a typo'd, removed, or non-writable field aborts the whole
                 call up front rather than burning a real Bulk API batch to find out the same thing;
                 a required-but-unsent field on insert is reported as a warning instead, since
-                automation could still default it. See `bulkops.py`'s pre-flight check.)
+                automation could still default it. See `bulkops.py`'s pre-flight check. Exception:
+                any column prefixed `REF_` — a human-only SQL-side audit field, rule 13 — is
+                excluded from this check entirely, never sent, never flagged. `--ref-prefix` overrides
+                the default `REF_` if a project uses a different convention.)
                 `.venv/Scripts/python.exe cli.py bulkops Account delete Account_Purge --external-id Legacy_Id__c`
                 (delete by external id — Bulk API 2.0's delete only ever accepts a real Id, so this
                 resolves external id values to real Ids via a query first, then deletes the resolved
@@ -322,6 +331,16 @@ venv may not be active in a fresh shell:
                 describe() before it's trusted as a migration key — rule 12. Read-only, no
                 confirmation needed, exits nonzero on failure. Not this framework's job to
                 create/fix the field; only to gate on it being correctly in place.)
+- Reference-record diff: `.venv/Scripts/python.exe cli.py compare-reference-record Account Account_Load
+                <RecordId> --migration-key Legacy_Id__c`
+                (roadmap #51: diffs a live, hand-created reference record — e.g. one an architect made
+                through the Salesforce UI to see how the org's real automation shapes it — against the
+                Load table row its migration key corresponds to, field by field. Matches by migration
+                key, not `Id`, since a hand-created record was never loaded through `bulkops` and so has
+                no `Id` in the Load table to match against — the key's value is read directly off the
+                live record. Read-only, a review/debugging aid only; never writes anything back.
+                `--key-column`/`--id-column`/`--error-column` override the Load table's writeback column
+                names if not the defaults.)
 - Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
   `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
   for ad-hoc queries.
@@ -335,7 +354,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
 `/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
-`/validate-external-id`, `/import-csv-directory`
+`/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
+`/compare-reference-record`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -424,6 +444,23 @@ available even when there's no dedicated skill for it.
     passes. It is not this framework's job to create or fix the field if
     it isn't — that's another team's task; this rule only gates on it
     already being correctly in place. See `ROADMAP.md` #50.
+13. Any Load table column prefixed `REF_` (case-insensitive) is a
+    human-only, SQL-side audit field — never sent to Salesforce, never
+    flagged by `bulkops`' pre-flight check as "not a real field." Excluded
+    automatically from the auto-derived column list `bulk_op()` sends
+    (default `--ref-prefix REF_`, overridable); an explicitly-passed
+    `send_columns`/column list is never second-guessed this way. Not this
+    framework's job to validate what an architect puts in one — only to
+    recognize and exclude it. See `ROADMAP.md` #55.
+14. No single `CREATE TABLE`/`INSERT INTO` column list, and no single
+    mapping-doc sheet, may target the same field twice — different
+    scripts/sheets targeting the same field is fine and expected (e.g. two
+    source systems feeding the same object). `check-mapping-balance`
+    reports both (`duplicate_target_fields` — one sheet, two+ source rows
+    choosing the same Target Field; `duplicate_implemented_columns` — one
+    transform's own column list repeating a name), and
+    `import-csv-directory` refuses to stage a CSV whose own header row
+    already has a repeated column. See `ROADMAP.md` #56.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
@@ -487,12 +524,13 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   directory of CSVs" starting point specifically.
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
-  `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`
+  `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`,
+  `reference_record.py`
   — the Data Architect toolbelt (load-order analysis, profiling, ad hoc
   query, single-object and relationship-aware mock data, mapping doc,
   auto-mapping, solution document generation, org automation risk analysis,
   Data Cloud/D360 query and status tooling, dynamic batch-size recommendations,
-  the Migration Run Book).
+  the Migration Run Book, reference-record pull/compare — roadmap #51).
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always

@@ -171,6 +171,37 @@ def apply_auto_map_suggestions(mapping_path, object_name, target_object, suggest
     return {"applied": applied, "skipped_human_filled": skipped_human}
 
 
+def find_unmapped_required_fields(mapping_path, object_name):
+    """Every row in object_name's sheet flagged Migrate Data == 'Yes' with
+    no Target Field API ever chosen (roadmap #49) -- a silent gap that
+    would otherwise only surface once the transform is built and a field
+    is simply missing. Read-only; refines #3/#10.
+
+    Returns [{"source_field", "notes"}, ...], in row order."""
+    wb = openpyxl.load_workbook(mapping_path, data_only=True)
+    sheet_name = _safe_sheet_name(object_name)
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"No sheet named '{sheet_name}' in {mapping_path}")
+    ws = wb[sheet_name]
+
+    gaps = []
+    for row in ws.iter_rows(min_row=4):
+        migrate = row[_COL_MIGRATE_DATA - 1].value
+        if migrate is None or str(migrate).strip() != "Yes":
+            continue
+        target_field = row[_COL_TARGET_FIELD_API - 1].value
+        if target_field is not None and str(target_field).strip():
+            continue
+        source_field = row[_COL_SOURCE_FIELD_API - 1].value
+        if not source_field:
+            continue
+        gaps.append({
+            "source_field": str(source_field).strip(),
+            "notes": row[_COL_SOURCE_NOTES - 1].value,
+        })
+    return gaps
+
+
 def extract_insert_columns(sql_text, table_name=None):
     """Return the column list from an INSERT INTO (...) statement in the
     given SQL text -- the first one matching table_name (case-insensitive,
@@ -190,11 +221,22 @@ def check_mapping_balance(sf, mapping_path, object_name, transform_sql_path, loa
         raise ValueError(f"No sheet named '{sheet_name}' in {mapping_path}")
     ws = wb[sheet_name]
 
-    documented = set()
+    # Hard rule 14: a target field chosen by more than one row within this
+    # ONE sheet is a real problem (an ambiguous INSERT down the line) --
+    # different sheets/scripts targeting the same field is fine and
+    # expected (e.g. two source systems feeding the same object), so this
+    # is deliberately scoped to one sheet, not the whole workbook. Capture
+    # duplicates before collapsing to a set for the balance check below.
+    source_fields_by_target = {}
     for row in ws.iter_rows(min_row=4):
-        value = row[_TARGET_FIELD_API_COL - 1].value
-        if value is not None and str(value).strip():
-            documented.add(str(value).strip())
+        target = row[_TARGET_FIELD_API_COL - 1].value
+        if target is None or not str(target).strip():
+            continue
+        target = str(target).strip()
+        source = row[_COL_SOURCE_FIELD_API - 1].value
+        source_fields_by_target.setdefault(target, []).append(str(source).strip() if source else None)
+    duplicate_target_fields = {t: srcs for t, srcs in source_fields_by_target.items() if len(srcs) > 1}
+    documented = set(source_fields_by_target)
 
     with open(transform_sql_path, encoding="utf-8") as fh:
         sql_text = fh.read()
@@ -202,6 +244,12 @@ def check_mapping_balance(sf, mapping_path, object_name, transform_sql_path, loa
     implemented_cols = extract_insert_columns(sql_text, load_table_name)
     if implemented_cols is None:
         raise ValueError(f"No INSERT INTO statement found in {transform_sql_path}")
+    # Same rule 14 check, transform side: a column named more than once in
+    # ONE script's own INSERT INTO/CREATE TABLE column list would break
+    # the actual SQL outright -- catch it before collapsing to a set.
+    duplicate_implemented_columns = sorted(
+        {c for c in implemented_cols if implemented_cols.count(c) > 1}
+    )
     implemented = set(implemented_cols)
 
     # Unlike the mapping doc (free text) and the transform's INSERT list
@@ -221,4 +269,6 @@ def check_mapping_balance(sf, mapping_path, object_name, transform_sql_path, loa
         "documented_not_implemented": sorted(documented - implemented),
         "implemented_not_documented": sorted(implemented - documented),
         "not_a_real_field": sorted(not_real_field),
+        "duplicate_target_fields": duplicate_target_fields,
+        "duplicate_implemented_columns": duplicate_implemented_columns,
     }

@@ -1,4 +1,7 @@
+import pytest
+
 from source_ingestion import (
+    _check_no_duplicate_columns,
     check_drift,
     extract_bulk_insert_source_path,
     extract_create_table_columns,
@@ -66,6 +69,21 @@ def test_generate_import_script_reads_header_and_numbers_sequentially(tmp_path):
     assert first.endswith("10_orders_import.sql")
     assert second.endswith("20_contacts_import.sql")
     assert "TEST-1" in open(first, encoding="utf-8").read()
+
+
+def test_check_no_duplicate_columns_passes_on_clean_header():
+    _check_no_duplicate_columns(["order_id", "customer_name", "amount"], "orders.csv")  # no raise
+
+
+def test_check_no_duplicate_columns_raises_on_repeated_header():
+    with pytest.raises(ValueError, match="duplicate column"):
+        _check_no_duplicate_columns(["order_id", "amount", "amount"], "orders.csv")
+
+
+def test_generate_import_script_rejects_csv_with_duplicate_header(tmp_path):
+    csv_path = _write_csv(tmp_path / "orders.csv", ["order_id", "amount", "amount"])
+    with pytest.raises(ValueError, match="duplicate column"):
+        generate_import_script(csv_path, "orders", "TEST-1", sql_dir=str(tmp_path / "sql"))
 
 
 def test_check_drift_ok_when_unchanged(tmp_path):

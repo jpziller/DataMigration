@@ -50,6 +50,7 @@ import risk_analyzer as ra
 import parquet_import as pqi
 import migration_run_book as mrb
 import source_ingestion as si
+import reference_record as rr
 
 
 def _ctx():
@@ -235,6 +236,7 @@ def disable_source_ingestion_logging_cmd(schema):
 @click.option("--dry-run", is_flag=True, help="With --where: report the matched count and sample Ids without touching SQL Server or Salesforce.")
 @click.option("--external-id", default=None, help="External id field (upsert; also delete -- resolved to real Ids via a query first, since Bulk API 2.0's delete only ever accepts Id).")
 @click.option("--key-column", default="LoadId", help="Local unique key for in-place writeback.")
+@click.option("--ref-prefix", default="REF_", help="Load table columns starting with this prefix (case-insensitive) are human-only SQL-side audit fields (hard rule 13) -- excluded from the payload and never flagged as 'not a real field'.")
 @click.option("--schema", default="dbo")
 @click.option("--email-deliverability", default=None,
               type=click.Choice(["no-access", "system-email-only", "all-email"]),
@@ -248,7 +250,7 @@ def disable_source_ingestion_logging_cmd(schema):
 @click.option("--run-book", "run_book_path", default=None, help="Migration Run Book workbook path -- with --run-book-tab, auto-syncs this load's BulkOpsLog row into that tab's Load phase right after it's written.")
 @click.option("--run-book-tab", default=None, help="Migration Run Book tab name to sync into -- requires --run-book.")
 def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_id,
-                key_column, schema, email_deliverability, confirm_external_email_risk,
+                key_column, ref_prefix, schema, email_deliverability, confirm_external_email_risk,
                 batch_size, run_book_path, run_book_tab):
     if bool(run_book_path) != bool(run_book_tab):
         raise click.BadParameter("--run-book and --run-book-tab must be given together.")
@@ -272,6 +274,7 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
     else:
         summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
                              external_id=external_id, key_column=key_column,
+                             ref_prefix=ref_prefix,
                              schema=schema, stage_dir=s.stage_dir,
                              email_deliverability=email_deliverability,
                              confirm_external_email_risk=confirm_external_email_risk,
@@ -632,6 +635,15 @@ def check_mapping_balance_cmd(object_name, mapping_path, transform_sql_path, loa
         click.echo(f"Not a real field on {object_name} (typo, removed, or never deployed -- fix before loading):")
         for field in result["not_a_real_field"]:
             click.echo(f"  {field}")
+    if result["duplicate_implemented_columns"]:
+        click.echo(f"Duplicate column(s) in {transform_sql_path}'s own INSERT INTO/CREATE TABLE list "
+                   "(hard rule 14 -- this breaks the SQL outright, fix before running it):")
+        for field in result["duplicate_implemented_columns"]:
+            click.echo(f"  {field}")
+    if result["duplicate_target_fields"]:
+        click.echo("Target field chosen by more than one row in this sheet (hard rule 14):")
+        for target, sources in result["duplicate_target_fields"].items():
+            click.echo(f"  {target}  <-  {', '.join(s or '(blank source)' for s in sources)}")
     if result["documented_not_implemented"]:
         click.echo("Documented as mapped, but the transform doesn't populate them:")
         for field in result["documented_not_implemented"]:
@@ -642,6 +654,63 @@ def check_mapping_balance_cmd(object_name, mapping_path, transform_sql_path, loa
             click.echo(f"  {field}")
     if not any(result.values()):
         click.echo("In balance -- mapping doc and transform agree, and every field is real.")
+
+
+@cli.command("check-required-mappings")
+@click.argument("object_name")
+@click.argument("mapping_path")
+def check_required_mappings_cmd(object_name, mapping_path):
+    """Flag every mapping-doc row marked Migrate Data = Yes with no Target
+    Field chosen yet (roadmap #49), and attempt a describe()-driven
+    suggestion for each. Read-only -- never writes into the mapping doc."""
+    _, sf, _e = _ctx()
+    results = am.suggest_for_unmapped_required_fields(sf, mapping_path, object_name)
+
+    if not results:
+        click.echo(f"No gaps -- every Migrate Data = Yes row on {object_name} already has a Target Field.")
+        return
+
+    click.echo(f"{len(results)} field(s) flagged Migrate Data = Yes with no Target Field chosen on {object_name}:")
+    for r in results:
+        if r["suggested_target_field"]:
+            click.echo(f"  {r['source_field']} -> suggest {r['suggested_target_field']} "
+                       f"({r['match_method']}, {r['match_score']:.0%})")
+        else:
+            click.echo(f"  {r['source_field']} -> no confident suggestion found, needs manual review")
+
+
+@cli.command("compare-reference-record")
+@click.argument("object_name")
+@click.argument("load_table")
+@click.argument("record_id")
+@click.option("--migration-key", "migration_key_field", required=True, help="Migration-key field name, e.g. Legacy_Id__c -- read directly off the live record to find its matching Load table row.")
+@click.option("--schema", default="dbo")
+@click.option("--key-column", default="LoadId", help="Load table's local unique key column (excluded from the diff).")
+@click.option("--id-column", default="Id", help="Load table's Salesforce Id writeback column (excluded from the diff).")
+@click.option("--error-column", default="Error", help="Load table's Error writeback column (excluded from the diff).")
+@click.option("--ref-prefix", default="REF_", help="Load table columns starting with this prefix (case-insensitive) are human-only SQL-side audit fields (hard rule 13) -- excluded from the diff entirely.")
+def compare_reference_record_cmd(object_name, load_table, record_id, migration_key_field,
+                                  schema, key_column, id_column, error_column, ref_prefix):
+    """Diff a live, hand-created reference record against the Load table
+    row its migration key corresponds to (roadmap #51) -- a review aid for
+    fixing the transform, never written back anywhere."""
+    _, sf, engine = _ctx()
+    result = rr.compare_reference_record(
+        sf, engine, object_name, load_table, record_id, migration_key_field,
+        schema=schema, key_column=key_column, id_column=id_column, error_column=error_column,
+        ref_prefix=ref_prefix,
+    )
+    click.echo(f"Matched via {migration_key_field} = '{result['migration_key_value']}'")
+
+    mismatches = [f for f in result["fields"] if not f["match"]]
+    for f in result["fields"]:
+        marker = "  " if f["match"] else "! "
+        click.echo(f"{marker}{f['field']}: load={f['load_table_value']!r}  live={f['live_value']!r}")
+
+    if mismatches:
+        click.echo(f"\n{len(mismatches)} of {len(result['fields'])} field(s) differ -- see '!' rows above.")
+    else:
+        click.echo(f"\nAll {len(result['fields'])} field(s) match.")
 
 
 @cli.command("auto-map")

@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
+from mapping_doc import find_unmapped_required_fields
 from type_map import is_compound
 
 _THESAURUS_PATH = os.path.join(os.path.dirname(__file__), "reference", "field_synonyms.json")
@@ -225,15 +226,11 @@ def was_already_auto_mapped(engine, source_table, target_object, schema="dbo"):
     return (last is not None, last)
 
 
-def suggest_mappings(sf, engine, target_object, source_table, schema="dbo"):
-    """Draft source -> target field suggestions for target_object from
-    source_table's real columns. Returns the list of suggestion dicts (also
-    written to dbo.AutoMapSuggestions / dbo.SourceRegistry)."""
-    ensure_source_profiled(engine, source_table, schema=schema)
-    _ensure_tables(engine, schema=schema)
-
-    alias_to_concept = load_thesaurus()
-
+def _build_target_lookup(sf, target_object):
+    """{normalized name/label -> describe() field dict} for target_object's
+    createable, non-compound fields -- shared by suggest_mappings() and
+    suggest_for_unmapped_required_fields() so this describe()-driven lookup
+    is built the same way in exactly one place."""
     target_desc = getattr(sf, target_object).describe()
     target_lookup = {}
     for f in target_desc["fields"]:
@@ -242,6 +239,18 @@ def suggest_mappings(sf, engine, target_object, source_table, schema="dbo"):
         target_lookup.setdefault(_normalize(f["name"]), f)
         if f.get("label"):
             target_lookup.setdefault(_normalize(f["label"]), f)
+    return target_lookup
+
+
+def suggest_mappings(sf, engine, target_object, source_table, schema="dbo"):
+    """Draft source -> target field suggestions for target_object from
+    source_table's real columns. Returns the list of suggestion dicts (also
+    written to dbo.AutoMapSuggestions / dbo.SourceRegistry)."""
+    ensure_source_profiled(engine, source_table, schema=schema)
+    _ensure_tables(engine, schema=schema)
+
+    alias_to_concept = load_thesaurus()
+    target_lookup = _build_target_lookup(sf, target_object)
 
     source_cols = _get_source_columns(engine, source_table, schema)
     profile_by_field = _get_field_profile(engine, source_table, schema)
@@ -300,6 +309,39 @@ def suggest_mappings(sf, engine, target_object, source_table, schema="dbo"):
 
     _write_suggestions(engine, target_object, source_table, suggestions, schema=schema)
     return suggestions
+
+
+def suggest_for_unmapped_required_fields(sf, mapping_path, target_object):
+    """Roadmap #49: for every mapping-doc row flagged Migrate Data == 'Yes'
+    with no Target Field ever chosen (mapping_doc.find_unmapped_required_
+    fields()), attempt a describe()-driven suggestion via the same
+    exact/thesaurus/fuzzy matching suggest_mappings() uses -- read-only,
+    never writes into the mapping doc (that's auto-map's job; this is a
+    diagnostic, same spirit as check-mapping-balance). No profiling
+    dependency -- unlike suggest_mappings(), this never touches source
+    data quality, only the mapping doc + live describe().
+
+    Returns [{"source_field", "suggested_target_field", "target_label",
+    "match_method", "match_score"}, ...] -- match fields are None when
+    nothing confident was found."""
+    gaps = find_unmapped_required_fields(mapping_path, target_object)
+    if not gaps:
+        return []
+
+    alias_to_concept = load_thesaurus()
+    target_lookup = _build_target_lookup(sf, target_object)
+
+    results = []
+    for gap in gaps:
+        target_field, method, score = _match_target(gap["source_field"], target_lookup, alias_to_concept)
+        results.append({
+            "source_field": gap["source_field"],
+            "suggested_target_field": target_field["name"] if target_field else None,
+            "target_label": target_field.get("label") if target_field else None,
+            "match_method": method,
+            "match_score": round(score, 3) if target_field else None,
+        })
+    return results
 
 
 def _write_suggestions(engine, target_object, source_table, suggestions, schema="dbo"):
