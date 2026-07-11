@@ -7,6 +7,8 @@ a pure unit test can't (an existence check that silently assumes the
 wrong dialect, a writeback that doesn't actually commit, two schemas
 bleeding into each other).
 """
+import json
+
 import pandas as pd
 import pytest
 
@@ -340,3 +342,102 @@ def test_bulk_op_fingerprint_columns_rejects_column_not_in_sent(sqlite_engine, t
             email_deliverability="no-access",
             fingerprint_columns=["NotSentColumn"],
         )
+
+
+def test_bulk_op_summary_includes_failure_error_counts(sqlite_engine, tmp_path):
+    """New for orchestrator.py's assess_tier() (roadmap #53): the summary
+    dict must surface distinct failure error messages and their counts,
+    not just the aggregate failed count -- previously only visible in the
+    writeback table."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2, 3, 4],
+        "LegacyId__c": ["A1", "A2", "A3", "A4"],
+        "Name": ["Row1", "Row2", "Row3", "Row4"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    sf = _stub_sf(StubBulkHandler(echo_cols=["LegacyId__c", "Name"], fail_every_n=2))
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["failed"] == 2
+    assert summary["failure_error_counts"] == {
+        "DUPLICATE_VALUE:deliberately failed for this test": 2
+    }
+
+
+def test_bulk_op_failure_error_counts_groups_distinct_messages_separately(sqlite_engine, tmp_path):
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2, 3],
+        "LegacyId__c": ["A1", "A2", "A3"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    fields = describe_fields(["LegacyId__c"])
+    fail_csv = (
+        "LegacyId__c,sf__Error\n"
+        "A1,FIRST_ERROR:bad thing one\n"
+        "A2,SECOND_ERROR:bad thing two\n"
+        "A3,FIRST_ERROR:bad thing one\n"
+    )
+    sf = StubSF({"Account": fields}, {"Account": StubBulkHandler("", fail_csv)})
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["failed"] == 3
+    assert summary["failure_error_counts"] == {
+        "FIRST_ERROR:bad thing one": 2,
+        "SECOND_ERROR:bad thing two": 1,
+    }
+
+
+def test_bulk_op_failure_error_counts_empty_on_a_fully_clean_run(sqlite_engine, tmp_path):
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({"LoadId": [1], "LegacyId__c": ["A1"], "Name": ["Row1"]})
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+    sf = _stub_sf(StubBulkHandler("LegacyId__c,Name,sf__Id\nA1,Row1,001X\n", ""))
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["failed"] == 0
+    assert summary["failure_error_counts"] == {}
+
+
+def test_bulk_op_logs_failure_error_counts_as_json_into_bulkopslog(sqlite_engine, tmp_path):
+    """failure_error_counts must round-trip through the real BulkOpsLog
+    INSERT (JSON-serialized), not just live in bulk_op()'s in-memory
+    return value -- orchestrator.py's history reading depends on this
+    actually being persisted."""
+    engine, _ = sqlite_engine
+    bo.enable_bulkops_logging(engine, schema="dbo")
+
+    df = pd.DataFrame({
+        "LoadId": [1, 2],
+        "LegacyId__c": ["A1", "A2"],
+        "Name": ["Row1", "Row2"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+    sf = _stub_sf(StubBulkHandler(echo_cols=["LegacyId__c", "Name"], fail_every_n=2))
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["logged"] is True
+
+    log_rows = pd.read_sql('SELECT * FROM "dbo"."BulkOpsLog"', engine)
+    assert len(log_rows) == 1
+    logged_counts = json.loads(log_rows.iloc[0]["FailureErrorCounts"])
+    assert logged_counts == summary["failure_error_counts"]

@@ -56,6 +56,7 @@ import reference_record as rr
 import record_types as rt
 import data_model_diagram as dmd
 import load_table_prep as ltp
+import orchestrator as orch
 import script_numbering as sn
 import validators_lookup as vl
 
@@ -377,6 +378,49 @@ def disable_bulkops_logging_cmd(schema):
     click.echo(f"This permanently drops {schema}.BulkOpsLog and all of its history.")
     bo.disable_bulkops_logging(engine, schema=schema)
     click.echo(f"Bulk load logging disabled for schema '{schema}'.")
+
+
+@cli.command("orchestrator-assess")
+@click.argument("object_name")
+@click.option("--log-id", type=int, default=None, help="Assess a specific BulkOpsLog row instead of the most recent one for this object.")
+@click.option("--schema", default="dbo")
+@click.option("--environment", type=click.Choice(["uat", "prod"]), default="uat",
+              help="Threshold profile from reference/orchestrator_thresholds.json -- prod is materially tighter.")
+def orchestrator_assess_cmd(object_name, log_id, schema, environment):
+    """Deterministic tier assessment (1-4) for a completed bulkops run --
+    orchestrator Phase 1 (roadmap #53, docs/ORCHESTRATOR_DESIGN.md).
+    Read-only; every individual bulkops call is still exactly as
+    ask-gated as it always was -- this never changes that, it only
+    observes and reports. Logs to <schema>.OrchestratorRunEvent if
+    enable-orchestrator-logging has been run for this schema."""
+    _, _, engine = _ctx()
+    resolved_log_id, result = orch.assess_from_log(engine, object_name, log_id=log_id, schema=schema, environment=environment)
+    click.echo(f"BulkOpsLog #{resolved_log_id} ({object_name}, {environment}): Tier {result['tier']}")
+    for reason in result["reasons"]:
+        click.echo(f"  - {reason}")
+    click.echo(f"Coarse-approval eligible: {result['coarse_approval_eligible']}"
+               + ("" if result["coarse_approval_eligible"] else " (no prior history for this object -- Stage 1/shadow mode only)"))
+    logged = orch.log_run_event(engine, resolved_log_id, object_name, result, schema=schema, environment=environment)
+    if not logged:
+        click.echo(f"(Not logged -- run enable-orchestrator-logging --schema {schema} to keep a shadow-mode history.)")
+
+
+@cli.command("enable-orchestrator-logging")
+@click.option("--schema", default="dbo", help="Schema to enable logging for -- each schema is opted in independently.")
+def enable_orchestrator_logging_cmd(schema):
+    _, _, engine = _ctx()
+    orch.enable_orchestrator_logging(engine, schema=schema)
+    click.echo(f"Orchestrator shadow-mode logging enabled for schema '{schema}' -- {schema}.OrchestratorRunEvent created.")
+    click.echo("Every orchestrator-assess call against this schema will now log automatically; no per-call flag needed.")
+
+
+@cli.command("disable-orchestrator-logging")
+@click.option("--schema", default="dbo", help="Schema to disable logging for.")
+def disable_orchestrator_logging_cmd(schema):
+    _, _, engine = _ctx()
+    click.echo(f"This permanently drops {schema}.OrchestratorRunEvent and all of its history.")
+    orch.disable_orchestrator_logging(engine, schema=schema)
+    click.echo(f"Orchestrator shadow-mode logging disabled for schema '{schema}'.")
 
 
 @cli.command("add-bulk-load-sort-column")

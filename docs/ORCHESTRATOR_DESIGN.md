@@ -500,29 +500,75 @@ given this project's actual cadence of real engagements? Too low and the
 high and the ladder never moves in practice. This is a judgment call about
 risk appetite and project pace that only the project owner can make.
 
-### 8.3 — Retry policy inside an orchestrated run
-§3 proposes **no auto-retry** inside a plan — every retry, even of a
-tier-1/2 failure, is its own fresh decision. Is that too conservative for
-a genuinely low-severity, previously-seen failure class, or is that
-exactly the intended posture? Worth confirming explicitly rather than
-assuming.
+### 8.3 — RESOLVED. Retry policy inside an orchestrated run
+**No auto-retry, ever** — confirmed by the project owner (2026-07-12).
+Every retry, even of a genuinely low-severity tier-1/2 failure, is its own
+fresh decision, matching the governing principle (round toward stopping)
+exactly as §3 originally proposed. `orchestrator.py` (Phase 1) doesn't
+implement any retry logic at all as a result — there's nothing to build
+here, the answer is "don't build it."
 
-### 8.4 — Who can approve
-Is the plan-approval action always the same human, in the same live Claude
-Code session, who confirms org/auth per Hard Rule 2 today — or could
-approval ever come from someone else, or through a different channel (e.g.
-once ROADMAP #54's Slack/Teams integration exists)? This affects whether
-`ApprovedBy` needs to capture anything beyond the OS user Claude Code is
-running as.
+### 8.4 — RESOLVED. Who can approve
+**Always the current user, in the live session** — confirmed by the
+project owner (2026-07-12). `ApprovedBy` (once Phase 2 builds
+`dbo.OrchestratorRunPlan`) just captures the OS user Claude Code is
+running as, same as `BulkOpsLog.RunBy` today. Revisit if this ever becomes
+a team workflow (e.g. once ROADMAP #54's Slack/Teams integration exists).
 
-### 8.5 — Baseline cold-start
-For an object with no prior Dev/UAT `BulkOpsLog` history at all (a brand-new
-object on its first real pass), tier assessment has no baseline to compare
-against — should such an object simply be ineligible for anything above
-Stage 1 (shadow mode) until it has at least one clean historical run, or is
-there a reasonable tier default for a cold-start object? This document
-assumes the former (no baseline, no coarse approval) but that assumption
-should be confirmed, not just inherited silently.
+### 8.5 — RESOLVED. Baseline cold-start
+**No baseline, no coarse-approval eligibility** — confirmed by the
+project owner (2026-07-12), matching this document's own original
+assumption. Implemented directly in `orchestrator.py`'s `assess_tier()`:
+the returned `coarse_approval_eligible` field is `False` whenever `history`
+is empty, regardless of how clean the current run's own tier comes out —
+tier itself is always a real, mechanical assessment of *this* run;
+eligibility for Stage 2+ automation is a separate, orthogonal question
+this flag governs. Live-verified: this project's own first-ever Account/
+Contact/Opportunity/Task `BulkOpsLog` rows each correctly assessed as
+`tier 1, coarse_approval_eligible: False` on their first run, flipping to
+`True` once a second run existed to compare against.
+
+---
+
+## Implementation status (2026-07-12)
+
+**Phase 1 — built.** The deterministic tier-assessment logic §1 requires
+("tier assessment is deterministic Python, not model judgment") now
+exists and is independently tested: `orchestrator.py`'s `assess_tier()`
+(19 unit tests covering every tier boundary explicitly),
+`reference/orchestrator_thresholds.json` (uat/prod profiles),
+`bulk_op()`'s new `failure_error_counts` return-dict field (§6's one
+required existing-module change, now built and logged into
+`BulkOpsLog.FailureErrorCounts`), `cli.py orchestrator-assess` (read-only,
+resolves a real `BulkOpsLog` row + this object's history + whether
+`dbo.ObjectAutomationRisk` has data for it), and opt-in
+`enable-orchestrator-logging`/`<schema>.OrchestratorRunEvent` (the
+shadow-mode observation record §5 calls for). **Zero change to Hard Rule
+2** — every individual `bulkops` call is exactly as `ask`-gated as it
+always was; this only observes and reports after the fact.
+
+Live-validated against this project's own real `BulkOpsLog` history (5
+rows from four Dev-tier dogfooding cycles): all three of Account/Contact/
+Opportunity's first-ever loads correctly assessed as tier 1; Task's real
+100%-failure run (a genuine, novel systemic error) correctly assessed as
+tier 4; Task's successful retry correctly assessed as tier 1. The
+deterministic logic's real output matched what a human independently
+concluded happened in every case — see §9's field notes for how this
+found two real bugs along the way (a `risk_analyzer.py` gap where a
+genuinely clean automation scan left zero trace, indistinguishable from
+"never scanned," and a history-query boundary bug in `orchestrator.py`
+itself that would have let a retroactive assessment see runs that
+happened *after* it as if they were prior history).
+
+**Phase 2 — explicitly deferred, not started.** `bulkops-under-plan`, the
+PreToolUse hook, `cli.py orchestrator-approve`, `dbo.OrchestratorRunPlan`,
+`reference/orchestrator_trust_ladder.json`, the new CLAUDE.md Hard Rule
+for the narrow Hard-Rule-2 exception, and the `docs/SECURITY_OVERVIEW.md`
+update for the hook as a new trust boundary — none of this exists yet, on
+purpose. Stage 2+'s actual coarse-approval mechanism only gets built once
+Stage 1 shadow mode has run against a real UAT pass, which doesn't exist
+yet — everything this project has done so far is Dev-tier dogfooding,
+permanently out of this design's scope (§1's own framing).
 
 ---
 
@@ -646,3 +692,34 @@ Contact — one field, mutually exclusive per row, vs. two independent
 fields. That distinction is exactly the kind of thing a human approving a
 plan would want called out explicitly, not left implicit in the
 dependency graph.
+
+### Building Phase 1 itself (2026-07-12)
+
+Two real bugs surfaced while building `assess_tier()`/`orchestrator-assess`
+against this project's own real data, not hypothetically:
+
+**A cold-start blind spot in `risk_analyzer.py`, not `orchestrator.py`.**
+`analyze-org-risk` genuinely found zero active automation of any kind for
+Account/Contact/Opportunity/Task in this org (a Trailhead Playground) —
+and `write_to_sql()` only ever inserted a row per *found* item, so a
+clean scan left **zero rows**, indistinguishable from "never scanned" to
+any downstream consumer checking "does this object have automation-risk
+data on file." `orchestrator.py`'s own §8.5 cold-start check would have
+been permanently wrong for exactly the org type most likely to be used
+for practice/testing. Fixed at the source (`risk_analyzer.py` now writes
+a `ScanCompleted` marker row when nothing else was found) rather than
+worked around in `orchestrator.py` — the fact "this object was scanned"
+and the fact "this object has active automation" are genuinely different
+things, and only one of them was being recorded.
+
+**A "future looks like history" bug in `orchestrator.py`'s own history
+query.** The first implementation excluded only the row being assessed
+(`LogId != :exclude`) rather than everything *at or after* it
+(`LogId < :before`) — harmless for the real-time case (assessing the
+most recent run right after it completes, where no later rows exist
+yet), but wrong for retroactively re-assessing an older row once newer
+ones exist, exactly the case this session's own live sanity check
+exercised (re-assessing Task's first, failed run after its successful
+retry already existed). Caught by that same live check, not by the unit
+tests written before it — a reminder that live data surfaces classes of
+bug synthetic test fixtures don't naturally think to construct.

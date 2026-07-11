@@ -35,6 +35,8 @@ from datetime import datetime, timezone
 import openpyxl
 from sqlalchemy import text
 
+import sql_dialect
+
 _INVALID_SHEET_CHARS = re.compile(r"[:\\/?*\[\]]")
 
 # Mirrors mapping_doc.py's column layout -- see that module's _HEADERS.
@@ -165,18 +167,25 @@ def analyze_migration_risk(sf, object_names, fields_in_scope_by_object=None):
     ]
 
 
+def _col_type(d, mssql_type, sqlite_type):
+    return mssql_type if isinstance(d, sql_dialect.MssqlDialect) else sqlite_type
+
+
 def _ensure_table(engine, schema="dbo"):
+    d = sql_dialect.for_engine(engine)
+    if d.table_exists(engine, schema, "ObjectAutomationRisk"):
+        return
+    qualified = d.qualify(schema, "ObjectAutomationRisk")
     with engine.begin() as cx:
         cx.execute(text(
-            f"IF OBJECT_ID('{schema}.ObjectAutomationRisk', 'U') IS NULL "
-            f"CREATE TABLE [{schema}].[ObjectAutomationRisk] ("
-            "ObjectName NVARCHAR(255) NOT NULL, "
-            "CheckType NVARCHAR(50) NOT NULL, "
-            "ItemName NVARCHAR(255) NOT NULL, "
-            "IsActive BIT NULL, "
-            "DirectHit BIT NULL, "
-            "Detail NVARCHAR(MAX) NULL, "
-            "AnalyzedDate DATETIME2 NOT NULL);"
+            f"CREATE TABLE {qualified} ("
+            f"{d.quote_ident('ObjectName')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
+            f"{d.quote_ident('CheckType')} {_col_type(d, 'NVARCHAR(50)', 'TEXT')} NOT NULL, "
+            f"{d.quote_ident('ItemName')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
+            f"{d.quote_ident('IsActive')} {_col_type(d, 'BIT', 'INTEGER')} NULL, "
+            f"{d.quote_ident('DirectHit')} {_col_type(d, 'BIT', 'INTEGER')} NULL, "
+            f"{d.quote_ident('Detail')} {d.raw_text_type()} NULL, "
+            f"{d.quote_ident('AnalyzedDate')} {_col_type(d, 'DATETIME2', 'TEXT')} NOT NULL);"
         ))
 
 
@@ -187,6 +196,7 @@ def write_to_sql(engine, results, schema="dbo"):
     rows = []
     for result in results:
         obj = result["object"]
+        rows_before = len(rows)
         for r in result["validation_rules"]:
             rows.append({
                 "object_name": obj, "check_type": "ValidationRule",
@@ -223,16 +233,31 @@ def write_to_sql(engine, results, schema="dbo"):
                 "direct_hit": False, "detail": r.get("TriggerType"), "analyzed_at": analyzed_at,
             })
 
+        if len(rows) == rows_before:
+            # A genuinely clean scan (zero active automation of any kind)
+            # would otherwise leave this object with NO rows at all --
+            # indistinguishable from "never scanned" for any downstream
+            # consumer checking "does this object have automation-risk
+            # data on file" (e.g. orchestrator.py's cold-start/tier-3
+            # check). One marker row records that the scan itself
+            # happened, even though it found nothing.
+            rows.append({
+                "object_name": obj, "check_type": "ScanCompleted",
+                "item_name": "(no active automation found)", "is_active": None,
+                "direct_hit": False, "detail": None, "analyzed_at": analyzed_at,
+            })
+
+    qualified = sql_dialect.for_engine(engine).qualify(schema, "ObjectAutomationRisk")
     with engine.begin() as cx:
         for result in results:
             cx.execute(
-                text(f"DELETE FROM [{schema}].[ObjectAutomationRisk] WHERE ObjectName = :o"),
+                text(f"DELETE FROM {qualified} WHERE ObjectName = :o"),
                 {"o": result["object"]},
             )
         if rows:
             cx.execute(
                 text(
-                    f"INSERT INTO [{schema}].[ObjectAutomationRisk] "
+                    f"INSERT INTO {qualified} "
                     "(ObjectName, CheckType, ItemName, IsActive, DirectHit, Detail, AnalyzedDate) "
                     "VALUES (:object_name, :check_type, :item_name, :is_active, :direct_hit, :detail, :analyzed_at)"
                 ),

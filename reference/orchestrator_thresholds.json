@@ -1,0 +1,18 @@
+{
+  "_comment": "Tier boundary numbers for the supervised load orchestrator (docs/ORCHESTRATOR_DESIGN.md #2). Proposed starting defaults, not scientifically derived -- grounded in this project's own documented history where possible (the 2% tier-2 ceiling comes from ROADMAP #14's dogfood run: 5/100 mock Account inserts failed on a known DUPLICATE_VALUE:Jigsaw cause), otherwise chosen by rounding conservative per the design's own governing principle. Git-tracked, human-tunable -- same convention as batch_size_heuristics.json/field_synonyms.json. A human reviews and commits changes deliberately; nothing here is hardcoded in Python.",
+  "uat": {
+    "tier2_max_failure_pct": 0.02,
+    "tier3_max_failure_pct": 0.10,
+    "repeated_error_min_rows": 5,
+    "repeated_error_min_pct": 0.01,
+    "elapsed_time_multiplier": 3.0
+  },
+  "prod": {
+    "_comment": "Materially tighter than uat, per the design's own requirement -- a clean UAT pass at a looser tier doesn't imply the same object should get the loose PROD tier (PROD access is separately gated by the graduation ladder in reference/orchestrator_trust_ladder.json anyway).",
+    "tier2_max_failure_pct": 0.01,
+    "tier3_max_failure_pct": 0.05,
+    "repeated_error_min_rows": 3,
+    "repeated_error_min_pct": 0.01,
+    "elapsed_time_multiplier": 2.0
+  }
+}

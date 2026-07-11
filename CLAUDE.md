@@ -305,10 +305,14 @@ venv may not be active in a fresh shell:
                 (creates `<schema>.BulkOpsLog`. From then on, every `bulkops` call
                 against that schema logs itself automatically — action, object,
                 source table, record counts, job count, the Email Deliverability
-                attestation, start/end/duration, OS user. No per-call flag needed;
-                presence of the table is the on/off switch, same pattern as the
-                `[Sort]` column and `key_column` writeback. Never logs `query` reads.
-                Each schema (source/staging/dbo/etc.) opts in independently.)
+                attestation, start/end/duration, OS user, and (roadmap #53) distinct
+                failure error messages and their counts as JSON in `FailureErrorCounts`
+                — needed by `orchestrator-assess`'s "seen before vs. novel error" check,
+                previously only visible in the writeback table, not the summary dict.
+                No per-call flag needed; presence of the table is the on/off switch,
+                same pattern as the `[Sort]` column and `key_column` writeback. Never
+                logs `query` reads. Each schema (source/staging/dbo/etc.) opts in
+                independently.)
                 `.venv/Scripts/python.exe cli.py disable-bulkops-logging --schema dbo`
                 (drops `<schema>.BulkOpsLog` — permanently discards that schema's
                 log history, so confirm before running.)
@@ -319,6 +323,36 @@ venv may not be active in a fresh shell:
                 one field-level signal it does give cheaply is cross-referencing an active
                 validation rule's `ErrorDisplayField` against the mapping doc's actually-migrated
                 target fields (`Migrate Data == Yes`) as a "direct hit." See `risk_analyzer.py`.)
+- Orchestrator tier assessment (roadmap #53, `docs/ORCHESTRATOR_DESIGN.md` — Phase 1 only;
+                read-only, never changes how `bulkops` itself is gated):
+                `.venv/Scripts/python.exe cli.py orchestrator-assess Account [--log-id N] [--environment uat|prod]`
+                (deterministic tier (1-4) for a completed `bulkops` run, resolved from a real
+                `BulkOpsLog` row — the most recent for that object if `--log-id` is omitted —
+                plus that object's own history and whether `analyze-org-risk` has been run for
+                it. Prints every reason that fired, not just the tier number. `assess_tier()`
+                in `orchestrator.py` is the actual logic — deliberately deterministic Python,
+                never model judgment, per the design doc's own core requirement. Also reports
+                `coarse_approval_eligible`: `False` whenever this object has no prior history
+                at all, regardless of how clean the current run looks — an object needs at
+                least one logged run before it's eligible for anything beyond Stage 1/shadow
+                mode. Two things a completed run genuinely can't reveal are deliberately not
+                checked here: a `bulk_op()` pre-flight failure and a missing Email
+                Deliverability attestation are both hard `raise`s before any summary exists at
+                all, so a real orchestrator loop treats that exception as tier 4 directly,
+                never reaching this command.)
+                `.venv/Scripts/python.exe cli.py enable-orchestrator-logging --schema dbo`
+                (creates `<schema>.OrchestratorRunEvent` — same opt-in, presence-of-table
+                convention as `BulkOpsLog`. Every `orchestrator-assess` call against that schema
+                then logs itself automatically: LogId, object, tier, reasons, environment,
+                timestamp, OS user. Never gates anything — purely the shadow-mode observation
+                record Stage 1 needs to eventually confirm the tier logic agreed with what
+                actually happened.)
+                `.venv/Scripts/python.exe cli.py disable-orchestrator-logging --schema dbo`
+                (drops `<schema>.OrchestratorRunEvent` — permanently discards that schema's
+                shadow-mode history, so confirm before running.)
+                Phase 2 (the actual coarse-approval mechanism — `bulkops-under-plan`, a
+                PreToolUse hook, `orchestrator-approve`) is explicitly not built yet — see the
+                design doc's own "Implementation status" note for why.
 - Batch-size recommendation (read-only, no Salesforce write — same rationale `bulkops` prints
                 automatically when `--batch-size` is left at `auto`):
                 `.venv/Scripts/python.exe cli.py recommend-batch-size Opportunity`
@@ -433,7 +467,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
-`/check-validators`
+`/check-validators`, `/orchestrator-assess`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -715,6 +749,15 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   for the validators library (`validators/system/*.md`,
   `validators/<Object>.md`). Purely a lookup convenience; writing a new
   validator entry is always a deliberate manual edit, never automated.
+- `orchestrator.py` — `orchestrator-assess`'s logic (roadmap #53, Phase 1
+  only): `assess_tier()`, the deterministic tier (1-4) assessment
+  `docs/ORCHESTRATOR_DESIGN.md` §1 requires never be model judgment, plus
+  the `BulkOpsLog` history/`ObjectAutomationRisk` reads it needs and the
+  opt-in `OrchestratorRunEvent` shadow-mode logging. Reuses
+  `reference/orchestrator_thresholds.json` (tier boundary numbers per
+  environment, same git-tracked/human-tunable convention as
+  `batch_size_heuristics.json`). Never changes how `bulkops` itself is
+  gated — Phase 2 (the actual coarse-approval mechanism) isn't built yet.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping. `type_map.py` is the SQL Server flavor;
   `sql_dialect.py`'s `SqliteDialect.sf_type_to_sql()` is SQLite's.

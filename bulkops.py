@@ -102,6 +102,7 @@ ACTIVITY LOGGING (opt-in, per schema -- roadmap #14):
 """
 import getpass
 import io
+import json
 import os
 from datetime import datetime, timezone
 
@@ -138,6 +139,7 @@ _BULKOPS_LOG_UPGRADE_COLUMNS = [
     ("BatchSize", "INT", "INTEGER"),
     ("BatchSizeSource", "NVARCHAR(20)", "TEXT"),
     ("LockErrorCount", "INT", "INTEGER"),
+    ("FailureErrorCounts", "NVARCHAR(MAX)", "TEXT"),
 ]
 
 
@@ -302,11 +304,13 @@ def _write_bulkops_log_row(engine, schema, row):
             "(Operation, ObjectName, SourceTable, TargetSchema, RecordsSubmitted, "
             "RecordsSucceeded, RecordsFailed, RecordsAmbiguous, ExternalIdNotFound, "
             "JobCount, EmailDeliverability, WrittenTo, StartedAt, CompletedAt, "
-            "DurationSeconds, RunBy, BatchSize, BatchSizeSource, LockErrorCount) VALUES "
+            "DurationSeconds, RunBy, BatchSize, BatchSizeSource, LockErrorCount, "
+            "FailureErrorCounts) VALUES "
             "(:operation, :object_name, :source_table, :target_schema, :submitted, "
             ":succeeded, :failed, :ambiguous, :external_id_not_found, :job_count, "
             ":email_deliverability, :written_to, :started_at, :completed_at, "
-            ":duration_seconds, :run_by, :batch_size, :batch_size_source, :lock_error_count)"
+            ":duration_seconds, :run_by, :batch_size, :batch_size_source, :lock_error_count, "
+            ":failure_error_counts)"
         ), row)
 
 
@@ -561,6 +565,17 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     lock_error_count = int(
         df["_result_error"].fillna("").str.contains("UNABLE_TO_LOCK_ROW").sum()
     )
+    # Distinct failure error messages and their counts -- previously only
+    # visible in the writeback table, not the summary dict. Needed by
+    # orchestrator.py's assess_tier() for its "seen before vs. novel error"
+    # check (a known signature vs. something never observed for this
+    # object before); every value here is the literal error text Salesforce
+    # (or this framework's own "no matching record" synthetic message)
+    # returned, not a normalized/bucketed category.
+    failure_error_counts = {
+        str(msg): int(count)
+        for msg, count in df["_result_error"].dropna().value_counts().items()
+    }
 
     # Write results back. For delete-by-external-id, the result table should
     # still show the external id value a row was submitted for, even though
@@ -596,6 +611,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         "batch_size_source": batch_size_source,
         "batch_size_rationale": batch_rationale,
         "lock_errors": lock_error_count,
+        "failure_error_counts": failure_error_counts,
     }
 
     # Activity logging -- opt-in per schema, see this module's ACTIVITY
@@ -625,6 +641,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
                 "batch_size": resolved_batch_size,
                 "batch_size_source": batch_size_source,
                 "lock_error_count": lock_error_count,
+                "failure_error_counts": json.dumps(failure_error_counts),
             })
             summary["logged"] = True
         except Exception as e:
