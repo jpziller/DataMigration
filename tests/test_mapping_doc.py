@@ -1,6 +1,7 @@
+import pytest
 import openpyxl
 
-from mapping_doc import _safe_sheet_name, check_mapping_balance, extract_insert_columns
+from mapping_doc import _safe_sheet_name, check_mapping_balance, extract_insert_columns, set_transform_script
 
 SQL = """
 -- staging
@@ -115,3 +116,79 @@ def test_check_mapping_balance_detects_duplicate_implemented_column(tmp_path):
     result = check_mapping_balance(sf, str(mapping_path), "Account", str(sql_path))
 
     assert result["duplicate_implemented_columns"] == ["Name"]
+
+
+def test_set_transform_script_fills_header_field(tmp_path):
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
+    (tmp_path / "sql" / "transformations").mkdir(parents=True)
+    (tmp_path / "sql" / "transformations" / "010_account_load.sql").write_text("", encoding="utf-8")
+
+    filename = set_transform_script(str(mapping_path), "Account", repo_root=str(tmp_path))
+
+    assert filename == "010_account_load.sql"
+    wb = openpyxl.load_workbook(mapping_path)
+    ws = wb["Account"]
+    assert ws.cell(row=1, column=5).value == "Transform Script:"
+    assert ws.cell(row=1, column=6).value == "010_account_load.sql"
+
+
+def test_set_transform_script_prefers_highest_numbered_match(tmp_path):
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
+    (tmp_path / "sql" / "transformations").mkdir(parents=True)
+    (tmp_path / "sql" / "transformations" / "010_account_load.sql").write_text("", encoding="utf-8")
+    (tmp_path / "sql" / "transformations" / "040_account_load.sql").write_text("", encoding="utf-8")
+
+    filename = set_transform_script(str(mapping_path), "Account", repo_root=str(tmp_path))
+
+    assert filename == "040_account_load.sql"
+
+
+def test_set_transform_script_uses_source_ingestion_dir_when_given(tmp_path):
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
+    (tmp_path / "sql" / "source_ingestion").mkdir(parents=True)
+    (tmp_path / "sql" / "source_ingestion" / "010_account_ingest.sql").write_text("", encoding="utf-8")
+
+    filename = set_transform_script(
+        str(mapping_path), "Account", script_subdir="source_ingestion", repo_root=str(tmp_path)
+    )
+
+    assert filename == "010_account_ingest.sql"
+
+
+def test_set_transform_script_raises_when_no_sheet(tmp_path):
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
+
+    with pytest.raises(ValueError, match="No sheet named"):
+        set_transform_script(str(mapping_path), "Contact", repo_root=str(tmp_path))
+
+
+def test_set_transform_script_raises_when_no_matching_script(tmp_path):
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
+    (tmp_path / "sql" / "transformations").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="No transform script"):
+        set_transform_script(str(mapping_path), "Account", repo_root=str(tmp_path))
+
+
+def test_set_transform_script_never_overwrites_source_object_header(tmp_path):
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
+    wb = openpyxl.load_workbook(mapping_path)
+    ws = wb["Account"]
+    ws.cell(row=1, column=1, value="Source Object:")
+    ws.cell(row=1, column=2, value="SourceAccounts")
+    wb.save(mapping_path)
+    (tmp_path / "sql" / "transformations").mkdir(parents=True)
+    (tmp_path / "sql" / "transformations" / "010_account_load.sql").write_text("", encoding="utf-8")
+
+    set_transform_script(str(mapping_path), "Account", repo_root=str(tmp_path))
+
+    wb2 = openpyxl.load_workbook(mapping_path)
+    ws2 = wb2["Account"]
+    assert ws2.cell(row=1, column=1).value == "Source Object:"
+    assert ws2.cell(row=1, column=2).value == "SourceAccounts"

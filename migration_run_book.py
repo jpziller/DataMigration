@@ -52,7 +52,6 @@ place without shifting the table already copied below it.
 """
 import os
 import re
-import subprocess
 
 import openpyxl
 from openpyxl.formatting.rule import CellIsRule
@@ -61,11 +60,12 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from sqlalchemy import text
 
+import git_info as gi
+import script_numbering as sn
 import sql_dialect
 
 _TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "docs", "MIGRATION_RUN_BOOK_TEMPLATE.md")
 _TRANSFORMS_DIR = os.path.join(os.path.dirname(__file__), "sql", "transformations")
-_REPO_ROOT = os.path.dirname(__file__)
 
 # The one shared column schema every phase uses -- mirrors a real client
 # file's actual header, plus this framework's own additions. "Object" is
@@ -131,9 +131,6 @@ _HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID = 9   # previously a blank spacer row --
 # desync any already-generated workbook's existing row layout.
 _TABLE_HEADER_ROW = 10
 _FIRST_DATA_ROW = 11
-
-_GITHUB_HTTPS_RE = re.compile(r"^https?://github\.com/([^/]+)/(.+?)(\.git)?/?$")
-_GITHUB_SSH_RE = re.compile(r"^git@github\.com:([^/]+)/(.+?)(\.git)?$")
 
 
 def _is_separator_row(cells):
@@ -202,44 +199,6 @@ def _save_workbook(wb, path):
         ) from e
 
 
-def _git_info():
-    """Best-effort {"remote_url", "commit_sha", "branch"} for the repo this
-    file lives in, or None on any failure (no git on PATH, not a repo, no
-    "origin" remote) -- the header just leaves those rows blank rather than
-    erroring out over a missing breadcrumb."""
-    try:
-        remote = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"], cwd=_REPO_ROOT,
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-        sha = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT,
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-        branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=_REPO_ROOT,
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-    except Exception:
-        return None
-    if not remote or not sha:
-        return None
-    return {"remote_url": remote, "commit_sha": sha, "branch": branch}
-
-
-def _github_url(remote_url):
-    """Normalize a GitHub remote (https or SSH form) to
-    https://github.com/owner/repo, or None for any other host -- a v1
-    limitation, documented in ROADMAP.md, not silently wrong."""
-    if not remote_url:
-        return None
-    for pattern in (_GITHUB_HTTPS_RE, _GITHUB_SSH_RE):
-        m = pattern.match(remote_url)
-        if m:
-            return f"https://github.com/{m.group(1)}/{m.group(2)}"
-    return None
-
-
 def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, target_env=None,
                               ticket_url=None, ticket_label="JIRA"):
     """Write the fixed-height breadcrumb block (rows 1-8). "Last Synced Log
@@ -248,7 +207,7 @@ def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, t
     function or its caller ever supplies, and (like Target Environment)
     it deliberately never carries forward: a fresh tab or a new pass
     hasn't had any of its own runs logged yet."""
-    github_url = _github_url(git_info["remote_url"]) if git_info else None
+    github_url = gi.github_url(git_info["remote_url"]) if git_info else None
     commit_label = f'{git_info["commit_sha"][:8]} ({git_info["branch"]})' if git_info else None
     scripts_url = (
         f'{github_url}/tree/{git_info["commit_sha"]}/sql/transformations'
@@ -380,22 +339,6 @@ def _size_columns(ws):
         ws.column_dimensions[letter].width = min(width, 90)
 
 
-def _script_filename_for(object_name):
-    """The real transform script for object_name -- when more than one
-    matches (e.g. an old illustrative template alongside the real numbered
-    script), the highest-numbered one wins, since this framework's own
-    numbering convention means "most recent"/"actually used" rather than
-    alphabetically first. Filenames are zero-padded to the same width, so
-    ascending string sort already puts the highest number last."""
-    if not os.path.isdir(_TRANSFORMS_DIR):
-        return ""
-    matches = sorted(
-        f for f in os.listdir(_TRANSFORMS_DIR)
-        if f.lower().endswith(".sql") and object_name.lower() in f.lower()
-    )
-    return matches[-1] if matches else ""
-
-
 def _load_order_rows(engine, object_names, schema, git_info=None):
     """Auto-fill Load-phase rows from load_order.py's (#2) existing
     dbo.ObjectLoadOrder/dbo.ObjectDependency -- same "prefill only what's
@@ -404,7 +347,7 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
     matched script filename also gets a real hyperlink to that exact file
     at the pinned commit."""
     in_scope = set(object_names)
-    github_url = _github_url(git_info["remote_url"]) if git_info else None
+    github_url = gi.github_url(git_info["remote_url"]) if git_info else None
 
     d = sql_dialect.for_engine(engine)
     if not d.table_exists(engine, schema, "ObjectLoadOrder"):
@@ -452,7 +395,7 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
         if siblings:
             parts.append(f"parallel with: {', '.join(siblings)}")
 
-        filename = _script_filename_for(obj)
+        filename = sn.script_filename_for(obj, _TRANSFORMS_DIR)
         row = {
             "Stage": "Load",
             "Object": filename or obj,
@@ -517,7 +460,7 @@ def generate_migration_run_book(output_path, tab_name, template_path=_TEMPLATE_P
 
     ws = wb.create_sheet(tab_name)
 
-    git_info = _git_info()
+    git_info = gi.get_git_info()
     _write_breadcrumb_header(
         ws, git_info, project_name=project_name, source_env=source_env,
         target_env=target_env, ticket_url=ticket_url, ticket_label=ticket_label,
@@ -554,7 +497,7 @@ def _blank_result_columns_and_refresh(ws, git_info):
     result_idxs = [i for i, c in enumerate(_COLUMNS, start=1) if c not in recipe]
     status_idx = _COLUMNS.index("Status") + 1
     object_idx = _COLUMNS.index("Object") + 1
-    github_url = _github_url(git_info["remote_url"]) if git_info else None
+    github_url = gi.github_url(git_info["remote_url"]) if git_info else None
 
     for row_idx in range(_FIRST_DATA_ROW, ws.max_row + 1):
         object_value = ws.cell(row=row_idx, column=object_idx).value
@@ -602,7 +545,7 @@ def add_migration_run_book_pass(path, from_tab, to_tab, template_path=_TEMPLATE_
     dst = wb.copy_worksheet(src)
     dst.title = to_tab
 
-    git_info = _git_info()
+    git_info = gi.get_git_info()
     _write_breadcrumb_header(
         dst, git_info,
         project_name=project_name if project_name is not None else carried["project_name"],
@@ -767,11 +710,11 @@ def _apply_log_result(ws, row_idx, log_row, git_info=None):
     # matched a stale/illustrative script that has since been replaced),
     # so this is re-resolved on every sync rather than trusted from
     # whatever's already in the cell.
-    filename = _script_filename_for(log_row["ObjectName"])
+    filename = sn.script_filename_for(log_row["ObjectName"], _TRANSFORMS_DIR)
     if filename:
         object_idx = _COLUMNS.index("Object") + 1
         cell = ws.cell(row=row_idx, column=object_idx, value=filename)
-        github_url = _github_url(git_info["remote_url"]) if git_info else None
+        github_url = gi.github_url(git_info["remote_url"]) if git_info else None
         if github_url:
             cell.hyperlink = f'{github_url}/blob/{git_info["commit_sha"]}/sql/transformations/{filename}'
             cell.font = _HYPERLINK_FONT
@@ -815,7 +758,7 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
     if not new_rows:
         return {"synced": 0, "inserted": 0, "updated": 0}
 
-    git_info = _git_info()
+    git_info = gi.get_git_info()
     inserted, updated = 0, 0
     for log_row in new_rows:
         target_row = _find_pending_load_row(ws, log_row["ObjectName"])

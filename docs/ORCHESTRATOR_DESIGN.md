@@ -523,3 +523,67 @@ Stage 1 (shadow mode) until it has at least one clean historical run, or is
 there a reasonable tier default for a cold-start object? This document
 assumes the former (no baseline, no coarse approval) but that assumption
 should be confirmed, not just inherited silently.
+
+---
+
+## 9. Field notes from dogfooding (2026-07-11)
+
+Three consecutive full Dev-tier cycles were run manually against a real org
+(D360_PLAYGROUND) this session — generate mock data, build numbered
+transforms, hard rules 6/7, `validate-external-id`, live `bulkops` insert
+per object in dependency order (rebuilding each child's transform only
+after its parent's real Ids existed), Run Book sync, Salesforce validation
+— each preceded by a full reset (org records deleted, scripts/docs/SQLite
+wiped). This is design-relevant, dated evidence, not speculation, so it's
+recorded here rather than lost at the end of the session.
+
+**§2 (tiers) — Tier 1 is real and achievable.** Once the genuine bugs found
+along the way were fixed (a datetime serialization defect and a result-
+fingerprint-matching defect — both real, both now fixed and tested), the
+second and third full cycles each landed all three objects at
+`failed == 0, ambiguous == 0, external_id_not_found == 0` — a clean Tier 1
+on every object, every time. This is a positive data point for the tier
+taxonomy itself: it's not just theoretically clean, an actual repeated
+mock-data run reaches it consistently.
+
+**§6 (`ObjectAutomationRisk` prerequisite) — the block will actually bite,
+which is the point, but it bit on *every single run this session*.**
+`analyze-org-risk` was never run against this org at any point across three
+full cycles. Every `bulkops` call printed `batch_advisor`'s own "hasn't been
+scanned by analyze-org-risk yet" note and fell back to seed-knowledge
+defaults. Under this design, **none of these three runs would have been
+eligible for anything beyond Stage 1 (shadow mode)** — confirming §6's
+stricter-than-`batch_advisor.py` bar is not just a theoretical tightening,
+it's a real gate a real dogfooding project would hit immediately. Worth
+building as a clear, actionable plan-generation error ("run
+`analyze-org-risk <objects>` first") rather than a silent fallback, since
+the natural failure mode (confirmed here) is simply forgetting to run it.
+
+**§6 (`bulk_op()` return-dict gap) — independently rediscovered, not just
+theorized.** The fingerprint-matching bug this session found (Salesforce
+echoing a sent datetime back reformatted, silently breaking whole-row
+matching) was diagnosed by hand-writing an ad hoc script to diff sent vs.
+echoed CSV values, because `bulk_op()`'s summary dict has no per-error
+breakdown — exactly the gap §6 already calls out as needed for tier
+assessment's "seen before vs. novel error" check. This is confirmation the
+gap is real and load-bearing, not a nice-to-have: without it, even a human
+debugging by hand has to reconstruct the same information from scratch
+every time.
+
+**§1 (Model B) — this session's manual loop *was* Model B, just without the
+one-approval mechanism.** The repeated build→sort→dupe-check→validate→
+insert→rebuild-child sequence, walked object-by-object in dependency order
+with a fresh look at each result before proceeding, is exactly the shape
+§1 describes — just with every single `bulkops` call individually
+`ask`-gated rather than covered by one plan approval. Three consecutive
+clean cycles of this exact manual shape is a reasonable real-world input
+toward §5's graduation criteria, once `analyze-org-risk` coverage (above)
+and `bulkops-under-plan` (§3) actually exist.
+
+**Operational gotcha, not a design gap:** `dbo.BulkOpsLog` lives in the same
+SQLite file wiped by a full reset, so "enable logging before the first
+load" has to be redone every fresh cycle — forgotten once this session
+(the first attempt), remembered by habit after that. Not something the
+orchestrator design needs to solve, but worth noting for
+`docs/MIGRATION_PLAYBOOK.md`/onboarding: a reset checklist should say so
+explicitly rather than relying on memory.

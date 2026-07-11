@@ -33,9 +33,14 @@ import os
 import re
 
 import openpyxl
+from openpyxl.styles import Font
 from sqlalchemy import text
 
+import git_info as gi
+import script_numbering as sn
 import sql_dialect
+
+_HYPERLINK_FONT = Font(color="0563C1", underline="single")
 
 _INSERT_INTO_RE = re.compile(
     r"INSERT\s+INTO\s+(?:\[?[\w]+\]?\.)?\[?(\w+)\]?\s*\(([^)]+)\)",
@@ -102,6 +107,11 @@ def generate_mapping_workbook(sf, target_object, output_path, engine, source_tab
     ws.cell(row=1, column=2, value=source_table)
     ws.cell(row=1, column=3, value="Target Object:")
     ws.cell(row=1, column=4, value=target_object)
+    ws.cell(row=1, column=5, value="Transform Script:")
+    # Deliberately left blank here -- the transform doesn't exist yet at
+    # generate-mapping-doc time in the standard workflow (mapping comes
+    # before building the transform). set_transform_script() fills this in
+    # later, once the real script has actually been built.
 
     for col_idx, header in enumerate(_HEADERS, start=1):
         if header is not None:
@@ -122,6 +132,50 @@ def generate_mapping_workbook(sf, target_object, output_path, engine, source_tab
 
     wb.save(output_path)
     return output_path
+
+
+def set_transform_script(mapping_path, target_object, script_subdir="transformations", repo_root=None):
+    """Fill in the "Transform Script:" header field (row 1) on
+    target_object's sheet with the real script that implements it --
+    resolved from sql/<script_subdir>/ the same way migration_run_book.py's
+    Load phase does (highest-numbered match wins), never hand-typed.
+    script_subdir is "transformations" (default) or "source_ingestion",
+    matching next-script-number's own --dir choices. repo_root defaults to
+    this repo (exposed only so tests can point it at a tmp_path instead of
+    the real sql/ tree). A real hyperlink to that file at the current
+    commit is attached too, when this repo has a GitHub remote -- same
+    breadcrumb convention the Migration Run Book uses.
+
+    Deliberately a separate step, not part of generate_mapping_workbook():
+    in the standard workflow, mapping comes before the transform is built,
+    so the script genuinely doesn't exist yet at that point. Raises if no
+    matching script is found -- this step only makes sense to run after
+    the real script exists, not as a guess at what it will be named."""
+    wb = openpyxl.load_workbook(mapping_path)
+    sheet_name = _safe_sheet_name(target_object)
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"No sheet named '{sheet_name}' in {mapping_path}")
+    ws = wb[sheet_name]
+
+    repo_root = repo_root if repo_root is not None else os.path.dirname(__file__)
+    directory = os.path.join(repo_root, "sql", script_subdir)
+    filename = sn.script_filename_for(target_object, directory)
+    if not filename:
+        raise ValueError(
+            f"No transform script for '{target_object}' found in sql/{script_subdir}/ -- "
+            "build the transform first, then run this."
+        )
+
+    ws.cell(row=1, column=5, value="Transform Script:")
+    cell = ws.cell(row=1, column=6, value=filename)
+    info = gi.get_git_info()
+    url = gi.github_url(info["remote_url"]) if info else None
+    if url:
+        cell.hyperlink = f'{url}/blob/{info["commit_sha"]}/sql/{script_subdir}/{filename}'
+        cell.font = _HYPERLINK_FONT
+
+    wb.save(mapping_path)
+    return filename
 
 
 def apply_auto_map_suggestions(mapping_path, object_name, target_object, suggestions):

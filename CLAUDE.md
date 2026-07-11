@@ -202,6 +202,14 @@ venv may not be active in a fresh shell:
                 SOURCE field from the named SQL table, with a blank Target block for a human to fill
                 in once a mapping is decided — doesn't guess the mapping itself. Auto-fills "Data Profile
                 Populated On/%" from existing profiling data for that source table, if any.)
+                `.venv/Scripts/python.exe cli.py set-mapping-script Account mapping/Migration_Mapping.xlsx`
+                (fills in that object's sheet's "Transform Script:" header field — auto-resolved from
+                `sql/transformations/` (highest-numbered match, `--dir source_ingestion` for that folder
+                instead), with a real GitHub hyperlink when this repo has a remote, same breadcrumb
+                convention the Migration Run Book uses. Deliberately its own step, run only *after* the
+                real transform is built — `generate-mapping-doc` never guesses this, since the script
+                genuinely doesn't exist yet at mapping time in the standard workflow. Raises if no
+                matching script is found rather than leaving a guessed filename in place.)
                 `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/<NNN>_account_load.sql`
                 (diffs a filled-in doc's Target block against the transform's real INSERT INTO list,
                 both directions, plus flags any referenced field that doesn't actually exist on the object.
@@ -424,7 +432,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
 `/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
-`/check-load-table-duplicate-keys`
+`/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -566,7 +574,18 @@ don't jump straight to writing T-SQL:
    copying a raw, org-specific Id from the source.
 5. **Build the transform** under `sql/transformations/`, producing the
    `*_Load` table. Include the ticket reference in a header comment
-   (rule 10) — ask for it if it hasn't been given.
+   (rule 10) — ask for it if it hasn't been given. Get the number from
+   `.venv/Scripts/python.exe cli.py next-script-number` rather than
+   guessing — scripts are numbered in gaps of 10 (010, 020, 030...) so a
+   script that needs inserting later between two that already exist can
+   take an unused number in that gap without renumbering anything already
+   committed; pass `--after <NNN> --before <MMM>` for that insertion case.
+   Same command, `--dir source_ingestion`, for `sql/source_ingestion/`.
+   Read-only/advisory — it suggests a number, never creates or renames a
+   file itself. Once the script is real, run `set-mapping-script` against
+   the mapping doc so its header records which script actually implements
+   this object — never before, since the script doesn't exist yet earlier
+   in this workflow.
 6. **Sort it** — `add-bulk-load-sort-column` against the object's parent key
    (rule 6), if it has one.
 7. **Dupe-check it** — `check-load-table-duplicate-keys` against the
@@ -608,6 +627,20 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   key duplicate/NULL check). Originally SQL Server stored procedures;
   retired in favor of plain Python + inline SQL via `sql_dialect.py`, so
   both work on either backend with no `CREATE PROCEDURE`/`EXEC` step.
+- `script_numbering.py` — `next-script-number`'s numbering logic for
+  `sql/transformations/`/`sql/source_ingestion/` (gaps of 10, with
+  `--after`/`--before` insertion into an existing gap), and
+  `script_filename_for()` — resolving which real script implements a given
+  object (highest-numbered match wins), shared by `migration_run_book.py`'s
+  Load-phase sync and `mapping_doc.py`'s `set-mapping-script`. Purely
+  advisory, same "tool proposes, human/Claude commits deliberately"
+  principle as `batch_advisor.py`'s recommendations — never creates or
+  renames a file.
+- `git_info.py` — shared git-repo introspection (current commit/branch,
+  and the GitHub base URL when a GitHub remote exists) used by both
+  `migration_run_book.py`'s breadcrumb header and `mapping_doc.py`'s
+  `set-mapping-script` hyperlink, so every "jump to this file at this
+  commit" link across the project is built the same way, from one place.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping. `type_map.py` is the SQL Server flavor;
   `sql_dialect.py`'s `SqliteDialect.sf_type_to_sql()` is SQLite's.

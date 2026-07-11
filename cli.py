@@ -56,6 +56,7 @@ import reference_record as rr
 import record_types as rt
 import data_model_diagram as dmd
 import load_table_prep as ltp
+import script_numbering as sn
 
 
 def _ctx():
@@ -125,6 +126,26 @@ def validate_external_id_cmd(object_name, field_name):
     for problem in result["problems"]:
         click.echo(f"  {problem}")
     raise SystemExit(1)
+
+
+@cli.command("next-script-number")
+@click.option("--dir", "target_dir", type=click.Choice(["transformations", "source_ingestion"]),
+              default="transformations", help="Which numbered script folder to check.")
+@click.option("--after", type=int, default=None, help="Insert between two existing scripts: the number immediately before the gap (use with --before).")
+@click.option("--before", type=int, default=None, help="Insert between two existing scripts: the number immediately after the gap (use with --after).")
+def next_script_number_cmd(target_dir, after, before):
+    """Suggests the next number for a new sql/transformations/ or
+    sql/source_ingestion/ script (roadmap: numbering gaps of 10 so a later
+    insertion doesn't force a renumber). With no options: the next
+    top-level slot. With --after/--before: an unused number strictly
+    between two existing scripts, for inserting one later. Read-only,
+    advisory only -- never creates or renames a file itself."""
+    directory = f"sql/{target_dir}"
+    try:
+        n = sn.next_number(directory, after=after, before=before)
+    except ValueError as e:
+        raise click.UsageError(str(e))
+    click.echo(sn.format_number(n))
 
 
 @cli.command("record-counts")
@@ -743,6 +764,21 @@ def generate_mapping_doc_cmd(object_name, output_path, source_table, schema):
     _, sf, engine = _ctx()
     path = mpd.generate_mapping_workbook(sf, object_name, output_path, engine, source_table, schema=schema)
     click.echo(f"Wrote {path} ({source_table} -> {object_name})")
+
+
+@cli.command("set-mapping-script")
+@click.argument("object_name")
+@click.argument("mapping_path")
+@click.option("--dir", "target_dir", type=click.Choice(["transformations", "source_ingestion"]),
+              default="transformations", help="Which numbered script folder to resolve the script from.")
+def set_mapping_script_cmd(object_name, mapping_path, target_dir):
+    """Fill in the mapping doc's "Transform Script:" header field for
+    object_name with the real transform script (auto-resolved, highest-
+    numbered match) -- run this only after the script has actually been
+    built, as its own step right after "Build the transform" in the
+    standard workflow, never before."""
+    filename = mpd.set_transform_script(mapping_path, object_name, script_subdir=target_dir)
+    click.echo(f"{mapping_path} [{object_name}]: Transform Script set to {filename}")
 
 
 @cli.command("check-mapping-balance")
