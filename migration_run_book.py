@@ -591,24 +591,14 @@ _UNRESOLVED_STATUS_VALUES = {None, "", "Not Started"}
 
 
 def _object_matches(object_name, object_value):
-    """Does a row's Object cell refer to this Salesforce object? Exact
-    (case-insensitive) match, or the object name appearing as a whole
-    delimited token -- so "Account" matches "010_account_load.sql" but
-    "Order" does NOT match "030_orderitem_load.sql" (a naive substring
-    check did, found in review: an Order log row would have filled the
-    OrderItem placeholder, and Order/OrderItem is exactly the pairing this
-    framework's own batch heuristics expect together). Underscore counts
-    as a delimiter (required for the filename convention to match at all),
-    which leaves one disclosed residual edge: "Quote" would still match
-    inside "sbqq__quote__c_load.sql" since custom-object suffixes are
-    underscore-delimited too."""
-    value = str(object_value)
-    if object_name.lower() == value.strip().lower():
-        return True
-    return re.search(
-        rf"(?<![A-Za-z0-9]){re.escape(object_name)}(?![A-Za-z0-9])",
-        value, re.IGNORECASE,
-    ) is not None
+    """Does a row's Object cell refer to this Salesforce object? Delegates
+    to script_numbering.matches_token() -- the same whole-token match this
+    docstring used to duplicate verbatim (e.g. "Account" matches
+    "010_account_load.sql" but "Order" does NOT match
+    "030_orderitem_load.sql"). Kept as a single shared implementation so a
+    future fix to the matching rule can't fix one call site and silently
+    leave the other on the old, buggier logic."""
+    return sn.matches_token(object_name, object_value)
 
 
 def _find_pending_load_row(ws, object_name, phase_prefix="load"):

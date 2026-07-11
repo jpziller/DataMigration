@@ -43,7 +43,9 @@ import sql_dialect
 _HYPERLINK_FONT = Font(color="0563C1", underline="single")
 
 _INSERT_INTO_RE = re.compile(
-    r"INSERT\s+INTO\s+(?:\[?[\w]+\]?\.)?\[?(\w+)\]?\s*\(([^)]+)\)",
+    r'INSERT\s+INTO\s+(?:(?:\[\w+\]|"\w+"|\w+)\.)?'
+    r'(?:\[(?P<table_br>\w+)\]|"(?P<table_dq>\w+)"|(?P<table_bare>\w+))'
+    r"\s*\((?P<cols>[^)]+)\)",
     re.IGNORECASE,
 )
 _INVALID_SHEET_CHARS = re.compile(r"[:\\/?*\[\]]")
@@ -254,12 +256,19 @@ def find_unmapped_required_fields(mapping_path, object_name):
 def extract_insert_columns(sql_text, table_name=None):
     """Return the column list from an INSERT INTO (...) statement in the
     given SQL text -- the first one matching table_name (case-insensitive,
-    schema prefix/brackets ignored), or the first INSERT INTO found if
-    table_name is None. Returns None if no match is found."""
+    schema prefix/brackets/double-quotes ignored), or the first INSERT INTO
+    found if table_name is None. Recognizes SQL Server's [bracket] quoting
+    and SQLite/ANSI's "double quote" quoting (SqliteDialect.qualify()'s own
+    output shape), not just bracket-or-bare -- a SQLite transform script
+    using its own dialect's real quoting used to never match here at all.
+    Returns None if no match is found."""
     for match in _INSERT_INTO_RE.finditer(sql_text):
-        found_table, col_list = match.group(1), match.group(2)
+        found_table = (
+            match.group("table_br") or match.group("table_dq") or match.group("table_bare")
+        )
+        col_list = match.group("cols")
         if table_name is None or found_table.lower() == table_name.lower():
-            return [c.strip().strip("[]") for c in col_list.split(",")]
+            return [c.strip().strip('[]"') for c in col_list.split(",")]
     return None
 
 

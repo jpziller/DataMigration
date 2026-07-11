@@ -1,3 +1,5 @@
+import pytest
+
 import validators_lookup as vl
 
 
@@ -35,3 +37,11 @@ def test_read_object_validator_returns_contents(tmp_path):
     (tmp_path / "Task.md").write_text("# Task validator\n\nSome content.", encoding="utf-8")
     content = vl.read_object_validator("Task", str(tmp_path))
     assert content == "# Task validator\n\nSome content."
+
+
+@pytest.mark.parametrize("bad_name", [
+    "../../etc/passwd", "..\\..\\secrets", "sub/dir", "sub\\dir", "..", "",
+])
+def test_object_validator_path_rejects_path_traversal(tmp_path, bad_name):
+    with pytest.raises(ValueError):
+        vl.object_validator_path(bad_name, str(tmp_path))

@@ -24,6 +24,23 @@ from sqlalchemy import text
 import type_map as mssql_type_map
 
 
+def _escape_bracket_ident(name):
+    """Escape a bracket-quoted (SQL Server) identifier's own closing
+    bracket by doubling it -- SQL Server's own convention, e.g. `]` inside
+    `[a]b]` must be written `[a]]b]`. Without this, an identifier with an
+    embedded `]` (e.g. a CSV column header this framework doesn't fully
+    control, see import-csv-directory/source_ingestion.py) breaks out of
+    the quoting and injects arbitrary SQL into the generated statement."""
+    return str(name).replace("]", "]]")
+
+
+def _escape_doublequote_ident(name):
+    """Escape a double-quoted (SQLite/ANSI) identifier's own quote
+    character by doubling it -- same reasoning as _escape_bracket_ident,
+    for the `"` character instead of `]`."""
+    return str(name).replace('"', '""')
+
+
 class SqlDialect(ABC):
     @abstractmethod
     def qualify(self, schema, table):
@@ -78,10 +95,10 @@ class SqlDialect(ABC):
 
 class MssqlDialect(SqlDialect):
     def qualify(self, schema, table):
-        return f"[{schema}].[{table}]"
+        return f"[{_escape_bracket_ident(schema)}].[{_escape_bracket_ident(table)}]"
 
     def quote_ident(self, name):
-        return f"[{name}]"
+        return f"[{_escape_bracket_ident(name)}]"
 
     def raw_text_type(self):
         return "NVARCHAR(MAX)"
@@ -130,10 +147,10 @@ class MssqlDialect(SqlDialect):
 
 class SqliteDialect(SqlDialect):
     def qualify(self, schema, table):
-        return f'"{schema}"."{table}"'
+        return f'"{_escape_doublequote_ident(schema)}"."{_escape_doublequote_ident(table)}"'
 
     def quote_ident(self, name):
-        return f'"{name}"'
+        return f'"{_escape_doublequote_ident(name)}"'
 
     def raw_text_type(self):
         return "TEXT"

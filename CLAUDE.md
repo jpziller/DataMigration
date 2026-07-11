@@ -447,11 +447,13 @@ existing `schema=` argument anywhere in this codebase already means the
 right thing on either backend, no per-call-site changes needed. The
 actual load engine — `replicate`, `bulkops` (writeback, activity logging,
 retry), hard rules 6/7's tooling, and `import-csv-directory`'s CSV
-staging — works on both backends. The SQL-Server-only cleansing/matching
-function library (`sql/functions/cleansing|matching|lookups`) and several
-data-architect tools (`profiling.py`, `risk_analyzer.py`, `auto_mapper.py`,
-`migration_run_book.py`, `mock_data.py`/`snowfakery_data.py`,
-`solution_doc.py`, `load_order.py`, `mapping_doc.py`, `parquet_import.py`,
+staging — works on both backends. `risk_analyzer.py`, `migration_run_book.py`,
+`mapping_doc.py`, and `snowfakery_data.py` have also been ported to
+`sql_dialect.py` (orchestrator Phase 1 needed the first of those; the
+others followed the same pattern). The SQL-Server-only cleansing/matching
+function library (`sql/functions/cleansing|matching|lookups`) and the
+remaining data-architect tools (`profiling.py`, `auto_mapper.py`,
+`mock_data.py`, `solution_doc.py`, `load_order.py`, `parquet_import.py`,
 `record_types.py`, `reference_record.py`) are **SQL-Server-only for now**
 — a deliberate scope boundary, not an oversight; port one incrementally
 via the same `sql_dialect.py` helpers whenever a real SQLite project

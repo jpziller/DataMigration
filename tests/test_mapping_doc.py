@@ -37,6 +37,25 @@ def test_extract_insert_columns_returns_none_when_no_match():
     assert extract_insert_columns(SQL, "Opportunity_Load") is None
 
 
+def test_extract_insert_columns_matches_sqlite_double_quoted_table():
+    """SqliteDialect.qualify() produces "schema"."table" -- a real SQLite
+    transform script using its own dialect's quoting used to never match
+    here at all (found in review, _INSERT_INTO_RE only recognized bracket
+    or bare identifiers)."""
+    sqlite_sql = (
+        'INSERT INTO "dbo"."Account_Load" ("Name", "BillingCity")\n'
+        'SELECT Name, City FROM SourceAccounts;'
+    )
+    cols = extract_insert_columns(sqlite_sql, "Account_Load")
+    assert cols == ["Name", "BillingCity"]
+
+
+def test_extract_insert_columns_matches_sqlite_bare_double_quoted_table_no_schema():
+    sqlite_sql = 'INSERT INTO "Account_Load" ("Name")\nSELECT Name FROM SourceAccounts;'
+    cols = extract_insert_columns(sqlite_sql, "Account_Load")
+    assert cols == ["Name"]
+
+
 def test_safe_sheet_name_strips_invalid_excel_characters():
     assert _safe_sheet_name("Account:Contact/Test") == "Account_Contact_Test"
 

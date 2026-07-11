@@ -22,7 +22,17 @@ def list_system_validators(validators_dir="validators"):
 
 
 def object_validator_path(object_name, validators_dir="validators"):
-    """Path to validators/<object_name>.md, or None if it doesn't exist."""
+    """Path to validators/<object_name>.md, or None if it doesn't exist.
+
+    object_name is expected to be a plain Salesforce object API name --
+    rejected outright if it contains a path separator or ".." (found in
+    review: unvalidated, this would let e.g.
+    object_name="../../../etc/passwd" escape validators_dir via
+    os.path.join(); low real-world severity today since every caller
+    passes a CLI-argument object name, but cheap to close outright rather
+    than lean on that being true forever)."""
+    if not object_name or "/" in object_name or "\\" in object_name or ".." in object_name:
+        raise ValueError(f"Invalid object name for validator lookup: {object_name!r}")
     path = os.path.join(validators_dir, f"{object_name}.md")
     return path if os.path.isfile(path) else None
 

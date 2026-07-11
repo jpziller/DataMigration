@@ -104,6 +104,7 @@ import getpass
 import io
 import json
 import os
+import re
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -152,6 +153,30 @@ def _read_result_csv(csv_text):
         return pd.DataFrame()
     return pd.read_csv(io.StringIO(csv_text), dtype=str,
                        keep_default_na=False, na_values=[""])
+
+
+_SF_ID_TOKEN_RE = re.compile(r"\b[a-zA-Z0-9]{15}\b|\b[a-zA-Z0-9]{18}\b")
+
+
+def _normalize_error_signature(msg):
+    """Collapse a Salesforce error message down to a stable signature for
+    orchestrator.py's "known vs. novel error" check -- a DUPLICATE_VALUE or
+    similar error embeds the specific colliding record's real Id directly
+    in the message text, so the exact same logical error class produces a
+    different raw string on almost every occurrence, always reading as
+    "novel" even when it's really the same recurring problem (found in
+    review). Replaces any 15- or 18-char alphanumeric token that also
+    contains at least one digit -- real Salesforce Ids always do, and the
+    digit requirement is what keeps a same-length, all-letters field/object
+    name (e.g. a 15-character label with no Id in it) from being collapsed
+    by mistake. Heuristic, not a guarantee: a token that happens to satisfy
+    both conditions without actually being a Salesforce Id would still be
+    replaced -- accepted, same "documented residual edge" spirit as
+    migration_run_book.py's own token-matching caveat."""
+    def repl(match):
+        token = match.group(0)
+        return "<ID>" if any(c.isdigit() for c in token) else token
+    return _SF_ID_TOKEN_RE.sub(repl, str(msg))
 
 
 def _fingerprint(df, cols):
@@ -530,10 +555,18 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         # (see this function's own docstring for why that's sometimes necessary:
         # a single echoed-back column that Salesforce reformats, e.g. a datetime
         # field, otherwise breaks matching for the whole row).
+        # A column only belongs in echo_cols if it's present in EVERY
+        # non-empty result frame, not just one of them (found in review):
+        # _fingerprint() is called with this same column list against
+        # successes, failures, AND submit_df, so a column present in only
+        # one result frame would raise KeyError the moment the OTHER
+        # frame is fingerprinted -- after the real Salesforce write has
+        # already happened. Vacuously true for an empty frame (nothing to
+        # be missing a column from).
         fingerprint_source = fingerprint_columns if fingerprint_columns is not None else sent
         echo_cols = [c for c in fingerprint_source if (
-            (not successes.empty and c in successes.columns) or
-            (not failures.empty and c in failures.columns)
+            (successes.empty or c in successes.columns) and
+            (failures.empty or c in failures.columns)
         )]
 
     id_by_fp, err_by_fp, ambiguous = {}, {}, 0
@@ -569,13 +602,16 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     # visible in the writeback table, not the summary dict. Needed by
     # orchestrator.py's assess_tier() for its "seen before vs. novel error"
     # check (a known signature vs. something never observed for this
-    # object before); every value here is the literal error text Salesforce
-    # (or this framework's own "no matching record" synthetic message)
-    # returned, not a normalized/bucketed category.
-    failure_error_counts = {
-        str(msg): int(count)
-        for msg, count in df["_result_error"].dropna().value_counts().items()
-    }
+    # object before). Keys run through _normalize_error_signature() first
+    # (record-Id tokens collapsed to <ID>) so the same recurring error
+    # class still reads as "known" across runs instead of looking novel
+    # every time purely because it names a different row's Id -- two
+    # distinct raw messages that normalize to the same signature have
+    # their counts combined here, not counted separately.
+    failure_error_counts = {}
+    for msg, count in df["_result_error"].dropna().value_counts().items():
+        key = _normalize_error_signature(msg)
+        failure_error_counts[key] = failure_error_counts.get(key, 0) + int(count)
 
     # Write results back. For delete-by-external-id, the result table should
     # still show the external id value a row was submitted for, even though

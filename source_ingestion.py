@@ -74,6 +74,18 @@ _BULK_INSERT_FROM_RE = re.compile(r"BULK\s+INSERT\s+.*?\bFROM\s+'([^']+)'", re.I
 _SCRIPT_NUMBER_RE = re.compile(r"^(\d+)_")
 
 
+def _escape_sql_string_literal(value):
+    """Escape a value for embedding inside a single-quoted T-SQL string
+    literal (double any embedded `'`, SQL Server's own convention) --
+    BULK INSERT's FROM clause can't accept a bound parameter (a real T-SQL
+    limitation, not a choice made here), so the path has to be embedded
+    as literal text. Without this, a CSV filename containing a `'` (this
+    directory's contents come from a client, not necessarily something
+    the operator typed themselves) breaks out of the string literal and
+    injects arbitrary SQL into the generated staging script."""
+    return str(value).replace("'", "''")
+
+
 def table_name_for_csv(csv_path):
     """Sanitized base filename (extension stripped, non-alnum -> '_') as
     the destination table name -- no forced prefix, the client's own
@@ -145,7 +157,7 @@ def generate_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_
     os.makedirs(sql_dir, exist_ok=True)
     columns = _read_csv_header(csv_path)
     _check_no_duplicate_columns(columns, csv_path)
-    abs_csv_path = os.path.abspath(csv_path)
+    abs_csv_path = _escape_sql_string_literal(os.path.abspath(csv_path))
 
     number = _next_script_number(sql_dir)
     filename = f"{number}_{table_name}_import.sql"
@@ -309,13 +321,16 @@ def _run_script(engine, schema, table_name, columns, csv_path):
 
         if isinstance(d, sql_dialect.MssqlDialect):
             # BULK INSERT's FROM clause does not accept a bound parameter in
-            # SQL Server -- the path must be a literal. Safe here because
-            # abs_csv_path is a local filesystem path this same process just
-            # resolved via os.path.abspath, not external/user-facing input
-            # reaching this string via a SQL injection surface.
+            # SQL Server -- the path must be a literal. The filename portion
+            # of csv_path is NOT fully trusted (import-csv-directory reads
+            # every *.csv from a client-provided directory -- the filename
+            # is whatever the client's file happened to be named, not
+            # necessarily operator-typed), so it's escaped via
+            # _escape_sql_string_literal() before embedding, same reasoning
+            # as generate_import_script()'s own use of it.
             # ROWTERMINATOR = '0x0a', not '\n' -- confirmed live, see
             # generate_import_script()'s docstring for why.
-            abs_csv_path = os.path.abspath(csv_path)
+            abs_csv_path = _escape_sql_string_literal(os.path.abspath(csv_path))
             cx.execute(text(
                 f"BULK INSERT {qualified} FROM '{abs_csv_path}' WITH "
                 "(FORMAT = 'csv', FIRSTROW = 2, FIELDQUOTE = '\"', FIELDTERMINATOR = ',', "

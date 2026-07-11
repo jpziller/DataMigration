@@ -88,7 +88,7 @@ summarizes.
 | 50 | Migration-key/External ID field validation against live describe() | **Built**, hardens rules 4/7 | `validate-external-id <Object> <Field>` (hard rule 12) | Confirms a named target field is genuinely `externalId`+`unique` in the live org's describe() before it's trusted as a migration key — explicit object+field parameters (same convention as `CheckLoadTableDuplicateKeys`/`--external-id`), not auto-detected from the mapping doc. Read-only, exits nonzero on failure so it can gate a script. Not this framework's job to create that field, just to gate on it being correctly in place. |
 | 51 | Reference-record pull/compare tool | **Built** | `compare-reference-record <Object> <LoadTable> <RecordId> --migration-key <Field>` | Diffs a live, hand-created reference record against the Load table row its migration key corresponds to — matched by migration key (read off the live record), not `Id`, since a hand-created record was never loaded via `bulkops`. Read-only review aid; never writes back. |
 | 52 | Mermaid process-flow diagrams from the Migration Run Book | Not built — new feature, explicitly requested | — | Idea: generate a Mermaid flowchart from a run-book tab's Stage/Object/Dependency structure as a `.md` file — renders natively on GitHub, and is already the right input format for a Lucid Chart import later. |
-| 53 | Supervised end-to-end load orchestrator | Not built — needs a collaborative design pass, UAT/PROD-only, aspirational | — | Idea: for UAT/PROD passes only (never dev/test), run the full load order with less per-step confirmation — but only ever with a strong bias to stop and ask over "plow ahead," since backing data out of a live org is worse than waiting for approval. An aspiration to earn over many projects, not a switch to flip; the actual warn/pause/stop signal framework needs to be designed together, not scoped solo. |
+| 53 | Supervised end-to-end load orchestrator | **Phase 1 built, tested, live-validated** — Phase 2 gated on a real UAT pass | `orchestrator-assess`, `enable-orchestrator-logging` | Deterministic tier assessment (`orchestrator.py`'s `assess_tier()`, `docs/ORCHESTRATOR_DESIGN.md`) live-validated against real `BulkOpsLog` history across all four tiers. Zero change to Hard Rule 2 — every `bulkops` call is exactly as `ask`-gated as before. The actual coarse-approval mechanism (Phase 2) isn't built yet, on purpose, until Stage 1 shadow mode runs against a real UAT-tier project. |
 | 54 | Chat-driven human-in-the-loop alerting/control (Slack/Teams) | Not built — roadmap idea per explicit request | — | Idea: outbound alerts to Slack/Teams instead of email (low-risk, near-term), and further out, driving a production run from Slack itself — the latter needs a real architecture decision (listener vs. polling) that would require revisiting `docs/SECURITY_OVERVIEW.md`'s current "no network listener" trust model. |
 | 55 | `REF_`-prefixed human-only audit columns, excluded from bulkops | **Built**, hard rule 13 | `--ref-prefix` (default `REF_`) | Raised directly from real DBAmp-era experience: a `REF_`-prefixed Load table column is a human-only SQL-side audit field, excluded from the auto-derived sent-column list and from the pre-flight "not a real field" check — never reaches the API, never aborts the load. |
 | 56 | Duplicate target-field detection (scripts + spreadsheets) | **Built**, hard rule 14 | `check-mapping-balance` (extended), `import-csv-directory` | Raised directly: a single `CREATE TABLE`/`INSERT INTO` column list, or a single mapping-doc sheet, must never target the same field twice — different scripts/sheets doing so is fine and expected. `check-mapping-balance` reports both `duplicate_target_fields` and `duplicate_implemented_columns`; `import-csv-directory` refuses a CSV whose own header already repeats a column. |
@@ -2830,11 +2830,13 @@ without needing to build a direct Lucid API integration to get value
 from this. Building/saving a *polished*, styled diagram elsewhere is a
 named future stretch, explicitly not part of this item yet.
 
-## 53. Supervised end-to-end load orchestrator — a framework to design collaboratively, not scope solo (not built)
+## 53. Supervised end-to-end load orchestrator — Phase 1 built, Phase 2 gated on a real UAT pass
 
-The single biggest capability described in this conversation. Confirmed
-directly, with real constraints that narrow it a lot from "automate the
-whole thing":
+Full design lives in `docs/ORCHESTRATOR_DESIGN.md` (built collaboratively,
+per the original ask below — not scoped solo). All five open design
+questions there are resolved. Real constraints that narrow this a lot
+from "automate the whole thing," confirmed directly and unchanged since
+the original design pass:
 
 - **UAT and PROD passes only.** Not dev, not earlier test iterations —
   those stay exactly as manual and per-step-confirmed as they are today,
@@ -2844,29 +2846,49 @@ whole thing":
   Stated directly: "It is a dream to do this... but the orchestrator
   isn't going to be something we just do every time... has to be tested
   over many projects." This gets built and trusted incrementally, not
-  shipped and turned on.
+  shipped and turned on. Graduation bar: 3 consecutive clean passes per
+  stage (design doc's Graduation Numbers question, resolved).
 - **Bias to stop, hard.** "You should never just plow ahead when we get
   to UAT and production loads... caution should be that you stop and ask
   if things are looking off and we don't have enough info." The stated
-  cost asymmetry is explicit and should drive every design choice here:
+  cost asymmetry is explicit and drives every design choice here:
   **backing data out of a live org is worse than waiting for approval.**
   A false pause costs a little time; a false continue can cost a
   backout-and-redo cycle in production. When genuinely unsure which way
   to round, round toward stopping.
-- **This still runs against Hard Rule 2** (`CLAUDE.md`: confirm before
-  every `bulkops` call, enforced today as a per-invocation approval gate)
-  — approving an entire UAT/PROD run up front, then proceeding through
-  multiple objects/batches without re-confirming each one, is a genuine,
-  deliberate loosening of that rule for this specific, narrow case, not
-  a blanket change to how `bulkops` behaves everywhere.
+- **This still runs against Hard Rule 2** (the Live-Org Write
+  Confirmation Rule — confirm before every `bulkops` call, enforced today
+  as a per-invocation approval gate) — approving an entire UAT/PROD run
+  up front, then proceeding through multiple objects/batches without
+  re-confirming each one, is a genuine, deliberate loosening of that rule
+  for this specific, narrow case, not a blanket change to how `bulkops`
+  behaves everywhere.
 
-**Not scoping this further alone.** The real work is designing the
-actual warn/pause/full-stop signal framework — what "looking off" means
-concretely, what counts as "enough info," where the line sits between
-"log it and continue" and "stop and ask" — and that's explicitly a
-collaborative design effort, not a spec to hand over. Next step when
-picked up: a dedicated planning session for this framework specifically,
-not folded into other work.
+**Phase 1 — built, tested, live-validated (2026-07-12).** The
+deterministic tier-assessment logic (`orchestrator.py`'s `assess_tier()`
+— Tier 1 Continue Silently, Tier 2 Continue with Warning, Tier 3 Pause
+and Ask, Tier 4 Full Stop), `reference/orchestrator_thresholds.json`,
+`bulk_op()`'s `failure_error_counts` addition, `cli.py orchestrator-assess`,
+and opt-in `OrchestratorRunEvent` shadow-mode logging all exist and pass
+24+ unit tests. Live-validated against this project's own real
+`BulkOpsLog` history across all four tiers — including a deliberately
+constructed test that produced real Tier 2 and Tier 3 outcomes, and
+found (then fixed) a genuine gap in the elapsed-time trigger where Bulk
+API 2.0's fixed per-job overhead made small clean batches look
+"slower per row" than large ones. **Zero change to Hard Rule 2** — every
+`bulkops` call is exactly as `ask`-gated as before; Phase 1 only observes
+and reports after the fact.
+
+**Phase 2 — not started, gated on a real UAT pass.** The actual
+coarse-approval mechanism (`bulkops-under-plan`, a PreToolUse hook,
+`orchestrator-approve`, `dbo.OrchestratorRunPlan`,
+`reference/orchestrator_trust_ladder.json`, the new CLAUDE.md Hard Rule
+for the narrow Hard-Rule-2 exception, and the `docs/SECURITY_OVERVIEW.md`
+update for the hook as a new trust boundary) doesn't exist yet, and
+shouldn't until Stage 1 shadow mode has actually run against a real
+UAT-tier project — everything done so far has been Dev-tier dogfooding,
+permanently out of this design's scope. See `docs/ORCHESTRATOR_DESIGN.md`
+section 5 (deferred items) for the full list.
 
 ## 54. Chat-driven human-in-the-loop alerting/control — Slack/Teams (not built — roadmap idea per explicit request)
 

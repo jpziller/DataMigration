@@ -1,0 +1,102 @@
+"""Integration coverage for risk_analyzer.py's SQL-writing half
+(_ensure_table/write_to_sql) against a real SQLite file -- previously
+untested at all (found in review): every other test in this module only
+exercised the pure Salesforce-metadata-shaping functions
+(analyze_object_risk/analyze_migration_risk), never the part that was
+actually broken on SQLite until this session's port (a raw T-SQL
+IF EXISTS/CREATE TABLE that only ran on SQL Server), nor the ScanCompleted
+marker row this session added.
+"""
+import pandas as pd
+import pytest
+
+import risk_analyzer as ra
+import sql_client
+from config import Settings
+
+
+@pytest.fixture
+def sqlite_engine(tmp_path):
+    s = Settings(
+        sql_backend="sqlite",
+        sql_sqlite_dir=str(tmp_path / "_sqlite"),
+        sql_sqlite_schemas="dbo",
+    )
+    return sql_client.make_engine(s), s
+
+
+def _clean_result(object_name):
+    """A scan result shaped like analyze_object_risk()'s return value, with
+    zero automation of any kind."""
+    return {
+        "object": object_name,
+        "validation_rules": [],
+        "active_validation_rule_count": 0,
+        "direct_hit_validation_rules": [],
+        "apex_triggers": [],
+        "workflow_rules": [],
+        "approval_processes": [],
+        "record_triggered_flows": [],
+        "active_flow_count": 0,
+        "warnings": [],
+    }
+
+
+def test_write_to_sql_creates_table_on_sqlite(sqlite_engine):
+    engine, _ = sqlite_engine
+    ra.write_to_sql(engine, [_clean_result("Account")], schema="dbo")
+    rows = pd.read_sql('SELECT * FROM "dbo"."ObjectAutomationRisk"', engine)
+    assert len(rows) == 1
+
+
+def test_write_to_sql_clean_scan_gets_scancompleted_marker(sqlite_engine):
+    """A genuinely clean scan (no active automation) must still leave a
+    row behind, so a downstream consumer (orchestrator.py's
+    _has_automation_risk_data) can tell "scanned, clean" apart from "never
+    scanned" -- a real bug found this session before this marker existed."""
+    engine, _ = sqlite_engine
+    ra.write_to_sql(engine, [_clean_result("Account")], schema="dbo")
+    rows = pd.read_sql('SELECT * FROM "dbo"."ObjectAutomationRisk" WHERE ObjectName = \'Account\'', engine)
+    assert len(rows) == 1
+    assert rows.iloc[0]["CheckType"] == "ScanCompleted"
+    assert rows.iloc[0]["ItemName"] == "(no active automation found)"
+    assert rows.iloc[0]["IsActive"] is None
+
+
+def test_write_to_sql_with_active_automation_no_marker_row(sqlite_engine):
+    engine, _ = sqlite_engine
+    result = _clean_result("Account")
+    result["validation_rules"] = [{
+        "ValidationName": "No_Blank_Name", "Active": True,
+        "ErrorDisplayField": "Name", "ErrorMessage": "Name is required", "direct_hit": False,
+    }]
+    ra.write_to_sql(engine, [result], schema="dbo")
+    rows = pd.read_sql('SELECT * FROM "dbo"."ObjectAutomationRisk" WHERE ObjectName = \'Account\'', engine)
+    assert len(rows) == 1
+    assert rows.iloc[0]["CheckType"] == "ValidationRule"
+    assert rows.iloc[0]["ItemName"] == "No_Blank_Name"
+    assert bool(rows.iloc[0]["IsActive"]) is True
+
+
+def test_write_to_sql_rescan_replaces_prior_rows_for_that_object(sqlite_engine):
+    """A second analyze-org-risk pass for the same object must replace its
+    old rows, not accumulate duplicates alongside them."""
+    engine, _ = sqlite_engine
+    ra.write_to_sql(engine, [_clean_result("Account")], schema="dbo")
+
+    result = _clean_result("Account")
+    result["apex_triggers"] = [{"Name": "AccountTrigger", "UsageBeforeInsert": True}]
+    ra.write_to_sql(engine, [result], schema="dbo")
+
+    rows = pd.read_sql('SELECT * FROM "dbo"."ObjectAutomationRisk" WHERE ObjectName = \'Account\'', engine)
+    assert len(rows) == 1
+    assert rows.iloc[0]["CheckType"] == "ApexTrigger"
+
+
+def test_write_to_sql_other_objects_untouched_by_a_rescan(sqlite_engine):
+    engine, _ = sqlite_engine
+    ra.write_to_sql(engine, [_clean_result("Account"), _clean_result("Contact")], schema="dbo")
+    ra.write_to_sql(engine, [_clean_result("Account")], schema="dbo")
+
+    rows = pd.read_sql('SELECT * FROM "dbo"."ObjectAutomationRisk"', engine)
+    assert set(rows["ObjectName"]) == {"Account", "Contact"}

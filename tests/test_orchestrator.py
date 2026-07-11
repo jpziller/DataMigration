@@ -44,6 +44,23 @@ def test_tier2_first_lock_error_no_prior_lock_error():
     assert result["tier"] == 2
 
 
+def test_tier2_accumulates_both_reasons_when_both_fire_at_once():
+    # Known-signature failure rate under the tier-2 ceiling AND a
+    # first-occurrence lock error, together -- both reasons must survive
+    # (found in review: an elif chain silently dropped whichever condition
+    # was checked second).
+    current = {
+        **_CLEAN, "submitted": 100, "failed": 2, "succeeded": 98,
+        "failure_error_counts": {"DUPLICATE_VALUE:x:Jigsaw": 2},
+        "lock_errors": 3,
+    }
+    result = assess_tier(current, _SOME_HISTORY, has_automation_risk_data=True)
+    assert result["tier"] == 2
+    assert len(result["reasons"]) == 2
+    assert any("Failure rate" in r for r in result["reasons"])
+    assert any("Lock errors" in r for r in result["reasons"])
+
+
 def test_tier3_band_between_tier2_and_tier3_ceiling_with_known_signature():
     # 5% failure, above the 2% tier-2 ceiling but within the 10% tier-3
     # ceiling, split across two already-known signatures (each well under

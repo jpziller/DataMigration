@@ -272,10 +272,13 @@ adoption.
 
 ---
 
-*Last reviewed against the codebase during the 2026-07-09 ruthless-review
-pass (covering `validate-external-id`/pytest+CI additions, the `sf_client.py`
-shell-argument hardening, and the ODBC password-masking caveat in
-`sql_client.py`) -- previously reviewed during the 2026-07-09 full repo
-review (Migration Run Book, `record-counts`, `SECURITY.md`/`CONTRIBUTING.md`
-additions). Update alongside any change that adds a credential type, a
-network listener, or an authentication boundary.*
+*Last reviewed against the codebase during the 2026-07-11 ruthless-review
+pass (covering Orchestrator Phase 1's `OrchestratorRunEvent` table, the
+`sql_dialect.py` identifier-escaping fix, and the `source_ingestion.py`
+BULK INSERT string-literal-escaping fix) -- previously reviewed during the
+2026-07-09 ruthless-review pass (covering `validate-external-id`/pytest+CI
+additions, the `sf_client.py` shell-argument hardening, and the ODBC
+password-masking caveat in `sql_client.py`) and, before that, the 2026-07-09
+full repo review (Migration Run Book, `record-counts`, `SECURITY.md`/
+`CONTRIBUTING.md` additions). Update alongside any change that adds a
+credential type, a network listener, or an authentication boundary.*

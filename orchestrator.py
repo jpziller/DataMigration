@@ -32,6 +32,13 @@ from sqlalchemy import text
 import sql_dialect
 
 _THRESHOLDS_PATH = os.path.join(os.path.dirname(__file__), "reference", "orchestrator_thresholds.json")
+# Disclosed, accepted limitation (found in review): a known error signature
+# that recurs less often than every 20 runs of this object will fall out of
+# this window and get reported as "novel" again -- a real gap, but a wider
+# window trades off against a real query cost on an object with a long
+# BulkOpsLog history, and 20 is judged enough for the trial-and-error
+# cadence a migration project actually runs at. Revisit if a real project's
+# usage pattern proves this wrong.
 _HISTORY_ROWS_CONSIDERED = 20
 
 # Names, not bare numbers -- "Tier 3" means nothing out of context any more
@@ -218,25 +225,33 @@ def assess_tier(current, history, has_automation_risk_data, environment="uat"):
                 "possibly stuck, rate-limited, or looping."
             )
 
+    # Tier 2, same additive-not-exclusive accumulation as tier 3/4 above --
+    # a run can be both "known low-rate failure" and "first-occurrence
+    # lock errors" at once, and both reasons should surface, not just
+    # whichever condition happened to be written first in an elif chain
+    # (found in review: a 1% known-signature failure rate plus a first-
+    # occurrence lock error used to silently drop one of the two reasons).
+    tier2_reasons = []
+    if failure_pct > 0 and failure_pct <= thresholds["tier2_max_failure_pct"] and not novel_errors:
+        tier2_reasons.append(
+            f"Failure rate {failure_pct:.1%} within the tier-2 ceiling "
+            f"({thresholds['tier2_max_failure_pct']:.0%}), all failure signature(s) previously seen."
+        )
+    if lock_errors > 0 and not repeat_second_consecutive:
+        # First occurrence (a second consecutive occurrence is already
+        # tier 3 via repeat_second_consecutive above) -- expected
+        # trial-and-error, not a stop condition, per design doc section 2's
+        # tier 2.
+        tier2_reasons.append("Lock errors on this object's first run at this batch size -- expected trial-and-error.")
+
     if tier4_reasons:
         tier, reasons = 4, tier4_reasons + tier3_reasons
     elif tier3_reasons:
         tier, reasons = 3, tier3_reasons
-    elif failure_pct > 0 and failure_pct <= thresholds["tier2_max_failure_pct"] and not novel_errors:
-        tier = 2
-        reasons = [
-            f"Failure rate {failure_pct:.1%} within the tier-2 ceiling "
-            f"({thresholds['tier2_max_failure_pct']:.0%}), all failure signature(s) previously seen."
-        ]
-    elif lock_errors > 0:
-        # First occurrence (no immediately-preceding lock-error run,
-        # already excluded above) -- expected trial-and-error, not a stop
-        # condition, per design doc section 2's tier 2.
-        tier = 2
-        reasons = ["Lock errors on this object's first run at this batch size -- expected trial-and-error."]
+    elif tier2_reasons:
+        tier, reasons = 2, tier2_reasons
     else:
-        tier = 1
-        reasons = ["Clean run: no failures, no ambiguous rows, no external-id misses."]
+        tier, reasons = 1, ["Clean run: no failures, no ambiguous rows, no external-id misses."]
 
     return {
         "tier": tier,

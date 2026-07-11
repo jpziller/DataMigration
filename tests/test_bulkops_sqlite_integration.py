@@ -399,6 +399,68 @@ def test_bulk_op_failure_error_counts_groups_distinct_messages_separately(sqlite
     }
 
 
+def test_bulk_op_failure_error_counts_normalizes_embedded_record_ids(sqlite_engine, tmp_path):
+    """Two DUPLICATE_VALUE errors that differ only in which record's real
+    Id they collided with must count as the SAME signature, not two
+    separate "novel" ones -- otherwise orchestrator.py's known-vs-novel
+    check would almost never see a recurring error as known (found in
+    review: the raw, unnormalized message embeds per-row-specific data)."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2, 3],
+        "LegacyId__c": ["A1", "A2", "A3"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    fields = describe_fields(["LegacyId__c"])
+    fail_csv = (
+        "LegacyId__c,sf__Error\n"
+        "A1,DUPLICATE_VALUE:duplicate value found: record with id: 001XX000003DHPbYAO\n"
+        "A2,DUPLICATE_VALUE:duplicate value found: record with id: 001XX000003DHQcYAO\n"
+        "A3,SOME_OTHER_ERROR:unrelated\n"
+    )
+    sf = StubSF({"Account": fields}, {"Account": StubBulkHandler("", fail_csv)})
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["failed"] == 3
+    assert summary["failure_error_counts"] == {
+        "DUPLICATE_VALUE:duplicate value found: record with id: <ID>": 2,
+        "SOME_OTHER_ERROR:unrelated": 1,
+    }
+
+
+def test_bulk_op_handles_result_frames_with_asymmetric_echoed_columns(sqlite_engine, tmp_path):
+    """The success-records CSV and failed-records CSV don't always echo
+    back the exact same set of sent columns (found in review) -- here the
+    success file echoes Name but the failure file doesn't. echo_cols must
+    only include columns present in BOTH non-empty result frames, or
+    fingerprinting the frame missing a column raises KeyError after the
+    real Salesforce write already happened."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2],
+        "LegacyId__c": ["A1", "A2"],
+        "Name": ["Row1", "Row2"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    success_csv = "LegacyId__c,Name,sf__Id\nA1,Row1,001XX000003DHPbYAO\n"
+    failure_csv = "LegacyId__c,sf__Error\nA2,SOME_ERROR:no Name column echoed here\n"
+    sf = _stub_sf(StubBulkHandler(success_csv, failure_csv))
+
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["succeeded"] == 1
+    assert summary["failed"] == 1
+
+
 def test_bulk_op_failure_error_counts_empty_on_a_fully_clean_run(sqlite_engine, tmp_path):
     engine, _ = sqlite_engine
     df = pd.DataFrame({"LoadId": [1], "LegacyId__c": ["A1"], "Name": ["Row1"]})

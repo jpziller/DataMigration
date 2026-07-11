@@ -73,6 +73,28 @@ def format_number(n):
     return f"{n:03d}"
 
 
+def matches_token(object_name, text_value):
+    """Whole-token (delimiter-bounded) match, case-insensitive -- e.g.
+    "Account" matches "010_account_load.sql" but "Order" does NOT match
+    "030_orderitem_load.sql" (a naive substring check did, found in
+    review: an Order log row/lookup would have matched the OrderItem
+    script instead, and Order/OrderItem is exactly the pairing this
+    project's own batch heuristics expect kept distinct). Underscore
+    counts as a delimiter (required for the filename convention to match
+    at all), which leaves one disclosed residual edge: "Quote" would still
+    match inside "sbqq__quote__c_load.sql" since custom-object suffixes
+    are underscore-delimited too. Shared by script_filename_for() below
+    and migration_run_book.py's own row-matching logic, so the fix for
+    one naturally covers the other instead of drifting apart again."""
+    text_value = str(text_value)
+    if object_name.lower() == text_value.strip().lower():
+        return True
+    return re.search(
+        rf"(?<![A-Za-z0-9]){re.escape(object_name)}(?![A-Za-z0-9])",
+        text_value, re.IGNORECASE,
+    ) is not None
+
+
 def script_filename_for(object_name, directory):
     """The real script for object_name in directory (sql/transformations/
     or sql/source_ingestion/) -- when more than one matches (e.g. an old
@@ -88,6 +110,6 @@ def script_filename_for(object_name, directory):
         return ""
     matches = sorted(
         f for f in os.listdir(directory)
-        if f.lower().endswith(".sql") and object_name.lower() in f.lower()
+        if f.lower().endswith(".sql") and matches_token(object_name, f)
     )
     return matches[-1] if matches else ""
