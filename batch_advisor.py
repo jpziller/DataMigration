@@ -99,7 +99,7 @@ def _automation_adjustment(engine, heuristics, object_name, schema):
 
     if not counts:
         rationale.append(
-            f"analyze-org-risk found no active automation on {object_name} recorded yet."
+            f"analyze-org-risk scanned {object_name} and confirmed no active automation -- no adjustment."
         )
         return 0, rationale
 

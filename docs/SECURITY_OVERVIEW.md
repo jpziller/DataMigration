@@ -175,6 +175,15 @@ operator at a terminal" and would need to change if that assumption changes
   alias**, and the Git remote/commit breadcrumbs. Same rule -- committing
   one is a deliberate decision, and one to sanitize first if the repo is
   public.
+- **`OrchestratorRunEvent`** (`orchestrator-assess`, roadmap #53, Phase 1
+  only -- opt-in per schema, same convention as `BulkOpsLog`) is a
+  read-only observation log: it never writes to Salesforce and never
+  changes how `bulkops` itself is gated. Its `Reasons` column can embed a
+  **real Salesforce record Id** when the underlying failure was a
+  `DUPLICATE_VALUE` error (Salesforce's own error text names the specific
+  colliding record) -- worth knowing before treating this table's contents
+  as low-sensitivity by default, same reasoning as `BulkOpsLog`'s own
+  `RunBy`/error text already gets in this section.
 
 ## 6. AI-operator considerations (specific to this being Claude-Code-driven)
 

@@ -374,15 +374,13 @@ self-advanced by the tool.
   cleanly through Stage 3 across enough real projects — not a blanket
   unlock the moment Stage 3 looks good once.
 
-**Promotion criteria:** N consecutive clean passes at a stage — a tier-4 stop
-for a *legitimate* reason (the system working as designed) doesn't count
+**Promotion criteria:** **N = 3** consecutive clean passes at a stage —
+confirmed by the project owner (see the Open Questions section's
+Graduation Numbers entry, now resolved). A Tier 4 (Full Stop) for a
+*legitimate* reason (the system working as designed) doesn't count
 against promotion; a problem the human had to catch that the orchestrator
-*missed* counts heavily against it and should reset progress at that stage,
-not just pause it. A proposed starting default is **N = 3**, but this is
-explicitly flagged as something the project owner should sanity-check (see
-§8.2) — three consecutive real UAT passes could span a long calendar time
-depending on project cadence, and the right number depends on how much
-signal one clean pass actually carries.
+*missed* counts heavily against it and should reset progress at that
+stage, not just pause it.
 
 **Demotion:** any post-hoc-discovered miss (a tier that should have fired and
 didn't) drops the affected object/stage back down, recorded in the same file
@@ -493,12 +491,15 @@ same pass: shell-metacharacter smuggling across compound commands is not a
 real risk — Claude Code validates each subcommand in a compound shell
 statement independently against the rules.
 
-### 8.2 — Graduation numbers
-Is **N = 3** consecutive clean passes a reasonable bar for promoting a stage,
-given this project's actual cadence of real engagements? Too low and the
-"tested over many projects" bar in the original ask isn't really met; too
-high and the ladder never moves in practice. This is a judgment call about
-risk appetite and project pace that only the project owner can make.
+### 8.2 — RESOLVED. Graduation numbers
+**N = 3 consecutive clean passes** — confirmed by the project owner
+(2026-07-12), matching this document's own originally-proposed default.
+A Tier 4 (Full Stop) for a legitimate reason (the system working as
+designed) doesn't count against progress; a miss the orchestrator should
+have caught but didn't resets progress at that stage entirely, not just
+pauses it. Applies once `reference/orchestrator_trust_ladder.json` exists
+(Phase 2, not built yet) — nothing to implement against this number until
+then, but the open question itself is settled.
 
 ### 8.3 — RESOLVED. Retry policy inside an orchestrated run
 **No auto-retry, ever** — confirmed by the project owner (2026-07-12).
