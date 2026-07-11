@@ -587,3 +587,62 @@ load" has to be redone every fresh cycle — forgotten once this session
 orchestrator design needs to solve, but worth noting for
 `docs/MIGRATION_PLAYBOOK.md`/onboarding: a reset checklist should say so
 explicitly rather than relying on memory.
+
+### A fourth cycle: Task with a genuinely polymorphic field (2026-07-11)
+
+A follow-up cycle (300 Accounts, plus Task with `WhatId` — confirmed live
+to be a real polymorphic lookup, ~90 possible target types including both
+Account and Opportunity) surfaced findings distinct from the first three
+cycles' — a different kind of complexity (real-world data model shape),
+not just load mechanics.
+
+**§2/§4 (tier boundaries) — a clean real-world Tier 4 case, both triggers
+firing together.** The first Task insert failed 530/530 (100%) with a
+brand-new error class never seen in this project's history
+(`INVALID_FIELD_FOR_INSERT_UPDATE`, Salesforce's own recurring-task
+field cross-validation). That's simultaneously "failure rate > 10%" *and*
+"a distinct failure message not previously seen" — two independent Tier 4
+triggers agreeing, not a borderline call. Good confirmation the tier
+boundaries correctly separate "systemic, needs a human" from "isolated
+data-quality tail" — this really was the former (a wrong transform
+decision, not bad row data), and the round-toward-stopping default caught
+it immediately rather than after partial damage.
+
+**A third failure category, distinct from the two this project had
+already caught.** Two failure modes are already well-represented in this
+project's own history: a framework bug (the datetime/fingerprint issues)
+and org automation blocking rows (the tier taxonomy's original motivating
+case). This one is neither — it's *mock/source data violating a target-
+org business rule that only applies to certain interdependent field
+combinations*, something no per-field validation could have caught in
+advance. Worth naming as its own category if the orchestrator's error-
+signature catalog (§2, §6) ever gets built out beyond "seen before /
+novel": a systemic combination-validity issue behaves differently from
+either of the other two (it's fixable by *excluding* fields, not by
+retrying, adjusting batch size, or fixing a framework bug).
+
+**§7 (pause/resume) — the fresh-confirmation bar played out exactly as
+designed.** Tier 4's "halts the entire remaining plan, resuming requires a
+fresh explicit confirmation of what happened and why it's safe to
+continue" is precisely what happened here in practice: stop, diagnose
+(the recurrence-field cluster), fix the transform, then a deliberate
+re-run — not an automatic retry of the same failing rows. The Migration
+Run Book's own design (§6's integration point) held up well under this:
+the failed attempt and the successful retry landed as two distinct rows
+(`Issue` / 0 succeeded, then `Completed` / 530 succeeded) rather than one
+overwriting the other — an honest record of "first attempt failed for a
+real reason, second attempt succeeded," which is exactly what a real
+Migration Run Book should preserve.
+
+**§3 (plan approval) — polymorphic relationships are worth surfacing at
+plan-approval time, not just handling correctly under the hood.**
+`load_order.py` already produces correct dependency edges for a
+polymorphic field (one edge per in-scope target type, confirmed working
+here without any change). But a plan-approval breadcrumb (§3's "object
+list and order") showing just "Task: after Account, after Opportunity"
+doesn't communicate that Task's relationship to those two parents is
+fundamentally different in kind from, say, Opportunity's to Account and
+Contact — one field, mutually exclusive per row, vs. two independent
+fields. That distinction is exactly the kind of thing a human approving a
+plan would want called out explicitly, not left implicit in the
+dependency graph.

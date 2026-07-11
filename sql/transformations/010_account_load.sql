@@ -2,15 +2,12 @@
    (hard rule 10). Builds Account_Load from the Snowfakery-generated
    Account_Mock table. Migration key MigrationID__c is regenerated from
    _MockRowId (guaranteed unique), NOT copied from Account_Mock's own
-   Snowfakery-generated value for that field -- see the mapping doc's
-   Notes column for this row.
+   Snowfakery-generated value for that field.
 
-   FLS for MigrationID__c on Account/Contact/Opportunity is granted via
-   the MigrationFieldAccess permission set (force-app/main/default/
+   FLS for MigrationID__c on Account/Contact/Opportunity/Task is granted
+   via the MigrationFieldAccess permission set (force-app/main/default/
    permissionsets/MigrationFieldAccess.permissionset-meta.xml), not the
-   Admin profile -- see CLAUDE.md hard rule 8 and this project's own
-   deployment notes for why (running user's real profile in this org is
-   not literally named "Admin"). */
+   Admin profile -- see CLAUDE.md hard rule 8. */
 
 DROP TABLE IF EXISTS "dbo"."Account_Load";
 

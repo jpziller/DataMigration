@@ -116,7 +116,7 @@ venv may not be active in a fresh shell:
                 later via `sql/transformations/*.sql` like every other source, same "stage raw, type
                 explicitly" philosophy. Deliberately different from `import-parquet`: generates a
                 numbered, git-committed `.sql` script per file under `sql/source_ingestion/`
-                (`--ticket` required, hard rule 10) rather than loading directly in Python — the
+                (`--ticket` required, the Script Ticket Traceability Rule, #10) rather than loading directly in Python — the
                 script is the real artifact of record, reused unchanged on every later pass, never
                 silently regenerated. On a later pass, the current CSV's header is checked against
                 what the existing script expects — **the full ordered column list, not just set
@@ -141,7 +141,7 @@ venv may not be active in a fresh shell:
                 regardless of prior state.)
 - Load order:   `.venv/Scripts/python.exe cli.py analyze-load-order Account Contact Opportunity ...`
 - Resolve RecordTypes: `.venv/Scripts/python.exe cli.py resolve-record-types Account`
-                (roadmap #36, hard rule 15 — RecordType Ids are org-specific and never portable
+                (roadmap #36, the RecordType Resolution Rule, #15 — RecordType Ids are org-specific and never portable
                 across orgs. Queries the target org's real RecordType rows for the object and
                 writes them into `dbo.RecordTypeMap` (shared across every object in the project,
                 like `dbo.FieldProfile`) — the transform then `JOIN`s against it by `DeveloperName`
@@ -255,7 +255,7 @@ venv may not be active in a fresh shell:
                 (insert/upsert require `--email-deliverability` — check Setup > Email Administration
                 > Deliverability yourself first and pass what it actually shows; there's no API to
                 read it, so `bulk_op()` requires this as an explicit human attestation and raises
-                before touching the API if it's missing — rule 9. `all-email` also needs
+                before touching the API if it's missing — the Email Deliverability Attestation Rule, #9. `all-email` also needs
                 `--confirm-external-email-risk`.)
                 (every sent column is checked against the target object's live describe() before
                 the API is ever called — a typo'd, removed, or non-writable field aborts the whole
@@ -432,7 +432,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
 `/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
-`/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`
+`/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
+`/check-validators`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -441,24 +442,36 @@ reasoning/coding (Apex, LWC, architecture work, anything else) is still
 available even when there's no dedicated skill for it.
 
 ## Hard rules
-1. `replicate` and any `DROP`/`CREATE` run ONLY against the mirror DB
-   `SF_Migration` (or, on a SQLite-backed project, the mirror files under
-   `SQL_SQLITE_DIR` — see "SQL backend" below). Never point the tools at a
-   source or production database. Confirm `SQL_DATABASE`/`SQL_SQLITE_DIR`
-   in `.env` before any replicate.
-2. `bulkops` writes to a live Salesforce org. Before running it, state which org
-   (`SF_ORG_ALIAS` and auth mode) and get confirmation. Never run it
-   speculatively or to "test."
-3. Never read or print `.env`, `server.key`, or any credential. The access token
-   comes from `sf org auth show-access-token` (the 2026 CLI update redacts it
-   from `sf org display`).
-4. Result mapping is fingerprint-based, not row-order (see `bulkops.py`). For
-   inserts, the load table must carry a unique key mapped to a real SF field
-   (e.g. `Legacy_Id__c`). Do not "simplify" this to positional mapping.
-5. Don't invent Salesforce object or field API names — confirm with `describe`
-   or `dump-describe` first.
-6. Every `*_Load` table for an object with a parent lookup/master-detail field
-   must get a `[Sort]` column before `bulkops`, via
+Each rule keeps its number for stable cross-referencing elsewhere in this
+file and in `ROADMAP.md`, but leads with a short name — "rule 6" means
+nothing out of context; "the Parent-Batch Sort Rule" is self-explanatory
+on its own. Rules 6, 7, 12, and 15 are also formalized as executable
+**System Validators** (see `validators/system/` below) — the same check,
+just packaged for per-object, retrieve-by-name lookup alongside any
+project-specific validator found for one particular object.
+
+1. **Mirror-DB-Only Writes.** `replicate` and any `DROP`/`CREATE` run ONLY
+   against the mirror DB `SF_Migration` (or, on a SQLite-backed project,
+   the mirror files under `SQL_SQLITE_DIR` — see "SQL backend" below).
+   Never point the tools at a source or production database. Confirm
+   `SQL_DATABASE`/`SQL_SQLITE_DIR` in `.env` before any replicate.
+2. **Live-Org Write Confirmation.** `bulkops` writes to a live Salesforce
+   org. Before running it, state which org (`SF_ORG_ALIAS` and auth mode)
+   and get confirmation. Never run it speculatively or to "test."
+3. **Credential Non-Disclosure.** Never read or print `.env`, `server.key`,
+   or any credential. The access token comes from
+   `sf org auth show-access-token` (the 2026 CLI update redacts it from
+   `sf org display`).
+4. **Fingerprint Result Mapping.** Result mapping is fingerprint-based, not
+   row-order (see `bulkops.py`). For inserts, the load table must carry a
+   unique key mapped to a real SF field (e.g. `Legacy_Id__c`). Do not
+   "simplify" this to positional mapping.
+5. **No Invented Field Names.** Don't invent Salesforce object or field API
+   names — confirm with `describe` or `dump-describe` first.
+6. **Parent-Batch Sort Rule** (System Validator —
+   `validators/system/parent-batch-sort.md`). Every `*_Load` table for an
+   object with a parent lookup/master-detail field must get a `[Sort]`
+   column before `bulkops`, via
    `.venv/Scripts/python.exe cli.py add-bulk-load-sort-column <LoadTable> <ParentKeyColumn>`
    (`load_table_prep.py` — plain Python + inline SQL via `sql_dialect.py`,
    not a stored procedure; works on either SQL backend). This numbers rows by
@@ -468,23 +481,27 @@ available even when there's no dedicated skill for it.
    instead of scattered across batches that process concurrently and
    lock-contend on the shared parent record. Always include this step; don't
    skip it because an object "seems small enough."
-7. Every `*_Load` table must have its migration-key column checked for
-   duplicates/NULLs before `bulkops`, via
+7. **Migration Key Integrity Rule** (System Validator —
+   `validators/system/migration-key-integrity.md`). Every `*_Load` table
+   must have its migration-key column checked for duplicates/NULLs before
+   `bulkops`, via
    `.venv/Scripts/python.exe cli.py check-load-table-duplicate-keys <LoadTable> <MigrationKeyColumn>`
    (`load_table_prep.py`, same non-stored-procedure convention as rule 6).
    A duplicate or NULL migration key breaks the fingerprint-based result
    mapping in rule 4 — resolve every duplicate it reports before loading,
    don't let it surface later as an unexplained `ambiguous` count after a
    real Salesforce API call.
-8. When deploying a new custom field via `sf project deploy start`, bundle a
-   `Profile`/`PermissionSet` metadata component granting Read+Edit to System
-   Administrator in the **same deploy**. API-deployed fields get zero
-   field-level security by default (unlike Setup-UI-created fields, which
-   auto-grant the admin profile) — don't wait for a manual Setup fix or a
-   failed query to surface the gap. Re-evaluate which profile/permission set
-   to grant once a dedicated API-only migration user exists.
-9. Before any `bulkops insert`/`upsert`, check Setup > Email Administration >
-   Deliverability yourself and pass `--email-deliverability
+8. **Field-Level Security Bundling Rule.** When deploying a new custom
+   field via `sf project deploy start`, bundle a `Profile`/`PermissionSet`
+   metadata component granting Read+Edit to System Administrator in the
+   **same deploy**. API-deployed fields get zero field-level security by
+   default (unlike Setup-UI-created fields, which auto-grant the admin
+   profile) — don't wait for a manual Setup fix or a failed query to
+   surface the gap. Re-evaluate which profile/permission set to grant once
+   a dedicated API-only migration user exists.
+9. **Email Deliverability Attestation Rule.** Before any `bulkops
+   insert`/`upsert`, check Setup > Email Administration > Deliverability
+   yourself and pass `--email-deliverability
    no-access|system-email-only|all-email` — `bulk_op()` requires it and
    raises before touching the API if it's missing. There is no supported
    API to read this setting (verified: retrieved `EmailAdministrationSettings`
@@ -495,86 +512,132 @@ available even when there's no dedicated skill for it.
    needs `--confirm-external-email-risk`, since that's the one state that
    can send real mail to real external contacts — don't pass it
    speculatively "to get past the check."
-10. Every new file under `sql/transformations/` **or `sql/source_ingestion/`**
-    must have its ticket reference (JIRA story/bug key, or whichever
-    ticketing system this project actually uses) hardcoded in a comment
-    near the top when the script is first built — `import-csv-directory`'s
-    `--ticket` enforces this for generated ingestion scripts the same way.
-    Never invent a ticket number — if one hasn't been given for the work at
+10. **Script Ticket Traceability Rule.** Every new file under
+    `sql/transformations/` **or `sql/source_ingestion/`** must have its
+    ticket reference (JIRA story/bug key, or whichever ticketing system
+    this project actually uses) hardcoded in a comment near the top when
+    the script is first built — `import-csv-directory`'s `--ticket`
+    enforces this for generated ingestion scripts the same way. Never
+    invent a ticket number — if one hasn't been given for the work at
     hand, ask for it before writing the header comment, or state explicitly
     that this project isn't using a ticket system. This is a
     consistency/traceability rule (not a safety-critical one like 1-9), but
     still every project, every script.
-11. **Auto-mapping (and any similar first-draft tool) only ever produces a
-    first pass on real client data — never a finished mapping.** Profile,
-    document, auto-map, add notes, then stop. The workshop process and the
-    human own everything past that point, every time, no exceptions —
-    mapping is iterative and client-facing, not something to autonomously
-    complete on someone else's real data. The one deliberate exception:
-    data this framework generated itself (`generate-mock-data`/
-    `generate-related-mock-data`) has known ground truth, so a mapping may
-    be carried all the way to complete for practice, testing, and
-    dogfooding new tooling — never for a live engagement's actual data.
-    See `ROADMAP.md` #48.
-12. Before any `bulkops insert`/`upsert` (or a delete resolved by
-    external id), the target field being used as the migration key must
-    be checked live via `validate-external-id <Object> <Field>` —
-    confirms it's genuinely flagged both External ID and Unique in the
-    org's current `describe()`, not just assumed from the mapping doc's
-    field name or the transform's column name. Do not load until it
-    passes. It is not this framework's job to create or fix the field if
-    it isn't — that's another team's task; this rule only gates on it
-    already being correctly in place. See `ROADMAP.md` #50.
-13. Any Load table column prefixed `REF_` (case-insensitive) is a
-    human-only, SQL-side audit field — never sent to Salesforce, never
-    flagged by `bulkops`' pre-flight check as "not a real field." Excluded
-    automatically from the auto-derived column list `bulk_op()` sends
-    (default `--ref-prefix REF_`, overridable); an explicitly-passed
-    `send_columns`/column list is never second-guessed this way. Not this
-    framework's job to validate what an architect puts in one — only to
-    recognize and exclude it. See `ROADMAP.md` #55.
-14. No single `CREATE TABLE`/`INSERT INTO` column list, and no single
-    mapping-doc sheet, may target the same field twice — different
-    scripts/sheets targeting the same field is fine and expected (e.g. two
-    source systems feeding the same object). `check-mapping-balance`
-    reports both (`duplicate_target_fields` — one sheet, two+ source rows
-    choosing the same Target Field; `duplicate_implemented_columns` — one
-    transform's own column list repeating a name), and
-    `import-csv-directory` refuses to stage a CSV whose own header row
-    already has a repeated column. See `ROADMAP.md` #56.
-15. Any Load table populating a `RecordTypeId` must resolve the target
-    org's real RecordTypes first via `resolve-record-types <Object>` —
-    RecordType Ids are org-specific and never portable across orgs. The
-    transform's own SQL should `JOIN dbo.RecordTypeMap` by `DeveloperName`
-    (a real, portable identifier) to populate `RecordTypeId`, never
-    hand-copy a raw Id from the source. This design deliberately has no
-    automatic unresolved-value guard — use a `LEFT JOIN` so an unmatched
-    `DeveloperName` surfaces as a visible `NULL RecordTypeId`, and verify
-    no row is left unresolved before loading. See `ROADMAP.md` #36.
+11. **Human-Owned Mapping Rule.** Auto-mapping (and any similar first-draft
+    tool) only ever produces a first pass on real client data — never a
+    finished mapping. Profile, document, auto-map, add notes, then stop.
+    The workshop process and the human own everything past that point,
+    every time, no exceptions — mapping is iterative and client-facing, not
+    something to autonomously complete on someone else's real data. The one
+    deliberate exception: data this framework generated itself
+    (`generate-mock-data`/`generate-related-mock-data`) has known ground
+    truth, so a mapping may be carried all the way to complete for
+    practice, testing, and dogfooding new tooling — never for a live
+    engagement's actual data. See `ROADMAP.md` #48.
+12. **Live Migration Key Validation Rule** (System Validator —
+    `validators/system/external-id-validation.md`). Before any `bulkops
+    insert`/`upsert` (or a delete resolved by external id), the target
+    field being used as the migration key must be checked live via
+    `validate-external-id <Object> <Field>` — confirms it's genuinely
+    flagged both External ID and Unique in the org's current `describe()`,
+    not just assumed from the mapping doc's field name or the transform's
+    column name. Do not load until it passes. It is not this framework's
+    job to create or fix the field if it isn't — that's another team's
+    task; this rule only gates on it already being correctly in place. See
+    `ROADMAP.md` #50.
+13. **REF_ Audit Column Exemption Rule.** Any Load table column prefixed
+    `REF_` (case-insensitive) is a human-only, SQL-side audit field —
+    never sent to Salesforce, never flagged by `bulkops`' pre-flight check
+    as "not a real field." Excluded automatically from the auto-derived
+    column list `bulk_op()` sends (default `--ref-prefix REF_`,
+    overridable); an explicitly-passed `send_columns`/column list is never
+    second-guessed this way. Not this framework's job to validate what an
+    architect puts in one — only to recognize and exclude it. See
+    `ROADMAP.md` #55.
+14. **No Duplicate Target Field Rule.** No single `CREATE TABLE`/`INSERT
+    INTO` column list, and no single mapping-doc sheet, may target the
+    same field twice — different scripts/sheets targeting the same field
+    is fine and expected (e.g. two source systems feeding the same
+    object). `check-mapping-balance` reports both
+    (`duplicate_target_fields` — one sheet, two+ source rows choosing the
+    same Target Field; `duplicate_implemented_columns` — one transform's
+    own column list repeating a name), and `import-csv-directory` refuses
+    to stage a CSV whose own header row already has a repeated column. See
+    `ROADMAP.md` #56.
+15. **RecordType Resolution Rule** (System Validator —
+    `validators/system/record-type-resolution.md`, when the object carries
+    a `RecordTypeId`). Any Load table populating a `RecordTypeId` must
+    resolve the target org's real RecordTypes first via
+    `resolve-record-types <Object>` — RecordType Ids are org-specific and
+    never portable across orgs. The transform's own SQL should `JOIN
+    dbo.RecordTypeMap` by `DeveloperName` (a real, portable identifier) to
+    populate `RecordTypeId`, never hand-copy a raw Id from the source.
+    This design deliberately has no automatic unresolved-value guard — use
+    a `LEFT JOIN` so an unmatched `DeveloperName` surfaces as a visible
+    `NULL RecordTypeId`, and verify no row is left unresolved before
+    loading. See `ROADMAP.md` #36.
+
+## Validators library
+`validators/` is a git-tracked knowledge base of things to check **before**
+(and, where automatable, **after**) building a transform for a given
+object — retrieved by object name rather than re-derived from memory or
+rediscovered the hard way on a live org. Two kinds:
+
+- **System validators** (`validators/system/*.md`) — apply to every
+  object, no exceptions. Each formalizes one of the Hard Rules above that's
+  also an executable check (rules 6, 7, 12, 15) — the markdown explains
+  *why*, and points at the real CLI command that runs it. Not a
+  reimplementation of those commands, just a named, retrievable home for
+  the same check.
+- **Object validators** (`validators/<Object>.md`, e.g. `validators/Task.md`)
+  — findings specific to one object, discovered the hard way on a real
+  project (a metadata deployment quirk, a polymorphic field, a business-
+  rule field cluster that can't be independently mocked). Created the
+  first time something object-specific is discovered; nothing is created
+  preemptively for an object with no known gotchas yet.
+
+Before building a transform for any object (Standard Workflow step 5,
+below), check `validators/<Object>.md` if one exists, and skim
+`validators/system/` if this is your first time through this project. A
+validator entry is knowledge captured so it survives past one session and
+one script — even a correctly-written script that already avoids a known
+issue should still have that issue documented here, since this repo gets
+handed off before most objects' scripts are ever built the first time.
+Some entries are markdown-only (a judgment call, or a check not worth
+automating yet); others point at real executable code — both are equally
+valid, and a doc-only entry may graduate to executable later, same
+tool-proposes-human-commits principle as `reference/batch_size_heuristics.json`.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
 don't jump straight to writing T-SQL:
-1. **Profile the source table first** (`profile-sql-table`) — auto-mapping
+1. **Check the validators library first** — read `validators/<Object>.md`
+   if one exists for this object (a project-specific gotcha found the hard
+   way last time), and skim `validators/system/` if this is your first
+   pass through this project. Cheaper to learn a known issue from a doc
+   than to rediscover it on a live org.
+2. **Profile the source table first** (`profile-sql-table`) — auto-mapping
    and any real mapping-quality judgment depend on knowing how populated a
    field actually is, not just what it's named. Don't skip to mapping
    before this exists.
-2. **Review the mapping** (source field → target field, transformation
+3. **Review the mapping** (source field → target field, transformation
    notes) for the object in question — `generate-mapping-doc` to build the
    starting structure, then `auto-map` to suggest a first pass at the
    Target block/Notes from the profiling data plus name/thesaurus/fuzzy
    matching. Both are a starting point for human review, not a finished
    mapping — treat every "Review" recommendation, and any auto-map "No"
    on a field that instinctively looks mappable, as worth a second look.
-3. **Confirm target field API names** with `describe`/`dump-describe`
-   (rule 5) — never guess a field name from the mapping doc alone.
-4. **Resolve RecordTypes first, if this object carries a `RecordTypeId`**
-   — `resolve-record-types <Object>` (rule 15), so the transform can
-   `JOIN dbo.RecordTypeMap` by `DeveloperName` rather than ever hand-
-   copying a raw, org-specific Id from the source.
-5. **Build the transform** under `sql/transformations/`, producing the
-   `*_Load` table. Include the ticket reference in a header comment
-   (rule 10) — ask for it if it hasn't been given. Get the number from
+4. **Confirm target field API names** with `describe`/`dump-describe` (the
+   No Invented Field Names Rule, #5) — never guess a field name from the
+   mapping doc alone.
+5. **Resolve RecordTypes first, if this object carries a `RecordTypeId`**
+   — `resolve-record-types <Object>` (the RecordType Resolution Rule,
+   #15), so the transform can `JOIN dbo.RecordTypeMap` by `DeveloperName`
+   rather than ever hand-copying a raw, org-specific Id from the source.
+6. **Build the transform** under `sql/transformations/`, producing the
+   `*_Load` table. Include the ticket reference in a header comment (the
+   Script Ticket Traceability Rule, #10) — ask for it if it hasn't been
+   given. Get the number from
    `.venv/Scripts/python.exe cli.py next-script-number` rather than
    guessing — scripts are numbered in gaps of 10 (010, 020, 030...) so a
    script that needs inserting later between two that already exist can
@@ -585,23 +648,30 @@ don't jump straight to writing T-SQL:
    file itself. Once the script is real, run `set-mapping-script` against
    the mapping doc so its header records which script actually implements
    this object — never before, since the script doesn't exist yet earlier
-   in this workflow.
-6. **Sort it** — `add-bulk-load-sort-column` against the object's parent key
-   (rule 6), if it has one.
-7. **Dupe-check it** — `check-load-table-duplicate-keys` against the
-   migration key (rule 7). Resolve anything it flags.
-8. **Validate the migration key live** — `validate-external-id <Object>
-   <Field>` against the actual target field (rule 12). Do not proceed
-   until it reports OK; fixing a failing field is another team's job, not
-   something to work around here.
-9. Only then move to `bulkops`, with explicit org/auth confirmation (rule 2)
-   and, for insert/upsert, Email Deliverability checked and passed (rule 9).
-   Leave `--batch-size` at its `auto` default unless you already know a
-   pinned value from a prior run of this same project — a scripted
-   integer always wins over the recommendation and stays exactly as
-   written, the same "hardcode it in the load script" norm every
-   established migration tool uses, just with a smarter starting point
-   (see `ROADMAP.md` #15).
+   in this workflow. If this build turned up a new object-specific
+   gotcha (a metadata quirk, a field that can't be safely mocked/loaded
+   independently, anything a future pass through this object would want
+   to know up front), write it into `validators/<Object>.md` now — the
+   whole point of the library is that this doesn't get rediscovered next
+   time, on this project or another one.
+7. **Sort it** — `add-bulk-load-sort-column` against the object's parent
+   key (the Parent-Batch Sort Rule, #6), if it has one.
+8. **Dupe-check it** — `check-load-table-duplicate-keys` against the
+   migration key (the Migration Key Integrity Rule, #7). Resolve anything
+   it flags.
+9. **Validate the migration key live** — `validate-external-id <Object>
+   <Field>` against the actual target field (the Live Migration Key
+   Validation Rule, #12). Do not proceed until it reports OK; fixing a
+   failing field is another team's job, not something to work around here.
+10. Only then move to `bulkops`, with explicit org/auth confirmation (the
+    Live-Org Write Confirmation Rule, #2) and, for insert/upsert, Email
+    Deliverability checked and passed (the Email Deliverability
+    Attestation Rule, #9). Leave `--batch-size` at its `auto` default
+    unless you already know a pinned value from a prior run of this same
+    project — a scripted integer always wins over the recommendation and
+    stays exactly as written, the same "hardcode it in the load script"
+    norm every established migration tool uses, just with a smarter
+    starting point (see `ROADMAP.md` #15).
 
 ## Licensing
 MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,
@@ -641,6 +711,10 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   `migration_run_book.py`'s breadcrumb header and `mapping_doc.py`'s
   `set-mapping-script` hyperlink, so every "jump to this file at this
   commit" link across the project is built the same way, from one place.
+- `validators_lookup.py` — `check-validators`'s read-only retrieval logic
+  for the validators library (`validators/system/*.md`,
+  `validators/<Object>.md`). Purely a lookup convenience; writing a new
+  validator entry is always a deliberate manual edit, never automated.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping. `type_map.py` is the SQL Server flavor;
   `sql_dialect.py`'s `SqliteDialect.sf_type_to_sql()` is SQLite's.
@@ -666,6 +740,14 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   the Migration Run Book, reference-record pull/compare — roadmap #51,
   RecordType DeveloperName resolution — roadmap #36, SDMN-style Mermaid
   data model ERDs — roadmap #57).
+- `validators/` — the validators library (see its own section above and
+  `validators/README.md`): `validators/system/*.md` formalizes Hard Rules
+  6/7/12/15 as named, retrievable checks; `validators/<Object>.md` (e.g.
+  `Task.md`) captures object-specific findings as they're discovered.
+  `system/` ships as genuine template content, same as `sql/functions/`;
+  object files grow project-by-project, same "grows via real corrections"
+  principle as the field-synonym thesaurus below — never rediscovered
+  fresh on a second project once it's been written down once.
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always

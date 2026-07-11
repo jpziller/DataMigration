@@ -170,6 +170,9 @@ reference/field_synonyms.json                           auto-mapping synonym the
                                                          (grows via real corrections, but the
                                                          starting set is generic/template content)
 sql/functions/                                          reusable T-SQL library
+validators/system/                                       named checks behind hard rules 6/7/12/15
+                                                         (validators/<Object>.md grows per-project,
+                                                         same "grows via real corrections" principle)
 force-app/                                               reusable field metadata pattern
                                                          (MigrationID__c + its FLS grant)
 docs/, CLAUDE.md, README.md, ROADMAP.md                  documentation

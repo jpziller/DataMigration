@@ -57,6 +57,7 @@ import record_types as rt
 import data_model_diagram as dmd
 import load_table_prep as ltp
 import script_numbering as sn
+import validators_lookup as vl
 
 
 def _ctx():
@@ -146,6 +147,32 @@ def next_script_number_cmd(target_dir, after, before):
     except ValueError as e:
         raise click.UsageError(str(e))
     click.echo(sn.format_number(n))
+
+
+@cli.command("check-validators")
+@click.argument("object_name")
+def check_validators_cmd(object_name):
+    """Print validators/<object_name>.md (if it exists) and the list of
+    universal system validators -- run before building a transform for
+    this object (Standard Workflow step 1). Read-only, safe without
+    confirmation; see validators/README.md for the full convention."""
+    system_validators = vl.list_system_validators()
+    click.echo("System validators (apply to every object):")
+    if system_validators:
+        for name in system_validators:
+            click.echo(f"  validators/system/{name}")
+    else:
+        click.echo("  (none found)")
+    click.echo("")
+
+    content = vl.read_object_validator(object_name)
+    if content is None:
+        click.echo(f"No object-specific validator found for '{object_name}' yet.")
+        click.echo("If this build turns up something worth capturing, write it into "
+                    f"validators/{object_name}.md -- see validators/README.md for the format.")
+        return
+    click.echo(f"validators/{object_name}.md:")
+    click.echo(content)
 
 
 @cli.command("record-counts")
@@ -734,7 +761,8 @@ def generate_related_mock_data_cmd(object_names, counts, schema):
             count_map[name] = int(n)
 
     (recipe_path, skipped_by_object, primary_parent, secondary_exact_parents,
-     secondary_random_parents, fields_by_object) = sfd.build_recipe(sf, object_names, count_map)
+     secondary_random_parents, fields_by_object,
+     polymorphic_children) = sfd.build_recipe(sf, object_names, count_map)
     click.echo(f"Recipe written to {recipe_path} (review/hand-edit, or re-run directly with `snowfakery {recipe_path}`)")
     for child, parent in primary_parent.items():
         note = ""
@@ -744,6 +772,14 @@ def generate_related_mock_data_cmd(object_names, counts, schema):
             note += (f"; also randomly references {', '.join(secondary_random_parents[child])} "
                      f"(not scoped to the same {parent} -- see roadmap #6)")
         click.echo(f"  {child} nested under {parent}{note}")
+    for child, info in polymorphic_children.items():
+        note = ""
+        if info["extra_refs"]:
+            note = f"; each cohort also references {', '.join(info['extra_refs'])}"
+        click.echo(
+            f"  {child} split into one cohort per {info['field']} target "
+            f"({', '.join(info['targets'])}), tagged via _ParentType{note}"
+        )
 
     rows_written = sfd.run_recipe(engine, recipe_path, object_names, fields_by_object, schema=schema)
     for name in object_names:

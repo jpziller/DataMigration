@@ -32,6 +32,23 @@ _UNSUPPORTED_TYPES = {"reference", "multipicklist", "base64", "encryptedstring"}
 # with (confirmed live: 5/100 mock inserts failed on DUPLICATE_VALUE:Jigsaw).
 _DATA_DOT_COM_FIELDS = {"Jigsaw", "JigsawCompanyId", "CleanStatus"}
 
+# Task/Event's own recurrence fields (IsRecurrence + every Recurrence*
+# field) are cross-validated as one interdependent cluster, not
+# independent fields -- confirmed live: mocking them independently at
+# random produces combinations Salesforce actively rejects (e.g.
+# "ActivityDate for a recurring task", "Day of week must be blank for
+# type Recurs Monthly", "Choose a type of date for repeating this task").
+# Safely mocking a *valid* recurrence pattern would need real
+# recurrence-rule-aware logic, not a per-field fake value -- out of scope
+# here, so the whole cluster is skipped rather than producing rows that
+# fail for reasons unrelated to whatever the mock run is actually testing.
+_INTERDEPENDENT_FIELD_NAMES = {"IsRecurrence"}
+_INTERDEPENDENT_FIELD_PREFIXES = ("Recurrence",)
+
+
+def _is_interdependent_field(name):
+    return name in _INTERDEPENDENT_FIELD_NAMES or name.startswith(_INTERDEPENDENT_FIELD_PREFIXES)
+
 _NAME_HINTS = [
     (("firstname",), {"type": "First Name"}),
     (("lastname",), {"type": "Last Name"}),
@@ -91,7 +108,9 @@ def _mockaroo_field(field):
         return {"name": name, "type": "Email Address"}
     if sf_type == "url":
         return {"name": name, "type": "URL"}
-    if sf_type in ("picklist",):
+    if sf_type in ("picklist", "combobox"):
+        # combobox (e.g. Task.Subject) carries real picklistValues too --
+        # it just also accepts free text, unlike a restricted picklist.
         values = [v["value"] for v in field.get("picklistValues", []) if v.get("active", True)]
         if values:
             return {"name": name, "type": "Custom List", "values": values}
@@ -125,6 +144,9 @@ def mock_schema_for_object(sf, object_name):
             continue
         if field["name"] in _DATA_DOT_COM_FIELDS:
             skipped.append((field["name"], "data.com"))
+            continue
+        if _is_interdependent_field(field["name"]):
+            skipped.append((field["name"], "interdependent recurrence field, not mocked"))
             continue
         mapped = _mockaroo_field(field)
         if mapped is None:

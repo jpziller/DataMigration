@@ -48,7 +48,7 @@ from sqlalchemy import text
 
 import load_order as lo
 import sql_dialect
-from mock_data import _UNSUPPORTED_TYPES, _DATA_DOT_COM_FIELDS, truncate_to_field_lengths
+from mock_data import _UNSUPPORTED_TYPES, _DATA_DOT_COM_FIELDS, _is_interdependent_field, truncate_to_field_lengths
 from type_map import is_compound
 
 _NAME_HINTS = [
@@ -108,7 +108,10 @@ def _snowfakery_field(field):
         return {"fake": "Email"}
     if sf_type == "url":
         return {"fake": "Url"}
-    if sf_type == "picklist":
+    if sf_type in ("picklist", "combobox"):
+        # combobox (e.g. Task.Subject) carries real picklistValues too --
+        # it just also accepts free text, unlike a restricted picklist.
+        # Picking a real value is still a reasonable mock, confirmed live.
         values = [v["value"] for v in field.get("picklistValues", []) if v.get("active", True)]
         if values:
             return {"random_choice": values}
@@ -165,6 +168,9 @@ def object_field_schema(sf, object_name):
         if field["name"] in _DATA_DOT_COM_FIELDS:
             skipped.append((field["name"], "data.com"))
             continue
+        if _is_interdependent_field(field["name"]):
+            skipped.append((field["name"], "interdependent recurrence field, not mocked"))
+            continue
         spec = _snowfakery_field(field)
         if spec is None:
             skipped.append((field["name"], field["type"]))
@@ -186,7 +192,8 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
     fixed one.
 
     Returns (recipe_path, skipped_by_object, primary_parent,
-    secondary_exact_parents, secondary_random_parents, fields_by_object).
+    secondary_exact_parents, secondary_random_parents, fields_by_object,
+    polymorphic_children).
     secondary_exact_parents[name] are additional in-scope parents that are
     already an ancestor of name's chosen primary parent -- these get an
     exact nested `reference:` (confirmed live: it resolves up the *entire*
@@ -197,8 +204,17 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
     it to "only rows under the same primary parent." fields_by_object[name]
     is the list of real describe() field dicts actually included for that
     object, needed by run_recipe() to know which columns of the combined
-    JSON output really belong to it.
-    Raises ValueError on unresolved circular dependencies or a missing count.
+    JSON output really belong to it. polymorphic_children[name] (only
+    present for a child whose in-scope parents come from a single
+    polymorphic reference field, e.g. Task.WhatId -> Account/Opportunity)
+    is {"field", "targets", "extra_refs"} -- name does NOT appear in
+    primary_parent/secondary_*_parents at all; it's nested once per target
+    instead (a separate cohort per possible value, tagged with a literal
+    `_ParentType` column so the transform can build a CASE per target),
+    each cohort still carrying extra_refs the normal way.
+    Raises ValueError on unresolved circular dependencies, a missing count,
+    or more than one polymorphic reference field in scope for one child
+    (not supported -- narrow the object list or build the recipe by hand).
     """
     missing_counts = [n for n in object_names if n not in counts]
     if missing_counts:
@@ -217,10 +233,43 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
     level_by_object = {row["object"]: row["level"] for row in result["order"]}
     self_ref_fields_by_object = result["self_references"]
 
+    # Group edges by (child, field) to detect a genuinely polymorphic field
+    # -- one field (e.g. Task.WhatId) with more than one in-scope target
+    # (Account, Opportunity) means "one target OR the other, per row," not
+    # "both simultaneously" the way two different fields pointing at two
+    # different objects would (e.g. Opportunity's own AccountId + ContactId).
+    # Conflating the two would wrongly force every mock row of a
+    # polymorphic child to reference every target at once.
+    field_targets_by_child = {}
+    for edge in edges:
+        if edge["child"] == edge["parent"]:
+            continue  # self-reference, handled via self_ref_fields_by_object
+        field_targets_by_child.setdefault(edge["child"], {}).setdefault(
+            edge["field"], set()
+        ).add(edge["parent"])
+
+    polymorphic_field_by_child = {}
+    for child, targets_by_field in field_targets_by_child.items():
+        poly_fields = [f for f, targets in targets_by_field.items() if len(targets) > 1]
+        if len(poly_fields) > 1:
+            raise ValueError(
+                f"{child} has more than one polymorphic reference field in scope "
+                f"({poly_fields}) -- not supported, narrow the object list or "
+                f"build the recipe by hand."
+            )
+        if poly_fields:
+            polymorphic_field_by_child[child] = poly_fields[0]
+
+    # Non-polymorphic parents only, per child -- a polymorphic child's other
+    # (single-target) fields still flow through the normal primary/secondary
+    # machinery below; its polymorphic field's own targets are handled
+    # afterward instead, as separate cohorts (see below build_recipe logic).
     parents_by_child = {}
     for edge in edges:
         if edge["child"] == edge["parent"]:
             continue  # self-reference, handled via self_ref_fields_by_object
+        if polymorphic_field_by_child.get(edge["child"]) == edge["field"]:
+            continue
         parents_by_child.setdefault(edge["child"], set()).add(edge["parent"])
 
     # Choose each object's primary (nesting) parent as its DEEPEST in-scope
@@ -250,6 +299,23 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
         secondary_exact_parents[name] = [p for p in remaining if p in chosen_ancestors]
         secondary_random_parents[name] = [p for p in remaining if p not in chosen_ancestors]
 
+    # A polymorphic child can't be nested under one single parent the normal
+    # way (it needs one independent cohort per possible target -- see
+    # build_node below), so pull it back out of the normal primary/
+    # secondary bookkeeping. Its OTHER (non-polymorphic) parents, if any --
+    # just computed above from the filtered parents_by_child -- become
+    # "extra references" every cohort still needs to carry, e.g.
+    # Task.WhoId -> Contact applies regardless of whether a given Task's
+    # WhatId cohort landed under Account or Opportunity.
+    polymorphic_extra_refs = {}
+    for child in polymorphic_field_by_child:
+        extra = [primary_parent[child]] if child in primary_parent else []
+        extra += secondary_exact_parents.get(child, []) + secondary_random_parents.get(child, [])
+        polymorphic_extra_refs[child] = extra
+        primary_parent.pop(child, None)
+        secondary_exact_parents.pop(child, None)
+        secondary_random_parents.pop(child, None)
+
     skipped_by_object = {}
     fields_by_object = {}
     for name in object_names:
@@ -264,7 +330,19 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
     children_of = {}
     for child, parent in primary_parent.items():
         children_of.setdefault(parent, []).append(child)
-    roots = [n for n in object_names if n not in primary_parent]
+    roots = [n for n in object_names if n not in primary_parent and n not in polymorphic_field_by_child]
+
+    # One cohort entry per (polymorphic child, possible target) -- e.g.
+    # Task appears once under Account and once under Opportunity, each a
+    # fully independent nested node using the SAME --count expression (a
+    # symmetric split, not a divided total), combining back into one
+    # <Child>_Mock table afterward since Snowfakery tags every generated
+    # row with its object name regardless of which nesting context
+    # produced it.
+    cohort_children_of = {}
+    for child, field in polymorphic_field_by_child.items():
+        for target in sorted(field_targets_by_child[child][field]):
+            cohort_children_of.setdefault(target, []).append(child)
 
     def build_node(name, is_child):
         fields_yaml = {field["name"]: spec for field, spec in fields_by_object[name]}
@@ -280,7 +358,34 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
             fields_yaml["_ParentMockRef"] = {"reference": primary_parent[name]}
         for child in children_of.get(name, []):
             fields_yaml[f"_children_{child}"] = [build_node(child, is_child=True)]
+        for child in cohort_children_of.get(name, []):
+            fields_yaml[f"_children_{child}"] = [build_cohort_node(child, name)]
         return {"object": name, "count": counts[name], "fields": fields_yaml}
+
+    def build_cohort_node(child, target_parent):
+        """One polymorphic cohort of child, nested directly under
+        target_parent -- e.g. Task nested under Account specifically.
+        _ParentType records which target this cohort actually is, a
+        literal Snowfakery accepts as a plain constant value (confirmed
+        live), so the transform can build a WHEN _ParentType = '<Target>'
+        CASE per possible target."""
+        fields_yaml = {field["name"]: spec for field, spec in fields_by_object[child]}
+        target_ancestors = ancestors_of.get(target_parent, set()) | {target_parent}
+        for extra in polymorphic_extra_refs.get(child, []):
+            if extra == target_parent:
+                # Same object this cohort is already nested under (e.g.
+                # Task's own separate AccountId field, alongside the
+                # polymorphic WhatId that also targets Account) --
+                # _ParentMockRef already points at this exact row, a
+                # second column referencing it would just be redundant.
+                continue
+            if extra in target_ancestors:
+                fields_yaml[f"_SecondaryParentRef_{extra}"] = {"reference": extra}
+            else:
+                fields_yaml[f"_SecondaryParentRef_{extra}"] = {"random_reference": extra}
+        fields_yaml["_ParentMockRef"] = {"reference": target_parent}
+        fields_yaml["_ParentType"] = target_parent
+        return {"object": child, "count": counts[child], "fields": fields_yaml}
 
     recipe = [{"snowfakery_version": 3}] + [build_node(root, is_child=False) for root in roots]
 
@@ -289,8 +394,17 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
     with open(recipe_path, "w", encoding="utf-8") as fh:
         yaml.safe_dump(recipe, fh, sort_keys=False, default_flow_style=False)
 
+    polymorphic_children = {
+        child: {
+            "field": field,
+            "targets": sorted(field_targets_by_child[child][field]),
+            "extra_refs": polymorphic_extra_refs.get(child, []),
+        }
+        for child, field in polymorphic_field_by_child.items()
+    }
+
     return (recipe_path, skipped_by_object, primary_parent, secondary_exact_parents,
-            secondary_random_parents, fields_by_object)
+            secondary_random_parents, fields_by_object, polymorphic_children)
 
 
 def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo", stage_dir="_stage"):
@@ -327,7 +441,7 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
 
         mapped_fields = [f for f, _spec in fields_by_object[name]]
         keep_cols = [f["name"] for f in mapped_fields] + [
-            c for c in ("id", "_ParentMockRef") if c in object_rows.columns
+            c for c in ("id", "_ParentMockRef", "_ParentType") if c in object_rows.columns
         ] + [c for c in object_rows.columns if c.startswith("_SecondaryParentRef_")]
         object_rows = object_rows[[c for c in keep_cols if c in object_rows.columns]].copy()
         object_rows = object_rows.rename(columns={"id": "_MockRowId"})
@@ -341,6 +455,10 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
             extra_cols_sql.append(f"{d.quote_ident('_MockRowId')} {int_type} NULL")
         if "_ParentMockRef" in object_rows.columns:
             extra_cols_sql.append(f"{d.quote_ident('_ParentMockRef')} {int_type} NULL")
+        if "_ParentType" in object_rows.columns:
+            # A cohort discriminator string (e.g. "Account"/"Opportunity"),
+            # not a mock row id -- text, not int_type.
+            extra_cols_sql.append(f"{d.quote_ident('_ParentType')} {d.raw_text_type()} NULL")
         for secondary_col in [c for c in object_rows.columns if c.startswith("_SecondaryParentRef_")]:
             extra_cols_sql.append(f"{d.quote_ident(secondary_col)} {int_type} NULL")
 
