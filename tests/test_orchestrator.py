@@ -145,6 +145,45 @@ def test_elapsed_time_check_skipped_gracefully_without_duration_data():
     assert result["tier"] == 1
 
 
+def test_elapsed_time_check_skipped_when_no_comparably_sized_history():
+    # Live finding (docs/ORCHESTRATOR_DESIGN.md field notes): Bulk API
+    # 2.0's fixed per-job overhead means a small batch structurally looks
+    # "slower per row" than a large one even when nothing is wrong. A
+    # 100-row current run compared only against a 1000-row history run
+    # (10x outside the comparable-size band) must NOT fire the
+    # elapsed-time trigger, no matter how much slower its raw per-row
+    # rate looks.
+    history = [{**_SOME_HISTORY[0], "duration_seconds": 30.0, "submitted": 1000}]  # 0.03s/row
+    current = {**_CLEAN, "submitted": 100, "duration_seconds": 15.0}  # 0.15s/row -- 5x history's rate
+    result = assess_tier(current, history, has_automation_risk_data=True)
+    assert result["tier"] == 1
+
+
+def test_elapsed_time_check_still_fires_against_similarly_sized_history():
+    # Same 5x-slower rate as above, but this time the history run is a
+    # comparable size (150 rows vs the current run's 100 -- within the
+    # 0.5x-2x band) -- the comparison is fair here, so the trigger should
+    # still fire.
+    history = [{**_SOME_HISTORY[0], "duration_seconds": 4.5, "submitted": 150}]  # 0.03s/row
+    current = {**_CLEAN, "submitted": 100, "duration_seconds": 15.0}  # 0.15s/row
+    result = assess_tier(current, history, has_automation_risk_data=True)
+    assert result["tier"] == 4
+
+
+def test_elapsed_time_check_uses_only_comparably_sized_rows_from_mixed_history():
+    # History has both a wildly-different-sized run (which should be
+    # ignored) and a comparably-sized one (which should be used) --
+    # confirms the size filter applies per-row, not "any history exists
+    # so compare against all of it averaged together."
+    history = [
+        {**_SOME_HISTORY[0], "duration_seconds": 3000.0, "submitted": 100000},  # 0.03s/row, wrong scale
+        {**_SOME_HISTORY[0], "duration_seconds": 3.0, "submitted": 100},  # 0.03s/row, comparable
+    ]
+    current = {**_CLEAN, "submitted": 100, "duration_seconds": 15.0}  # 0.15s/row
+    result = assess_tier(current, history, has_automation_risk_data=True)
+    assert result["tier"] == 4
+
+
 def test_tier4_takes_priority_over_tier3_reasons_in_output():
     # Both a tier-3 trigger (no automation data) and a tier-4 trigger
     # (over the failure ceiling) fire together -- tier must be 4, and

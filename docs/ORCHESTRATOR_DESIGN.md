@@ -745,21 +745,29 @@ same signature, now known, at 1% failure) correctly assessed as **Tier
 2**. Both exactly as designed — real confirmation of the novelty-vs-known
 distinction working as intended, not just in synthetic tests.
 
-**A genuine, unexpected Tier 4** also fired, on data that was supposed to
-be the clean baseline: Batch A (100 rows, 100% success) took 14.6s
-(0.146s/row), 4.9x slower per-row than an earlier 300-row Account load's
-0.030s/row — tripping the 3x elapsed-time-overrun trigger on a run with
-zero actual data problems. Root cause: Bulk API 2.0's per-job overhead
-(job creation, polling until completion) is largely **fixed regardless of
-row count**, so "seconds per row" isn't actually batch-size-invariant — a
-smaller batch will structurally look slower per-row than a larger one
-even when nothing is wrong. This is a real gap in §2's elapsed-time
-trigger as specified (compare against history without regard to relative
-batch size), not a coding bug in `assess_tier()` — it correctly implements
-what the design says, and the design's own metric doesn't hold up against
-real Bulk API 2.0 timing behavior. Worth revisiting before Phase 2 trusts
-this trigger for a real stop: candidates include comparing at a fixed
-per-job overhead baseline rather than pure per-row rate, requiring a
-minimum row count before the check applies at all, or tracking "seconds
-per job" and "seconds per row beyond the first job" as separate figures.
-Not fixed in this pass — flagged here rather than guessed at.
+**A genuine, unexpected Tier 4 (Full Stop)** also fired, on data that was
+supposed to be the clean baseline: Batch A (100 rows, 100% success) took
+14.6s (0.146s/row), 4.9x slower per-row than an earlier 300-row Account
+load's 0.030s/row — tripping the 3x elapsed-time-overrun trigger on a run
+with zero actual data problems. Root cause: Bulk API 2.0's per-job
+overhead (job creation, polling until completion) is largely **fixed
+regardless of row count**, so "seconds per row" isn't actually batch-size-
+invariant — a smaller batch will structurally look slower per-row than a
+larger one even when nothing is wrong. This was a real gap in the Signal
+Tier Taxonomy section's elapsed-time trigger as originally specified
+(compare against history without regard to relative batch size), not a
+coding bug in `assess_tier()` — it correctly implemented what the design
+said, and the design's own metric didn't hold up against real Bulk API
+2.0 timing behavior.
+
+**Fixed (2026-07-12):** `_average_seconds_per_record()` now only compares
+against history rows of a *comparable size* (within a 0.5x-2x band of the
+current run's row count) — with no comparably-sized history, the
+elapsed-time check simply doesn't fire rather than risk a false Tier 4
+against an unlike-sized baseline. Re-verified against the exact real data
+that surfaced the bug: Batch A (LogId 6) now correctly assesses as Tier 1
+(Continue Silently) once its only prior history (a 300-row run, 3x
+outside the comparable band for a 100-row current run) is correctly
+excluded from the comparison. 4 new unit tests cover the size-band filter
+directly, including a mixed-history case (one wildly-different-sized row
+ignored, one comparably-sized row still used).

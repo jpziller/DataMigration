@@ -73,13 +73,31 @@ def _previous_run_had_lock_errors(history):
     return (history[-1].get("lock_errors") or 0) > 0
 
 
-def _average_seconds_per_record(history):
-    """Average of (duration_seconds / submitted) across history rows that
-    have both -- None if no history row has enough data to compute it."""
+_COMPARABLE_SIZE_BAND = (0.5, 2.0)
+
+
+def _average_seconds_per_record(history, current_submitted):
+    """Average of (duration_seconds / submitted) across history rows of a
+    *comparable size* to the current run -- None if no history row has
+    enough data, or none is close enough in size to compare fairly.
+
+    Deliberately size-banded, not just "every history row with duration
+    data": confirmed live (docs/ORCHESTRATOR_DESIGN.md's own field notes)
+    that Bulk API 2.0's per-job overhead (job creation, polling until
+    completion) is largely fixed regardless of row count, so seconds-per-
+    row is NOT batch-size-invariant -- a small clean batch can look far
+    "slower per row" than a large one purely from that fixed cost, not
+    because anything is wrong. Comparing only against similarly-sized
+    runs (within a 2x band either way) keeps the comparison fair; with no
+    comparable-sized history, the elapsed-time check simply doesn't fire
+    rather than risk a false Tier 4 (Full Stop) against an unlike-sized
+    baseline."""
+    lo, hi = _COMPARABLE_SIZE_BAND
     rates = [
         row["duration_seconds"] / row["submitted"]
         for row in history
         if row.get("duration_seconds") and row.get("submitted")
+        and lo <= (current_submitted / row["submitted"]) <= hi
     ]
     return sum(rates) / len(rates) if rates else None
 
@@ -189,14 +207,14 @@ def assess_tier(current, history, has_automation_risk_data, environment="uat"):
             "unrelated one-off bad rows."
         )
 
-    avg_rate = _average_seconds_per_record(history)
+    avg_rate = _average_seconds_per_record(history, submitted) if submitted else None
     duration = current.get("duration_seconds")
     if avg_rate is not None and duration is not None and submitted:
         actual_rate = duration / submitted
         if actual_rate > thresholds["elapsed_time_multiplier"] * avg_rate:
             tier4_reasons.append(
                 f"Elapsed time ({duration:.0f}s for {submitted} rows) exceeds "
-                f"{thresholds['elapsed_time_multiplier']}x this object's historical rate -- "
+                f"{thresholds['elapsed_time_multiplier']}x the rate of similarly-sized prior runs -- "
                 "possibly stuck, rate-limited, or looping."
             )
 
