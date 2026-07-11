@@ -170,13 +170,28 @@ reference/field_synonyms.json                           auto-mapping synonym the
                                                          (grows via real corrections, but the
                                                          starting set is generic/template content)
 sql/functions/                                          reusable T-SQL library
-sql/transformations/010_account_load.sql                illustrative example (hypothetical
-                                                         source table, not real data)
 force-app/                                               reusable field metadata pattern
                                                          (MigrationID__c + its FLS grant)
 docs/, CLAUDE.md, README.md, ROADMAP.md                  documentation
 .env.example, .mcp.json.example                          config templates (not real config)
 ```
+
+**`sql/transformations/`** is deliberately neither of the above two categories.
+It ships **empty** (just `.gitkeep`, same convention as `mapping/`/`metadata/`
+below) -- unlike `sql/functions/`, no illustrative example script lives here,
+because a numbered transform is always real, project-specific migration logic
+for one client's one object, never a generic template to copy from. The
+style/pattern an example would show lives instead in
+[`docs/MIGRATION_PLAYBOOK.md`](docs/MIGRATION_PLAYBOOK.md)'s "Migration Script
+Pattern" section, as documentation rather than a file sitting in the numbered
+sequence. Unlike
+the fully-gitignored artifacts below, though, these scripts **are** meant to
+be committed to git -- just to that project's own repo/branch, not this
+framework's shared template repo, and only once real (built against a real
+mapping, not left in as a practice/test artifact). A full reset (wiping a
+practice run back to a clean slate) erases every numbered script; a real
+client project's scripts persist and are never erased without explicit
+approval, even to remove just one.
 
 **Generated, org-specific artifacts** — gitignored by default, because every
 org's schema and every project's field mappings are different:
@@ -339,7 +354,7 @@ python cli.py generate-mock-data Account --count 50
 # blank Target block for a human to fill in -- doesn't guess the mapping.
 python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts
 python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts
-python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
+python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/<NNN>_account_load.sql
 
 # Auto-suggest a mapping into that doc's Target block/Notes/Migrate Data
 # columns -- requires the source table to already be profiled. Matches by
@@ -429,9 +444,11 @@ joins results back on that fingerprint:
   unique → exact mapping.
 - **insert** has no Id yet. Put a **unique migration-key column** among the sent
   columns — mapped to a real SF external-id text field (e.g. `Legacy_Id__c`) —
-  so the fingerprint is guaranteed unique. `sql/transformations/010_account_load.sql`
-  shows the pattern. Rows identical across every sent column are genuinely
-  ambiguous and counted in the `ambiguous` field of the summary.
+  so the fingerprint is guaranteed unique. A project's own numbered transform
+  under `sql/transformations/` (e.g. `SELECT CAST(<mock/source row id> AS ...)
+  AS Legacy_Id__c`) is where this pattern actually gets built. Rows identical
+  across every sent column are genuinely ambiguous and counted in the
+  `ambiguous` field of the summary.
 
 Writeback target: if the load table has the `key_column` (default `LoadId`),
 `Id`/`Error` are updated in place. Otherwise a `<table>_Result` table is

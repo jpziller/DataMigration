@@ -381,13 +381,19 @@ def _size_columns(ws):
 
 
 def _script_filename_for(object_name):
+    """The real transform script for object_name -- when more than one
+    matches (e.g. an old illustrative template alongside the real numbered
+    script), the highest-numbered one wins, since this framework's own
+    numbering convention means "most recent"/"actually used" rather than
+    alphabetically first. Filenames are zero-padded to the same width, so
+    ascending string sort already puts the highest number last."""
     if not os.path.isdir(_TRANSFORMS_DIR):
         return ""
     matches = sorted(
         f for f in os.listdir(_TRANSFORMS_DIR)
         if f.lower().endswith(".sql") and object_name.lower() in f.lower()
     )
-    return matches[0] if matches else ""
+    return matches[-1] if matches else ""
 
 
 def _load_order_rows(engine, object_names, schema, git_info=None):
@@ -730,7 +736,7 @@ def _insert_load_row(ws, object_name, phase_prefix="load"):
     return insert_at
 
 
-def _apply_log_result(ws, row_idx, log_row):
+def _apply_log_result(ws, row_idx, log_row, git_info=None):
     submitted = log_row["RecordsSubmitted"]
     succeeded = log_row["RecordsSucceeded"]
     failed = log_row["RecordsFailed"]
@@ -754,6 +760,21 @@ def _apply_log_result(ws, row_idx, log_row):
         pct_idx = _COLUMNS.index("Success Percent") + 1
         cell = ws.cell(row=row_idx, column=pct_idx, value=succeeded / submitted)
         cell.number_format = "0.00%"
+
+    # Prefer the real transform script's filename over a plain object name
+    # in the Object column -- the placeholder row created at generation
+    # time may predate the script actually being built (or may have
+    # matched a stale/illustrative script that has since been replaced),
+    # so this is re-resolved on every sync rather than trusted from
+    # whatever's already in the cell.
+    filename = _script_filename_for(log_row["ObjectName"])
+    if filename:
+        object_idx = _COLUMNS.index("Object") + 1
+        cell = ws.cell(row=row_idx, column=object_idx, value=filename)
+        github_url = _github_url(git_info["remote_url"]) if git_info else None
+        if github_url:
+            cell.hyperlink = f'{github_url}/blob/{git_info["commit_sha"]}/sql/transformations/{filename}'
+            cell.font = _HYPERLINK_FONT
 
 
 def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
@@ -794,6 +815,7 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
     if not new_rows:
         return {"synced": 0, "inserted": 0, "updated": 0}
 
+    git_info = _git_info()
     inserted, updated = 0, 0
     for log_row in new_rows:
         target_row = _find_pending_load_row(ws, log_row["ObjectName"])
@@ -802,7 +824,7 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
             inserted += 1
         else:
             updated += 1
-        _apply_log_result(ws, target_row, log_row)
+        _apply_log_result(ws, target_row, log_row, git_info=git_info)
 
     ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["LogId"])
     _save_workbook(wb, path)

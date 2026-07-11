@@ -18,7 +18,7 @@ Examples:
     python cli.py generate-mock-data Account --count 50
     python cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts
     python cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts  # same file -> adds a tab, doesn't overwrite
-    python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql
+    python cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/<NNN>_account_load.sql
     python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
     python cli.py generate-solution-doc Solution.docx Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
     python cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx
@@ -241,6 +241,7 @@ def disable_source_ingestion_logging_cmd(schema):
 @click.option("--dry-run", is_flag=True, help="With --where: report the matched count and sample Ids without touching SQL Server or Salesforce.")
 @click.option("--external-id", default=None, help="External id field (upsert; also delete -- resolved to real Ids via a query first, since Bulk API 2.0's delete only ever accepts Id).")
 @click.option("--key-column", default="LoadId", help="Local unique key for in-place writeback.")
+@click.option("--fingerprint-columns", default=None, help="Comma-separated subset of the sent columns to match results on, instead of every sent column. Use this when a sent column can come back from Salesforce reformatted (e.g. a datetime echoed as '...+00:00' -> '...000Z') -- the default fingerprint (every sent column) would then fail to match that row at all. The migration key column alone (e.g. MigrationID__c) is normally the safest choice.")
 @click.option("--ref-prefix", default="REF_", help="Load table columns starting with this prefix (case-insensitive) are human-only SQL-side audit fields (hard rule 13) -- excluded from the payload and never flagged as 'not a real field'.")
 @click.option("--schema", default="dbo")
 @click.option("--email-deliverability", default=None,
@@ -255,8 +256,9 @@ def disable_source_ingestion_logging_cmd(schema):
 @click.option("--run-book", "run_book_path", default=None, help="Migration Run Book workbook path -- with --run-book-tab, auto-syncs this load's BulkOpsLog row into that tab's Load phase right after it's written.")
 @click.option("--run-book-tab", default=None, help="Migration Run Book tab name to sync into -- requires --run-book.")
 def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_id,
-                key_column, ref_prefix, schema, email_deliverability, confirm_external_email_risk,
+                key_column, fingerprint_columns, ref_prefix, schema, email_deliverability, confirm_external_email_risk,
                 batch_size, run_book_path, run_book_tab):
+    fingerprint_columns = [c.strip() for c in fingerprint_columns.split(",")] if fingerprint_columns else None
     if bool(run_book_path) != bool(run_book_tab):
         raise click.BadParameter("--run-book and --run-book-tab must be given together.")
     if where and operation != "delete":
@@ -279,6 +281,7 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
     else:
         summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
                              external_id=external_id, key_column=key_column,
+                             fingerprint_columns=fingerprint_columns,
                              ref_prefix=ref_prefix,
                              schema=schema, stage_dir=s.stage_dir,
                              email_deliverability=email_deliverability,

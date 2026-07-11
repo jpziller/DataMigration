@@ -202,7 +202,7 @@ venv may not be active in a fresh shell:
                 SOURCE field from the named SQL table, with a blank Target block for a human to fill
                 in once a mapping is decided — doesn't guess the mapping itself. Auto-fills "Data Profile
                 Populated On/%" from existing profiling data for that source table, if any.)
-                `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/010_account_load.sql`
+                `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/<NNN>_account_load.sql`
                 (diffs a filled-in doc's Target block against the transform's real INSERT INTO list,
                 both directions, plus flags any referenced field that doesn't actually exist on the object.
                 Also flags rule 14 duplicates: the same Target Field chosen by two+ rows in one sheet,
@@ -656,6 +656,17 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   heuristics, but Markdown here since the structure itself is meant to be
   read directly, not hidden behind Python constants.
 - `sql/transformations/*.sql` — the migration logic (numbered; run in order).
+  Ships **empty** (just `.gitkeep`) — unlike `sql/functions/`, no illustrative
+  example script lives here, since a numbered transform is always real,
+  project-specific logic for one client's one object, never a generic
+  template. The style/pattern an example would show instead lives in
+  `docs/MIGRATION_PLAYBOOK.md`'s "Migration Script Pattern" section, as
+  documentation rather than a file in the numbered sequence. These scripts
+  *are* meant to be committed to git once real
+  (that project's own repo/branch, not this framework's shared template
+  repo) — a full reset of a practice/test run erases every numbered
+  script; a real client project's scripts persist and are never erased
+  without explicit approval, even to remove just one.
 - `sql/source_ingestion/*.sql` — generated `BULK INSERT` scripts, one per
   client-provided CSV file (`import-csv-directory`, roadmap #46). Numbered
   like `sql/transformations/`, but conceptually upstream of it: these stage
