@@ -3,7 +3,7 @@ deterministic logic docs/ORCHESTRATOR_DESIGN.md section 1 insists must
 never be model judgment. Every tier boundary is covered explicitly and
 independently, so a change to one trigger can't silently break another.
 """
-from orchestrator import assess_tier
+from orchestrator import assess_tier, TIER_NAMES
 
 _CLEAN = {
     "operation": "insert", "submitted": 100, "succeeded": 100, "failed": 0,
@@ -165,3 +165,26 @@ def test_prod_thresholds_are_tighter_than_uat():
     # check), but over prod's tighter 5% tier-3 ceiling (tier 4).
     assert uat_result["tier"] == 3
     assert prod_result["tier"] == 4
+
+
+def test_every_tier_result_includes_its_name_not_just_the_bare_number():
+    # "Tier 3" means nothing out of context, same reason CLAUDE.md's Hard
+    # Rules were given names -- every result must carry tier_name too.
+    for current, history, has_data in [
+        (_CLEAN, _SOME_HISTORY, True),
+        ({**_CLEAN, "operation": "delete"}, _SOME_HISTORY, True),
+        ({**_CLEAN, "ambiguous": 1}, _SOME_HISTORY, True),
+        ({**_CLEAN, "submitted": 100, "failed": 50, "succeeded": 50,
+          "failure_error_counts": {"X": 50}}, _SOME_HISTORY, True),
+    ]:
+        result = assess_tier(current, history, has_automation_risk_data=has_data)
+        assert result["tier_name"] == TIER_NAMES[result["tier"]]
+
+
+def test_tier_names_are_the_four_expected_ones():
+    assert TIER_NAMES == {
+        1: "Continue Silently",
+        2: "Continue with Warning",
+        3: "Pause and Ask",
+        4: "Full Stop",
+    }

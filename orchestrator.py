@@ -34,6 +34,17 @@ import sql_dialect
 _THRESHOLDS_PATH = os.path.join(os.path.dirname(__file__), "reference", "orchestrator_thresholds.json")
 _HISTORY_ROWS_CONSIDERED = 20
 
+# Names, not bare numbers -- "Tier 3" means nothing out of context any more
+# than "rule 7" did (CLAUDE.md's own Hard Rules were renamed for the same
+# reason). Taken directly from docs/ORCHESTRATOR_DESIGN.md section 2's own
+# tier headers, not invented separately.
+TIER_NAMES = {
+    1: "Continue Silently",
+    2: "Continue with Warning",
+    3: "Pause and Ask",
+    4: "Full Stop",
+}
+
 
 def _load_thresholds():
     with open(_THRESHOLDS_PATH, "r", encoding="utf-8") as fh:
@@ -90,7 +101,8 @@ def assess_tier(current, history, has_automation_risk_data, environment="uat"):
     environment: "uat" or "prod" -- selects the threshold profile from
         reference/orchestrator_thresholds.json.
 
-    Returns {"tier": 1-4, "reasons": [...], "coarse_approval_eligible": bool}.
+    Returns {"tier": 1-4, "tier_name": TIER_NAMES[tier], "reasons": [...],
+    "coarse_approval_eligible": bool}.
     "reasons" lists every trigger that fired, not just the first/highest
     -- print all of them, not just the tier number (design doc's own
     "seed knowledge, org automation, load history" rationale-first
@@ -115,7 +127,8 @@ def assess_tier(current, history, has_automation_risk_data, environment="uat"):
     if _is_delete_operation(current):
         return {
             "tier": 4,
-            "reasons": ["Delete/purge operation -- always tier 4, unconditionally (never graduates)."],
+            "tier_name": TIER_NAMES[4],
+            "reasons": ["Delete/purge operation -- always Tier 4 (Full Stop), unconditionally (never graduates)."],
             "coarse_approval_eligible": bool(history),
         }
 
@@ -209,6 +222,7 @@ def assess_tier(current, history, has_automation_risk_data, environment="uat"):
 
     return {
         "tier": tier,
+        "tier_name": TIER_NAMES[tier],
         "reasons": reasons,
         "coarse_approval_eligible": bool(history),
     }
@@ -324,6 +338,9 @@ _RUN_EVENT_COLUMNS = [
     ("AssessedAt", "DATETIME2", "TEXT", False),
     ("RunBy", "NVARCHAR(128)", "TEXT", True),
 ]
+_RUN_EVENT_UPGRADE_COLUMNS = [
+    ("TierName", "NVARCHAR(30)", "TEXT"),
+]
 
 
 def _col_type(d, mssql_type, sqlite_type):
@@ -337,17 +354,37 @@ def enable_orchestrator_logging(engine, schema="dbo"):
     assessment automatically; never gates anything, purely the shadow-mode
     observation record design doc section 5 calls for -- the raw material
     for eventually checking whether the tier logic agreed with what
-    actually happened."""
+    actually happened.
+
+    Also idempotently adds any columns in _RUN_EVENT_UPGRADE_COLUMNS if
+    this is an existing table from before they were introduced -- same
+    upgrade-in-place convention as enable_bulkops_logging(), history
+    preserved rather than requiring disable+re-enable."""
     d = sql_dialect.for_engine(engine)
-    if d.table_exists(engine, schema, "OrchestratorRunEvent"):
-        return
     qualified = d.qualify(schema, "OrchestratorRunEvent")
-    col_defs = [d.autoincrement_pk_column_ddl("EventId")]
-    for name, mssql_t, sqlite_t, nullable in _RUN_EVENT_COLUMNS:
-        null_sql = "NULL" if nullable else "NOT NULL"
-        col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} {null_sql}")
-    with engine.begin() as cx:
-        cx.execute(text(f"CREATE TABLE {qualified} (" + ", ".join(col_defs) + ");"))
+
+    if not d.table_exists(engine, schema, "OrchestratorRunEvent"):
+        col_defs = [d.autoincrement_pk_column_ddl("EventId")]
+        for name, mssql_t, sqlite_t, nullable in _RUN_EVENT_COLUMNS:
+            null_sql = "NULL" if nullable else "NOT NULL"
+            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} {null_sql}")
+        for name, mssql_t, sqlite_t in _RUN_EVENT_UPGRADE_COLUMNS:
+            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} NULL")
+        with engine.begin() as cx:
+            cx.execute(text(f"CREATE TABLE {qualified} (" + ", ".join(col_defs) + ");"))
+        return
+
+    missing = [
+        (name, mssql_t, sqlite_t) for name, mssql_t, sqlite_t in _RUN_EVENT_UPGRADE_COLUMNS
+        if not d.column_exists(engine, schema, "OrchestratorRunEvent", name)
+    ]
+    if missing:
+        with engine.begin() as cx:
+            for name, mssql_t, sqlite_t in missing:
+                cx.execute(text(
+                    f"ALTER TABLE {qualified} ADD {d.quote_ident(name)} "
+                    f"{_col_type(d, mssql_t, sqlite_t)} NULL;"
+                ))
 
 
 def disable_orchestrator_logging(engine, schema="dbo"):
@@ -374,13 +411,14 @@ def log_run_event(engine, log_id, object_name, result, schema="dbo", environment
     with engine.begin() as cx:
         cx.execute(
             text(
-                f"INSERT INTO {qualified} (LogId, ObjectName, Tier, Reasons, Environment, AssessedAt, RunBy) "
-                "VALUES (:log_id, :object_name, :tier, :reasons, :environment, :assessed_at, :run_by)"
+                f"INSERT INTO {qualified} (LogId, ObjectName, Tier, TierName, Reasons, Environment, AssessedAt, RunBy) "
+                "VALUES (:log_id, :object_name, :tier, :tier_name, :reasons, :environment, :assessed_at, :run_by)"
             ),
             {
                 "log_id": log_id,
                 "object_name": object_name,
                 "tier": result["tier"],
+                "tier_name": result.get("tier_name", TIER_NAMES.get(result["tier"])),
                 "reasons": " | ".join(result["reasons"]),
                 "environment": environment,
                 "assessed_at": datetime.now(timezone.utc).replace(tzinfo=None),

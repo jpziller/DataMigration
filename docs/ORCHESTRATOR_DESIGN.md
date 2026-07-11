@@ -723,3 +723,43 @@ exercised (re-assessing Task's first, failed run after its successful
 retry already existed). Caught by that same live check, not by the unit
 tests written before it — a reminder that live data surfaces classes of
 bug synthetic test fixtures don't naturally think to construct.
+
+### Real Tier 2/3 validation, and a genuine §2 design gap found (2026-07-12)
+
+Every real `BulkOpsLog` row up to this point had landed at Tier 1 or
+Tier 4 only — the middle of the taxonomy was unit-tested but never seen
+live. Deliberately constructed a 3-batch Account test (300 fresh mock
+rows split into batches of 100) to close that gap: Batch A clean, Batch B
+and Batch C each with one row's `MigrationID__c` intentionally collided
+with an already-inserted key, both against the *same* target record so
+the real Salesforce `DUPLICATE_VALUE` error text would be byte-identical
+across occurrences (confirmed: Salesforce's own error text embeds the
+colliding record's Id, e.g. `...duplicates value on record with id:
+001gK...:--`, so two different colliding targets would *not* have
+produced matching signatures — this only works because both batches were
+set up to collide with the same one).
+
+Result: Batch B (the first-ever occurrence of this error) correctly
+assessed as **Tier 3** ("novel failure error signature"); Batch C (the
+same signature, now known, at 1% failure) correctly assessed as **Tier
+2**. Both exactly as designed — real confirmation of the novelty-vs-known
+distinction working as intended, not just in synthetic tests.
+
+**A genuine, unexpected Tier 4** also fired, on data that was supposed to
+be the clean baseline: Batch A (100 rows, 100% success) took 14.6s
+(0.146s/row), 4.9x slower per-row than an earlier 300-row Account load's
+0.030s/row — tripping the 3x elapsed-time-overrun trigger on a run with
+zero actual data problems. Root cause: Bulk API 2.0's per-job overhead
+(job creation, polling until completion) is largely **fixed regardless of
+row count**, so "seconds per row" isn't actually batch-size-invariant — a
+smaller batch will structurally look slower per-row than a larger one
+even when nothing is wrong. This is a real gap in §2's elapsed-time
+trigger as specified (compare against history without regard to relative
+batch size), not a coding bug in `assess_tier()` — it correctly implements
+what the design says, and the design's own metric doesn't hold up against
+real Bulk API 2.0 timing behavior. Worth revisiting before Phase 2 trusts
+this trigger for a real stop: candidates include comparing at a fixed
+per-job overhead baseline rather than pure per-row rate, requiring a
+minimum row count before the check applies at all, or tracking "seconds
+per job" and "seconds per row beyond the first job" as separate figures.
+Not fixed in this pass — flagged here rather than guessed at.

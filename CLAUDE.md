@@ -326,11 +326,14 @@ venv may not be active in a fresh shell:
 - Orchestrator tier assessment (roadmap #53, `docs/ORCHESTRATOR_DESIGN.md` — Phase 1 only;
                 read-only, never changes how `bulkops` itself is gated):
                 `.venv/Scripts/python.exe cli.py orchestrator-assess Account [--log-id N] [--environment uat|prod]`
-                (deterministic tier (1-4) for a completed `bulkops` run, resolved from a real
+                (deterministic tier for a completed `bulkops` run, resolved from a real
                 `BulkOpsLog` row — the most recent for that object if `--log-id` is omitted —
                 plus that object's own history and whether `analyze-org-risk` has been run for
-                it. Prints every reason that fired, not just the tier number. `assess_tier()`
-                in `orchestrator.py` is the actual logic — deliberately deterministic Python,
+                it. Every tier has a name, printed alongside the number, never shown bare —
+                **Tier 1 (Continue Silently)**, **Tier 2 (Continue with Warning)**, **Tier 3
+                (Pause and Ask)**, **Tier 4 (Full Stop)** — see `orchestrator.TIER_NAMES`.
+                Prints every reason that fired, not just the tier. `assess_tier()` in
+                `orchestrator.py` is the actual logic — deliberately deterministic Python,
                 never model judgment, per the design doc's own core requirement. Also reports
                 `coarse_approval_eligible`: `False` whenever this object has no prior history
                 at all, regardless of how clean the current run looks — an object needs at
@@ -338,8 +341,8 @@ venv may not be active in a fresh shell:
                 mode. Two things a completed run genuinely can't reveal are deliberately not
                 checked here: a `bulk_op()` pre-flight failure and a missing Email
                 Deliverability attestation are both hard `raise`s before any summary exists at
-                all, so a real orchestrator loop treats that exception as tier 4 directly,
-                never reaching this command.)
+                all, so a real orchestrator loop treats that exception as **Tier 4 (Full
+                Stop)** directly, never reaching this command.)
                 `.venv/Scripts/python.exe cli.py enable-orchestrator-logging --schema dbo`
                 (creates `<schema>.OrchestratorRunEvent` — same opt-in, presence-of-table
                 convention as `BulkOpsLog`. Every `orchestrator-assess` call against that schema
@@ -750,10 +753,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   `validators/<Object>.md`). Purely a lookup convenience; writing a new
   validator entry is always a deliberate manual edit, never automated.
 - `orchestrator.py` — `orchestrator-assess`'s logic (roadmap #53, Phase 1
-  only): `assess_tier()`, the deterministic tier (1-4) assessment
-  `docs/ORCHESTRATOR_DESIGN.md` §1 requires never be model judgment, plus
-  the `BulkOpsLog` history/`ObjectAutomationRisk` reads it needs and the
-  opt-in `OrchestratorRunEvent` shadow-mode logging. Reuses
+  only): `assess_tier()`, the deterministic Tier 1 (Continue Silently)
+  through Tier 4 (Full Stop) assessment `docs/ORCHESTRATOR_DESIGN.md`'s
+  Foundational Architecture Choice section requires never be model
+  judgment (`TIER_NAMES` — every tier gets a real name, never shown as a
+  bare number), plus the `BulkOpsLog` history/`ObjectAutomationRisk` reads
+  it needs and the opt-in `OrchestratorRunEvent` shadow-mode logging. Reuses
   `reference/orchestrator_thresholds.json` (tier boundary numbers per
   environment, same git-tracked/human-tunable convention as
   `batch_size_heuristics.json`). Never changes how `bulkops` itself is

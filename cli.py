@@ -395,7 +395,8 @@ def orchestrator_assess_cmd(object_name, log_id, schema, environment):
     enable-orchestrator-logging has been run for this schema."""
     _, _, engine = _ctx()
     resolved_log_id, result = orch.assess_from_log(engine, object_name, log_id=log_id, schema=schema, environment=environment)
-    click.echo(f"BulkOpsLog #{resolved_log_id} ({object_name}, {environment}): Tier {result['tier']}")
+    click.echo(f"BulkOpsLog #{resolved_log_id} ({object_name}, {environment}): "
+               f"Tier {result['tier']} ({result['tier_name']})")
     for reason in result["reasons"]:
         click.echo(f"  - {reason}")
     click.echo(f"Coarse-approval eligible: {result['coarse_approval_eligible']}"
