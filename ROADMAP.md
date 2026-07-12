@@ -96,7 +96,7 @@ summarizes.
 | 58 | Bidirectional convert: Data Transform JSON ↔ Code Extension Python | Not built — depends on #45 | — | Idea: JSON→Python translates the canvas Data Transform's `nodes`/`ui` export into an `entrypoint.py` against the `datacustomcode` SDK, for the node types #45 already confirmed (`load`/`formula`/`outputD360`) — safe today, since it's known structure to known SDK calls. Python→JSON is the harder direction: it inherits #45's own generation blocker (8/11 node types still unconfirmed) and only ever recognizes a constrained, canvas-representable subset of Python, refusing whatever falls outside it rather than guessing. |
 | 59 | Migration brief intake / project bootstrap | Not built — new feature, explicitly requested | — | Idea: a minimal structured file (objects in scope, target org, ticket, per-object notes) that a discovery-AI session hands off, and one command that validates every named object against live `describe()`, runs `analyze-load-order`, and scaffolds the Migration Run Book — turning "discovery just finished" into a concrete first command sequence instead of a cold start. |
 | 60 | Discovery question checklist generator | Not built — new feature, explicitly requested | — | Idea: given a candidate object list, generate the per-object questions an architect should ask the client — driven by real signals this framework already computes (`analyze-org-risk` finds active validation rules → ask about that business rule; object carries RecordTypes → ask about the mapping), not a generic template. |
-| 61 | Bulk-load failure triage assistant | Not built — new feature, explicitly requested | — | Idea: group a load's failures by normalized error signature (building on the review's `_normalize_error_signature()`) and map common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which mapping/transform column to check — turning "100 rows failed" into "1 root cause, here's where to look." |
+| 61 | Bulk-load failure triage assistant | **Built** | `triage-failures <table> [--object] [--mapping-path]` | Groups a load's failures by normalized error signature (`_normalize_error_signature()`) and maps common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which existing command to run next — turning "N rows failed" into "1 root cause, here's where to look." `--object`/`--mapping-path` enable real cross-references (mapping-doc/`ObjectAutomationRisk`) instead of static text alone. |
 | 62 | Adversarial mock data generation | Not built — new feature, explicitly requested | — | Idea: a companion to `generate-mock-data`/`generate-related-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields) so validation-rule collisions surface during Dev testing, not during a real client load. |
 | 63 | Reset-dev-cycle command | Not built — new feature, explicitly requested | — | Idea: codify the manual reset ritual this project has done by hand every dogfooding cycle (drop mock/Load/staging tables, optionally purge org test data via `bulkops delete --where`) into one command, instead of remembering the steps each time. |
 | 64 | Row-count reconciliation report | Not built — new feature, explicitly requested | — | Idea: walk the load order and cross-check source row count → Load table row count → `bulkops` succeeded count per object, flagging anywhere rows silently disappeared (a too-aggressive filter, a bad `JOIN`) — a data-completeness auditor, not a per-tool spot check. |
@@ -3227,34 +3227,63 @@ not memory or a generic checklist template. Output could land as plain
 markdown, or as starter rows in a Migration Run Book's Pre-Migration
 phase (decide at build time which is more useful in practice).
 
-## 61. Bulk-load failure triage assistant (not built — new feature, explicitly requested)
+## 61. Bulk-load failure triage assistant — BUILT (`failure_triage.py`)
 
 Builds directly on this session's ruthless-review fix to `bulkops.py`'s
 `failure_error_counts` (record-Id tokens normalized to `<ID>` so a
-recurring error reads as "known," not "novel," across runs). This item
-goes one step further: for a load's grouped failure signatures, map
-well-known Salesforce Bulk API error codes to a likely root cause and
-where to look, instead of leaving the architect to manually parse raw
-error strings row by row:
+recurring error reads as "known," not "novel," across runs, via
+`_normalize_error_signature()`). `triage_failures(engine, table, schema=
+"dbo", error_column="Error", object_name=None, mapping_path=None)`
+(`cli.py triage-failures <table>`) groups a load's failures by that same
+normalized signature and maps well-known Salesforce Bulk API error codes
+to a likely root cause and which existing command to run next, instead
+of leaving the architect to manually parse raw error strings row by row.
+`table` is the same load table (written back in place) or
+`<table>_Result` table `bulkops-retry`/`build_retry_table()` already
+reads — same calling convention, deliberately, so the two commands slot
+into the same post-load workflow.
 
-- `DUPLICATE_VALUE` → check the migration key/external ID field for
-  genuine duplicates in the source, or cross-reference `analyze-org-risk`
-  for a duplicate rule/matching rule on that field.
-- `REQUIRED_FIELD_MISSING` → cross-reference the mapping doc's `Migrate
-  Data = Yes` rows for that field (the same check `check-required-mappings`,
-  #49, already implements) — was it left unmapped?
-- `STRING_TOO_LONG` → cross-reference `profile-sql-table`'s max observed
-  length for that source field against the target field's real length
-  from `describe()`.
-- `INVALID_CROSS_REFERENCE_KEY` → almost always a lookup/master-detail
-  field pointing at an Id that doesn't exist yet — check load order (#2)
-  for a same-parent-batch ordering problem (Hard Rule 6) before assuming
-  it's a data issue.
+Guidance is registered per error CODE (`_ERROR_CODE_GUIDANCE`) for
+`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`,
+`INVALID_CROSS_REFERENCE_KEY`, `FIELD_CUSTOM_VALIDATION_EXCEPTION`,
+`INVALID_FIELD_FOR_INSERT_UPDATE`, `MALFORMED_ID`, and
+`UNABLE_TO_LOCK_ROW` — an unrecognized code still gets a clear "no known
+guidance yet" fallback rather than erroring. Two deliberate, disclosed
+scope limits versus the original idea sketch above, both explained in
+`failure_triage.py`'s own module docstring:
 
-A pattern-matching layer over a well-documented, stable Salesforce error
-vocabulary, cross-referenced against data this framework already
-collects — advisory only, same "suggests, never auto-fixes" posture as
-`auto_mapper.py`.
+- Field-name extraction is only attempted for `REQUIRED_FIELD_MISSING`'s
+  stable "Required fields are missing: `[Field1, Field2]`" bracketed-list
+  shape (`_extract_required_fields()`) — every other code gets guidance
+  text only, since inventing a field-position regex for a message shape
+  not directly confirmed against this project's own live data would be
+  exactly the kind of stale-training-data guess `CLAUDE.md` warns against
+  for anything Salesforce-API-version-specific.
+- `DUPLICATE_VALUE` gets no live cross-reference against
+  `dbo.ObjectAutomationRisk` — `analyze-org-risk`/`risk_analyzer.py` only
+  ever scans ValidationRule/ApexTrigger/WorkflowRule/ApprovalProcess/
+  FlowDefinitionView, never Salesforce's separate DuplicateRule metadata
+  type, so there's genuinely nothing on file to check yet (a real,
+  disclosed gap, not an oversight — a future item in its own right if
+  DuplicateRule scanning ever gets added to `risk_analyzer.py`).
+
+Two real, live cross-references ARE built, both opt-in via optional
+arguments (works fine without them, richer with them — same pattern as
+`analyze_object_risk()`'s own `fields_in_scope`): `--object` +
+`--mapping-path` checks whether a `REQUIRED_FIELD_MISSING` field was
+ever chosen as a Target Field in the mapping doc at all
+(`_is_field_ever_mapped()` — the reverse question from
+`find_unmapped_required_fields()`/#49, which only surfaces source rows,
+not "was this target field mapped by anyone"); `--object` alone pulls
+`FIELD_CUSTOM_VALIDATION_EXCEPTION` candidates from whichever active
+`ValidationRule` rows a prior `analyze-org-risk` run already cached for
+that object. Read-only, advisory only — never changes data, never
+re-runs `bulkops` — same "suggests, never auto-fixes" posture as
+`auto_mapper.py`. Verified via real `bulk_op()` runs against a SQLite
+engine (`tests/test_failure_triage.py`), not yet dogfooded against a
+live Salesforce failure — there was no real failure sitting in the
+mirror DB to point it at when this was built, and manufacturing one
+against the live org wasn't judged worth a real write just for a demo.
 
 ## 62. Adversarial mock data generation (not built — new feature, explicitly requested)
 
@@ -3269,8 +3298,8 @@ against real client data or, worse, during a UAT pass:
   the fingerprint-based result mapping, Hard Rule 4, degrade the way
   it's supposed to — an `ambiguous` count, not silent data loss?).
 - A string field intentionally longer than `describe()`'s max length for
-  it (`STRING_TOO_LONG`, cheaply cross-checked with #61 above once both
-  exist).
+  it (`STRING_TOO_LONG`, cheaply cross-checked with `triage-failures`,
+  #61, now that it's built).
 - A required field deliberately left blank.
 - An invalid/nonexistent picklist value.
 - A lookup field pointing at an Id that doesn't exist.
@@ -3346,9 +3375,10 @@ A plain-English "here's what happened this pass" draft, pulled from
 ready to send a client stakeholder instead of a raw spreadsheet dump or
 a manually-written status email. Nearly free given how much structured
 data this framework already logs by the time a pass finishes: object
-count, total/succeeded/failed records per object, and (once #61 exists)
-a plain-language description of what went wrong for any object that
-didn't come back 100% clean, instead of a raw error code. Could reuse
+count, total/succeeded/failed records per object, and — now that
+`triage-failures` (#61) is built — a plain-language description of what
+went wrong for any object that didn't come back 100% clean, instead of a
+raw error code. Could reuse
 `solution_doc.py`'s existing Word-document-generation machinery
 (`docxtpl`) for a client-ready format, or start as plain Markdown first —
 same "ship the simple version, decide on polish later" discipline as

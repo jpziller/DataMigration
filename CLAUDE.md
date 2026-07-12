@@ -298,6 +298,31 @@ venv may not be active in a fresh shell:
                 `_Result` table into a fresh `<table>_Retry` table. Does not call Salesforce itself;
                 resubmit the new table via a normal, separately-confirmed `bulkops` call once you've
                 looked at why those rows failed.)
+                `.venv/Scripts/python.exe cli.py triage-failures Contact_Load [--object Contact] [--mapping-path mapping/Migration_Mapping.xlsx]`
+                (roadmap #61: groups a load's failures by normalized error signature — the same
+                `_normalize_error_signature()` this session's ruthless review added to `bulkops.py`'s
+                `failure_error_counts`, record-Id tokens collapsed to `<ID>` so a recurring cause
+                counts as one signature, not one per row — and maps well-known, stable Salesforce Bulk
+                API error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`,
+                `INVALID_CROSS_REFERENCE_KEY`, `FIELD_CUSTOM_VALIDATION_EXCEPTION`,
+                `INVALID_FIELD_FOR_INSERT_UPDATE`, `MALFORMED_ID`, `UNABLE_TO_LOCK_ROW`) to a likely
+                root cause and which existing command to run next — turning "N rows failed" into "1
+                root cause, here's where to look" instead of reading raw error strings row by row.
+                Field-name extraction is only attempted for `REQUIRED_FIELD_MISSING`'s stable
+                "Required fields are missing: [Field1, Field2]" bracketed-list shape — every other
+                code gets guidance text only, never an invented field-position regex for a message
+                shape not directly confirmed against this project's own live data. `--object` (plus
+                `--mapping-path` for the `REQUIRED_FIELD_MISSING` check) enables two real, live
+                cross-references instead of static text alone: whether a missing-required field was
+                ever chosen as a Target Field in the mapping doc at all, and — for
+                `FIELD_CUSTOM_VALIDATION_EXCEPTION` — the active validation rules already on file in
+                `dbo.ObjectAutomationRisk` from a prior `analyze-org-risk` run. `DUPLICATE_VALUE`
+                deliberately gets no live cross-reference: `analyze-org-risk` only scans
+                ValidationRule/ApexTrigger/WorkflowRule/ApprovalProcess/FlowDefinitionView, never
+                Salesforce's separate DuplicateRule metadata type, so there's genuinely nothing on
+                file to check yet. Read-only, advisory only — never changes data, never re-runs
+                `bulkops` itself. `table` is the same load table or `<table>_Result` table
+                `bulkops-retry` already reads.)
 - Bulk load activity logging (opt-in, per schema — off by default, never
                 automatic; the same opt-in-per-database convention established
                 commercial migration tools use):
@@ -491,7 +516,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
-`/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`
+`/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
+`/triage-failures`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -787,6 +813,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping. `type_map.py` is the SQL Server flavor;
   `sql_dialect.py`'s `SqliteDialect.sf_type_to_sql()` is SQLite's.
+- `failure_triage.py` — bulk-load failure triage assistant (roadmap #61):
+  groups a completed `bulk_op()` run's failures by normalized error
+  signature (`bulkops.py`'s own `_normalize_error_signature()`) and maps
+  well-known Salesforce Bulk API error codes to a likely root cause and
+  which existing command to run next. Advisory only — never changes
+  data, never re-runs `bulkops`.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
   SQL-Server-only for now (see the "SQL backend" note above).

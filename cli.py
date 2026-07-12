@@ -59,6 +59,7 @@ import load_table_prep as ltp
 import orchestrator as orch
 import script_numbering as sn
 import validators_lookup as vl
+import failure_triage as ft
 
 
 def _ctx():
@@ -360,6 +361,41 @@ def bulkops_retry_cmd(table, schema, error_column):
     else:
         click.echo(f"Copied {count} failed row(s) from {schema}.{table} into {retry_table}")
         click.echo(f"Review it, then resubmit: python cli.py bulkops <Object> <operation> {retry_table.split('.')[-1]} ...")
+
+
+@cli.command("triage-failures")
+@click.argument("table")
+@click.option("--schema", default="dbo")
+@click.option("--error-column", default="Error")
+@click.option("--object", "object_name", default=None, help="Enables real cross-references: dbo.ObjectAutomationRisk's active validation rules (FIELD_CUSTOM_VALIDATION_EXCEPTION), and whether a REQUIRED_FIELD_MISSING field was ever mapped (with --mapping-path).")
+@click.option("--mapping-path", default=None, help="Mapping workbook -- with --object, checks whether a REQUIRED_FIELD_MISSING field was ever chosen as a Target Field at all.")
+def triage_failures_cmd(table, schema, error_column, object_name, mapping_path):
+    """Group a completed bulkops run's failures (roadmap #61) by
+    normalized error signature and map well-known Salesforce Bulk API
+    error codes to a likely root cause + suggested next command --
+    turning "N rows failed" into "1 root cause, here's where to look."
+    Read-only, advisory only -- never changes data, never re-runs
+    bulkops. `table` is the same load table (written back in place) or
+    <table>_Result table bulkops-retry already reads."""
+    _, _, engine = _ctx()
+    results = ft.triage_failures(
+        engine, table, schema=schema, error_column=error_column,
+        object_name=object_name, mapping_path=mapping_path,
+    )
+    if not results:
+        click.echo(f"No failed rows found in {schema}.{table} (column {error_column}) -- nothing to triage.")
+        return
+
+    total = sum(r["count"] for r in results)
+    click.echo(f"{total} failed row(s) across {len(results)} distinct signature(s) in {schema}.{table}:")
+    for r in results:
+        click.echo(f"\n{r['count']}x {r['code']}: {r['cause']}")
+        if r["fields"]:
+            click.echo(f"  Field(s) named in the error: {', '.join(r['fields'])}")
+        for step in r["next_steps"]:
+            click.echo(f"  - {step}")
+        for extra in r["detail"]:
+            click.echo(f"    -> {extra}")
 
 
 @cli.command("enable-bulkops-logging")
