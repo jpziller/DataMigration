@@ -17,6 +17,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
+import sql_dialect
+
+
+def _col_type(d, mssql_type, sqlite_type):
+    return mssql_type if isinstance(d, sql_dialect.MssqlDialect) else sqlite_type
+
 
 def build_dependency_edges(sf, object_names):
     """Return a list of dependency edges among the given objects.
@@ -119,46 +125,53 @@ def _group_cycle_members(remaining, parents_of):
 
 
 def write_to_sql(engine, object_names, edges, result, schema="dbo"):
+    """Ported from raw T-SQL to sql_dialect.py so this (and
+    migration_brief.py, roadmap #59, which calls analyze_load_order()
+    directly) is real-SQLite-testable, same pattern as
+    risk_analyzer.py/migration_run_book.py/mapping_doc.py/mock_data.py's
+    own ports earlier this project. Zero behavior change against SQL
+    Server -- same column types, same DROP-and-recreate semantics."""
     analyzed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    d = sql_dialect.for_engine(engine)
+    dep_qualified = d.qualify(schema, "ObjectDependency")
+    order_qualified = d.qualify(schema, "ObjectLoadOrder")
+    dep_exists = d.table_exists(engine, schema, "ObjectDependency")
+    order_exists = d.table_exists(engine, schema, "ObjectLoadOrder")
 
     with engine.begin() as cx:
+        if dep_exists:
+            cx.execute(text(f"DROP TABLE {dep_qualified};"))
         cx.execute(text(
-            f"IF OBJECT_ID('{schema}.ObjectDependency', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[ObjectDependency];"
-        ))
-        cx.execute(text(
-            f"CREATE TABLE [{schema}].[ObjectDependency] ("
-            "ChildObject NVARCHAR(255) NOT NULL, "
-            "ParentObject NVARCHAR(255) NOT NULL, "
-            "LookupField NVARCHAR(255) NOT NULL, "
-            "IsMasterDetail BIT NOT NULL, "
-            "IsNillable BIT NOT NULL, "
-            "AnalyzedDate DATETIME2 NOT NULL);"
+            f"CREATE TABLE {dep_qualified} ("
+            f"{d.quote_ident('ChildObject')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
+            f"{d.quote_ident('ParentObject')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
+            f"{d.quote_ident('LookupField')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
+            f"{d.quote_ident('IsMasterDetail')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
+            f"{d.quote_ident('IsNillable')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
+            f"{d.quote_ident('AnalyzedDate')} {_col_type(d, 'DATETIME2', 'TEXT')} NOT NULL);"
         ))
         if edges:
             cx.execute(
                 text(
-                    f"INSERT INTO [{schema}].[ObjectDependency] "
+                    f"INSERT INTO {dep_qualified} "
                     "(ChildObject, ParentObject, LookupField, IsMasterDetail, IsNillable, AnalyzedDate) "
                     "VALUES (:child, :parent, :field, :is_master_detail, :is_nillable, :analyzed_at)"
                 ),
                 [{**edge, "analyzed_at": analyzed_at} for edge in edges],
             )
 
+        if order_exists:
+            cx.execute(text(f"DROP TABLE {order_qualified};"))
         cx.execute(text(
-            f"IF OBJECT_ID('{schema}.ObjectLoadOrder', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[ObjectLoadOrder];"
-        ))
-        cx.execute(text(
-            f"CREATE TABLE [{schema}].[ObjectLoadOrder] ("
-            "ObjectName NVARCHAR(255) NOT NULL PRIMARY KEY, "
-            "LoadLevel INT NULL, "
-            "LoadSequence INT NULL, "
-            "HasSelfReference BIT NOT NULL, "
-            "SelfReferenceFields NVARCHAR(500) NULL, "
-            "InUnresolvedCycle BIT NOT NULL, "
-            "CycleMembers NVARCHAR(500) NULL, "
-            "AnalyzedDate DATETIME2 NOT NULL);"
+            f"CREATE TABLE {order_qualified} ("
+            f"{d.quote_ident('ObjectName')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL PRIMARY KEY, "
+            f"{d.quote_ident('LoadLevel')} {_col_type(d, 'INT', 'INTEGER')} NULL, "
+            f"{d.quote_ident('LoadSequence')} {_col_type(d, 'INT', 'INTEGER')} NULL, "
+            f"{d.quote_ident('HasSelfReference')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
+            f"{d.quote_ident('SelfReferenceFields')} {_col_type(d, 'NVARCHAR(500)', 'TEXT')} NULL, "
+            f"{d.quote_ident('InUnresolvedCycle')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
+            f"{d.quote_ident('CycleMembers')} {_col_type(d, 'NVARCHAR(500)', 'TEXT')} NULL, "
+            f"{d.quote_ident('AnalyzedDate')} {_col_type(d, 'DATETIME2', 'TEXT')} NOT NULL);"
         ))
 
         cycle_by_object = {}
@@ -185,7 +198,7 @@ def write_to_sql(engine, object_names, edges, result, schema="dbo"):
 
         cx.execute(
             text(
-                f"INSERT INTO [{schema}].[ObjectLoadOrder] "
+                f"INSERT INTO {order_qualified} "
                 "(ObjectName, LoadLevel, LoadSequence, HasSelfReference, SelfReferenceFields, "
                 "InUnresolvedCycle, CycleMembers, AnalyzedDate) "
                 "VALUES (:object_name, :level, :sequence, :has_self_ref, :self_ref_fields, "

@@ -94,7 +94,7 @@ summarizes.
 | 56 | Duplicate target-field detection (scripts + spreadsheets) | **Built**, hard rule 14 | `check-mapping-balance` (extended), `import-csv-directory` | Raised directly: a single `CREATE TABLE`/`INSERT INTO` column list, or a single mapping-doc sheet, must never target the same field twice — different scripts/sheets doing so is fine and expected. `check-mapping-balance` reports both `duplicate_target_fields` and `duplicate_implemented_columns`; `import-csv-directory` refuses a CSV whose own header already repeats a column. |
 | 57 | Data model ERD diagrams — source subject-area models + target model, SDMN-inspired | **Built** | `generate-target-data-model`, `generate-source-data-model` | Mermaid ERDs approximating Salesforce Data Model Notation (verified against the real SDMN guide — its per-entity color/border coding and diamond relationship symbol genuinely can't be reproduced in Mermaid; its solid-vs-dashed identifying/non-identifying line distinction can, and maps onto master-detail vs lookup). Target model relationships are real (`load_order.build_dependency_edges()`); source model relationships are a naming-convention guess only, always labeled and reported for review, never presented as confirmed. |
 | 58 | Bidirectional convert: Data Transform JSON ↔ Code Extension Python | Not built — depends on #45 | — | Idea: JSON→Python translates the canvas Data Transform's `nodes`/`ui` export into an `entrypoint.py` against the `datacustomcode` SDK, for the node types #45 already confirmed (`load`/`formula`/`outputD360`) — safe today, since it's known structure to known SDK calls. Python→JSON is the harder direction: it inherits #45's own generation blocker (8/11 node types still unconfirmed) and only ever recognizes a constrained, canvas-representable subset of Python, refusing whatever falls outside it rather than guessing. |
-| 59 | Migration brief intake / project bootstrap | Not built — new feature, explicitly requested | — | Idea: a minimal structured file (objects in scope, target org, ticket, per-object notes) that a discovery-AI session hands off, and one command that validates every named object against live `describe()`, runs `analyze-load-order`, and scaffolds the Migration Run Book — turning "discovery just finished" into a concrete first command sequence instead of a cold start. |
+| 59 | Migration brief intake / project bootstrap | **Built** | `bootstrap-project brief.yaml run_book.xlsx --tab Dev1` | A minimal YAML file (objects in scope, target org, ticket, per-object notes) that a discovery-AI session hands off, and one command that validates every named object against live `describe()`, runs `analyze-load-order`, and scaffolds the Migration Run Book — turning "discovery just finished" into a concrete first command sequence instead of a cold start. Never guesses mapping/field lists/transform logic. |
 | 60 | Discovery question checklist generator | Not built — new feature, explicitly requested | — | Idea: given a candidate object list, generate the per-object questions an architect should ask the client — driven by real signals this framework already computes (`analyze-org-risk` finds active validation rules → ask about that business rule; object carries RecordTypes → ask about the mapping), not a generic template. |
 | 61 | Bulk-load failure triage assistant | **Built** | `triage-failures <table> [--object] [--mapping-path]` | Groups a load's failures by normalized error signature (`_normalize_error_signature()`) and maps common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which existing command to run next — turning "N rows failed" into "1 root cause, here's where to look." `--object`/`--mapping-path` enable real cross-references (mapping-doc/`ObjectAutomationRisk`) instead of static text alone. |
 | 62 | Adversarial mock data generation | **Built** | `generate-adversarial-mock-data <Object> --count N --scenario scenario:field:rows` | A companion to `generate-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields, bad lookup references) so validation-rule collisions surface during Dev testing, not during a real client load. Writes to `<Object>_Mock_Adversarial`, tagged via a `REF_`-prefixed column so the same table can go straight into a real `bulkops` call. |
@@ -3163,39 +3163,60 @@ that wraps the CLI commands the way this repo's existing
 building this, once enough real DT exports exist to know the converter
 is worth shipping at all.
 
-## 59. Migration brief intake / project bootstrap (not built — new feature, explicitly requested)
+## 59. Migration brief intake / project bootstrap — BUILT (`migration_brief.py`)
 
 Raised directly off a description of how this framework actually gets
 used: an architect handles client discovery separately (with help from
 another AI session — use cases, which objects need migrating, special
 requirements), then hands that off to *this* framework to script,
-validate, and run. Today that hand-off is a cold start — nothing here
-reads a discovery output; the architect re-types the object list into
-the first `describe`/`analyze-load-order` call by hand.
+validate, and run. Today that hand-off was a cold start — nothing here
+read a discovery output; the architect re-typed the object list into the
+first `describe`/`analyze-load-order` call by hand.
 
-The idea: a minimal, deliberately simple structured file (YAML or JSON —
-decide at build time, not now) that a discovery-AI session could produce
-directly: objects in scope, a short note per object (why it's in scope,
-any special requirement already known), the target org alias, and a
-ticket/project reference (the Script Ticket Traceability Rule, #10,
-already requires one per script — this just captures it once at the
-project level instead of re-asking per file). One new command reads it
-and does the boring, mechanical first pass: confirms every named object
-is real via live `describe()` (a typo or a renamed object surfaces
-immediately, not three commands later), runs `analyze-load-order` across
-the whole set, and scaffolds a Migration Run Book via
-`generate-migration-run-book` with the object list already wired in.
+`parse_migration_brief()` reads a minimal, deliberately simple YAML file
+(not a rigid schema — start empty, grow from real usage, same discipline
+as `reference/field_synonyms.json`) a discovery-AI session could produce
+directly: objects in scope, a short note per object, the target org
+alias, and a ticket/project reference. `bootstrap_project()`
+(`cli.py bootstrap-project brief.yaml run_book.xlsx --tab Dev1`) does the
+boring, mechanical first pass and nothing more: confirms every named
+object is real via live `describe()` (a typo or a renamed object
+surfaces immediately as a reported problem, not three commands later —
+never silently skipped), runs `analyze-load-order` (#2) across the
+objects that ARE real, and scaffolds a Migration Run Book (#16) via
+`generate_migration_run_book()` with that object list already wired in.
 Deliberately does **not** try to guess mapping, field lists, or
-transform logic from the brief's notes — that's still `generate-mapping-doc`/
-`auto-map`'s job, on the real source tables, once they exist. This is
-strictly the "get the boilerplate out of the way so the real work can
-start" step, same scope discipline as `auto_mapper.py`'s own
-first-pass-only philosophy (Hard Rule 11).
+transform logic from the brief's own notes — that's still
+`generate-mapping-doc`/`auto-map`'s job, on the real source tables, once
+they exist (Hard Rule 11's same first-pass-only scope discipline).
 
-Keep the brief format itself minimal for v1 rather than over-specifying a
-rigid schema before a real discovery session shows what's actually
-useful — same "start empty, grow from real usage" discipline as
-`reference/field_synonyms.json`.
+Two things worth calling out beyond the original idea sketch above:
+
+- **Org-alias cross-check.** The brief's `target_org_alias`, when given,
+  is compared against this session's *actual* configured org alias
+  (`Settings.sf_org_alias`) — a warning, not a hard block, since a brief
+  written before the exact alias was finalized is a normal, non-error
+  state (Hard Rule 2's spirit: confirm the target org, without
+  over-blocking a legitimate early-draft brief).
+- **The ticket field doesn't force-fit into the Run Book.**
+  `generate_migration_run_book()`'s own `ticket_url`/`ticket_label`
+  header fields describe a whole ticket **system** link (e.g. a Jira
+  project URL), not one specific ticket number — there's no natural home
+  for "this project's ticket is PROJ-123" at that level. Rather than
+  misuse those fields, the brief's `ticket` is simply reported back as a
+  reminder for the Script Ticket Traceability Rule (#10) once real
+  transform scripts get built.
+
+Building this needed `load_order.py`'s own `write_to_sql()` ported off
+raw SQL-Server-only T-SQL onto `sql_dialect.py` (same pattern as
+`risk_analyzer.py`/`migration_run_book.py`/`mapping_doc.py`/
+`mock_data.py`'s own ports) — `analyze_load_order()` needed to be
+real-SQLite-testable, and `load_order.py` had zero test coverage for its
+database-writing half before this (only the pure `compute_load_order()`/
+`_group_cycle_members()` functions had tests). Both are now covered
+against a real SQLite engine. Dogfooded live against this project's own
+org: confirmed a real object, caught a deliberately-typo'd one, and
+scaffolded a real Run Book tab with the correct script filename linked.
 
 ## 60. Discovery question checklist generator (not built — new feature, explicitly requested)
 

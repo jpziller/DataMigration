@@ -65,6 +65,7 @@ import pass_summary as ps
 import dev_cycle as devc
 import reconciliation as rc
 import readiness as rdy
+import migration_brief as mbf
 
 
 def _ctx():
@@ -522,6 +523,50 @@ def assess_migration_readiness_cmd(object_names, schema, mapping_path, migration
         for gate_name, gate in r["gates"].items():
             symbol = "OK" if gate["ok"] else ("--" if gate["ok"] is None else "FAIL")
             click.echo(f"  [{symbol}] {gate_name}: {gate['detail']}")
+
+
+@cli.command("bootstrap-project")
+@click.argument("brief_path")
+@click.argument("run_book_path")
+@click.option("--tab", "tab_name", required=True, help="New Migration Run Book tab name (refuses to overwrite an existing tab).")
+@click.option("--schema", default="dbo")
+def bootstrap_project_cmd(brief_path, run_book_path, tab_name, schema):
+    """Bootstrap a new migration project from a brief (roadmap #59) --
+    closes the hand-off gap between upstream client discovery (the
+    architect, often with another AI session's help) and this
+    framework's own build/validate/run tooling. Confirms every object
+    named in the brief is real via live describe(), runs
+    analyze-load-order across the ones that are, and scaffolds a
+    Migration Run Book with that object list wired in. Never guesses
+    mapping, field lists, or transform logic from the brief's own
+    notes -- that's still generate-mapping-doc/auto-map's job, on the
+    real source tables, once they exist."""
+    s, sf, engine = _ctx()
+    result = mbf.bootstrap_project(
+        sf, engine, brief_path, run_book_path, tab_name, schema=schema,
+        configured_org_alias=s.sf_org_alias or None,
+    )
+
+    if result["project"]:
+        click.echo(f"Project: {result['project']}")
+    if result["ticket"]:
+        click.echo(f"Ticket: {result['ticket']} -- remember this for the Script Ticket Traceability Rule "
+                   "(hard rule 10) once real transform scripts get built.")
+    if result["org_alias_warning"]:
+        click.echo(f"! {result['org_alias_warning']}")
+
+    click.echo(f"Confirmed {len(result['valid_objects'])} object(s): {', '.join(result['valid_objects']) or '(none)'}")
+    if result["problems"]:
+        click.echo(f"{len(result['problems'])} problem(s):")
+        for p in result["problems"]:
+            click.echo(f"  ! {p}")
+
+    if result["run_book_path"]:
+        click.echo(f"Load order analyzed and Migration Run Book scaffolded at {result['run_book_path']} (tab '{tab_name}').")
+        click.echo("Next: profile the source tables, then generate-mapping-doc/auto-map -- this bootstrap "
+                   "never guesses mapping, field lists, or transform logic.")
+    else:
+        click.echo("No valid objects -- nothing to analyze or scaffold. Fix the brief and try again.")
 
 
 @cli.command("enable-bulkops-logging")

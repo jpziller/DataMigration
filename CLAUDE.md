@@ -70,6 +70,37 @@ for you, and it'll stick for future sessions too.
 Call the venv Python directly — `cd` does not persist between bash calls and the
 venv may not be active in a fresh shell:
 
+- Bootstrap a new project: `.venv/Scripts/python.exe cli.py bootstrap-project brief.yaml
+                migration_run_book.xlsx --tab Dev1`
+                (roadmap #59: closes the hand-off gap between upstream client discovery — the
+                architect, often with another AI session's help, landing on which objects need
+                migrating, the use cases behind each one, special requirements — and this framework's
+                own build/validate/run tooling. Today that hand-off is a cold start; this reads a
+                minimal, deliberately simple YAML "migration brief" a discovery-AI session could
+                produce directly:
+                ```yaml
+                project: Acme Migration
+                ticket: PROJ-123
+                target_org_alias: ACME_UAT
+                objects:
+                  - name: Account
+                    notes: Primary account records, ~5000 rows expected
+                  - name: Contact
+                ```
+                and does the boring, mechanical first pass: confirms every named object is real via
+                live `describe()` (a typo or renamed object surfaces immediately, not three commands
+                later — reported as a clear problem, never silently skipped), runs `analyze-load-order`
+                across the objects that ARE real, and scaffolds a Migration Run Book with that object
+                list already wired in. `target_org_alias`, if given, is cross-checked against this
+                session's actual configured org alias — a warning, not a hard block, since a brief
+                written before the exact alias was finalized is normal. Deliberately does **not** try
+                to guess mapping, field lists, or transform logic from the brief's own notes — that's
+                still `generate-mapping-doc`/`auto-map`'s job, on the real source tables, once they
+                exist (Hard Rule 11's same first-pass-only scope discipline). The brief's `ticket`
+                field is reported back as a reminder for the Script Ticket Traceability Rule (#10) once
+                real transform scripts get built — it isn't forced into the Run Book's own
+                `ticket_url`/`ticket_label` header fields, which describe a whole ticket **system** link,
+                not one specific ticket number.)
 - Inspect org:  `.venv/Scripts/python.exe cli.py list-objects`
 -               `.venv/Scripts/python.exe cli.py describe Account`
 -               `.venv/Scripts/python.exe cli.py dump-describe Account`
@@ -596,10 +627,12 @@ others followed the same pattern). `mock_data.py`'s own table-DDL step
 (`create_mock_table()`) was ported too, once roadmap #62's
 `adversarial_mock_data.py` needed it to be real-SQLite-testable — the rest
 of `mock_data.py` (the Mockaroo schema-derivation logic) never touched SQL
-directly to begin with. The SQL-Server-only cleansing/matching function
-library (`sql/functions/cleansing|matching|lookups`) and the remaining
-data-architect tools (`profiling.py`, `auto_mapper.py`, `solution_doc.py`,
-`load_order.py`, `parquet_import.py`, `record_types.py`,
+directly to begin with. `load_order.py`'s own `write_to_sql()` was ported
+the same way, once roadmap #59's `migration_brief.py` needed
+`analyze_load_order()` to be real-SQLite-testable. The SQL-Server-only
+cleansing/matching function library (`sql/functions/cleansing|matching|lookups`)
+and the remaining data-architect tools (`profiling.py`, `auto_mapper.py`,
+`solution_doc.py`, `parquet_import.py`, `record_types.py`,
 `reference_record.py`) are **SQL-Server-only for now** — a deliberate
 scope boundary, not an oversight; port one incrementally via the same
 `sql_dialect.py` helpers whenever a real SQLite project
@@ -620,7 +653,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
 `/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
-`/reconcile-load-counts`, `/assess-migration-readiness`
+`/reconcile-load-counts`, `/assess-migration-readiness`, `/bootstrap-project`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -953,6 +986,13 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   6/7/12, `analyze-org-risk` coverage, `check-mapping-balance`, Email
   Deliverability attestation, and `reconciliation.py`'s own row-count
   reconciliation (#64) — no new checks invented. Read-only.
+- `migration_brief.py` — migration brief intake / project bootstrap
+  (roadmap #59): parses a minimal YAML "migration brief" a discovery-AI
+  session could produce directly, confirms every named object is real
+  via live `describe()`, runs `analyze-load-order`, and scaffolds a
+  Migration Run Book — the mechanical first pass, closing the hand-off
+  gap between upstream client discovery and this framework's own
+  tooling. Never guesses mapping/field lists/transform logic.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
   SQL-Server-only for now (see the "SQL backend" note above).
