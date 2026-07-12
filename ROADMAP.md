@@ -100,7 +100,7 @@ summarizes.
 | 62 | Adversarial mock data generation | **Built** | `generate-adversarial-mock-data <Object> --count N --scenario scenario:field:rows` | A companion to `generate-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields, bad lookup references) so validation-rule collisions surface during Dev testing, not during a real client load. Writes to `<Object>_Mock_Adversarial`, tagged via a `REF_`-prefixed column so the same table can go straight into a real `bulkops` call. |
 | 63 | Reset-dev-cycle command | **Built** | `reset-dev-cycle --objects Account Contact [--purge-org-where Object:WHERE] [--dry-run]` | Codifies the manual reset ritual this project did by hand every dogfooding cycle: drops every `_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given objects and clears their profiling rows (mirror-DB-only, always safe); `--purge-org-where` optionally also purges matching org test data via the same `bulkops delete --where` mechanism (#32) — hard rule 2 applies in full. No skill wrapper, same as `bulkops` itself. |
 | 64 | Row-count reconciliation report | **Built** | `reconcile-load-counts <Objects> [--mapping-path] [--load-table Object=Table]` | Cross-checks source row count → Load table row count → `bulkops`' most recent submitted/succeeded/failed counts per object, flagging anywhere they don't reconcile (missing Load table, dropped rows, never loaded, or a stale prior run) — a data-completeness auditor, not a per-tool spot check. |
-| 65 | Migration readiness score | Not built — new feature, explicitly requested | — | Idea: one aggregate go/no-go view across hard rules 6/7/12/15, `analyze-org-risk` coverage, mapping balance, and Email Deliverability attestation state per object — right now "are we ready" means checking five different tables/commands by hand. |
+| 65 | Migration readiness score | **Built** | `assess-migration-readiness <Objects> [--migration-key Object=Field] [--mapping-path] [--load-table Object=Table]` | One aggregate READY/NOT READY view per object across hard rules 6/7/12, `analyze-org-risk` coverage, `check-mapping-balance`, Email Deliverability attestation, and #64's row-count reconciliation — a "not checked" gate never blocks the verdict by itself, only an explicit failure does. |
 | 66 | Auto-drafted client-facing pass summary | **Built** | `generate-pass-summary <path> --tab <name> --output <path.md> [--load-table Object=Table]` | Drafts a plain-English "here's what happened this pass" summary from the Migration Run Book's own Load-phase results, ready to send a client stakeholder. `--load-table` optionally enriches any object's failures with a plain-language root cause via `triage-failures` (#61) instead of just a raw failed count — never guessed from the Run Book's own Object cell. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
@@ -3414,23 +3414,52 @@ overrides it per object, never guessed. Entirely read-only, aggregating
 data every one of these tools already produces — the value is in
 cross-checking all three together in one pass, not new data collection.
 
-## 65. Migration readiness score (not built — new feature, explicitly requested)
+## 65. Migration readiness score — BUILT (`readiness.py`)
 
 One aggregate go/no-go view instead of manually checking five different
-tables/commands to answer "are we actually ready for this pass." Per
-object: has the Parent-Batch Sort Rule (#6) been applied? Has the
-Migration Key Integrity Rule (#7) check passed clean? Has the Live
-Migration Key Validation Rule (#12) passed against the live org? Has
-`analyze-org-risk` (#5) actually been run for this object (the same
+tables/commands to answer "are we actually ready for this pass."
+`assess_migration_readiness()` (`cli.py assess-migration-readiness
+<Objects> [--migration-key Object=Field] [--mapping-path]
+[--load-table Object=Table]`) checks, per object: has the Parent-Batch
+Sort Rule (#6) been applied — only when the object actually has an
+in-scope parent on file in `dbo.ObjectDependency` (from
+`analyze-load-order`), so a parent-less object is never falsely flagged
+for a missing `Sort` column? Has the Migration Key Integrity Rule (#7)
+check passed clean — re-run live via `load_table_prep.py`, not recalled
+from memory? Has the Live Migration Key Validation Rule (#12) passed
+against the live org — re-run live via `metadata.validate_external_id_field()`?
+Has `analyze-org-risk` (#5) actually been run for this object (the same
 "scanned vs. never scanned" signal `orchestrator.py` already needs and
 `risk_analyzer.py`'s `ScanCompleted` marker already makes checkable)? Has
-`check-mapping-balance` (#3) come back clean? Has Email Deliverability
-been attested for this pass (Hard Rule 9 — still a human attestation,
-never auto-checked, so this can only confirm the flag was passed on the
-most recent run, not verify the Setup value itself)? Aggregate into a
-per-object checklist plus one overall verdict — read-only, no new
-checks invented, purely a re-presentation of gates this framework
-already enforces individually.
+`check-mapping-balance` (#3) come back clean — re-run live against the
+mapping doc and the object's real transform script, auto-resolved via
+`script_numbering.script_filename_for()`? Has Email Deliverability been
+attested for this pass (hard rule 9 — still a human attestation, never
+auto-checked, so this can only confirm the flag was recorded on the most
+recent `BulkOpsLog` insert/update/upsert row, not verify the Setup value
+itself — skipped, not failed, when the most recent run was a delete,
+since deletes never need it)? Row-count reconciliation (#64) is folded
+in directly, reusing `reconciliation.py` rather than reimplementing it.
+
+Two gates need a per-object parameter this module can never safely guess
+— the migration-key field name and the mapping doc path — both optional;
+an object left out of `--migration-key` just reports those two gates as
+"not checked," never assumed clean. Every gate's result is `True`/
+`False`/`None` (not applicable or not checked) — **only an explicit
+`False` blocks the overall READY/NOT READY verdict**; a `None` gate is
+still fully reported (so a human can judge whether that gap matters for
+this particular pass) but doesn't itself sink readiness. This distinction
+mattered in practice: the row-count-reconciliation gate originally
+treated `reconciliation.py`'s own "Load table doesn't exist yet" flag as
+an explicit failure, inconsistent with every other gate's `None`
+treatment of that exact state (a load that simply hasn't happened yet
+isn't a readiness *failure*) — found and fixed via this module's own
+test suite before it shipped. Aggregate into a per-object checklist plus
+one overall verdict — read-only, no new checks invented, purely a
+re-presentation of gates this framework already enforces individually.
+Dogfooded live against this project's own org and mirror DB, including
+watching the verdict flip from NOT READY to READY after a real
+`analyze-org-risk` run.
 
 ## 66. Auto-drafted client-facing pass summary — BUILT (`pass_summary.py`)
 

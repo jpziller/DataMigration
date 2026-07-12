@@ -381,6 +381,32 @@ venv may not be active in a fresh shell:
                 `--load-table Object=TableName` overrides the `<Object>_Load` default naming
                 convention. Entirely read-only, aggregating data every one of these tools already
                 produces.)
+- Migration readiness score: `.venv/Scripts/python.exe cli.py assess-migration-readiness Account
+                [--migration-key Account=MigrationID__c] [--mapping-path mapping/Migration_Mapping.xlsx]
+                [--load-table Account=Account_LoadV2]`
+                (roadmap #65: one aggregate go/no-go view per object instead of checking five
+                different tables/commands by hand — re-checks or re-presents every gate this framework
+                already enforces individually: the Parent-Batch Sort Rule (hard rule 6, only applies
+                when the object has an in-scope parent on file in `dbo.ObjectDependency`); the
+                Migration Key Integrity Rule (hard rule 7, re-runs `check-load-table-duplicate-keys`
+                live); the Live Migration Key Validation Rule (hard rule 12, re-runs
+                `validate-external-id` live against the real org); `analyze-org-risk` scan coverage
+                (the same "scanned vs. never scanned" signal `orchestrator.py`/`risk_analyzer.py`'s
+                `ScanCompleted` marker already makes checkable); `check-mapping-balance`, re-run live
+                against the mapping doc and the object's real transform script (auto-resolved via
+                `script_numbering.script_filename_for()`); Email Deliverability attestation (hard rule
+                9 — a human attestation, never auto-checked, so this can only confirm the flag was
+                recorded on the most recent `BulkOpsLog` insert/update/upsert row, not verify the live
+                Setup value — skipped, not failed, when the most recent run was a delete); and
+                row-count reconciliation (#64), folded in directly rather than reimplemented.
+                `--migration-key Object=Field` (repeatable) enables the two migration-key gates for
+                that object — left out, both report "not checked," never assumed clean.
+                `--mapping-path` enables `check-mapping-balance` and the reconciliation gate's
+                source-count half. `--load-table Object=TableName` overrides the `<Object>_Load`
+                default. A gate reported "not checked"/"not applicable" never blocks the overall
+                READY/NOT READY verdict by itself — only an explicit failure does; the point is
+                surfacing every gap, not treating an unchecked gate as silently clean. Read-only, no
+                new checks invented.)
 - Bulk load activity logging (opt-in, per schema — off by default, never
                 automatic; the same opt-in-per-database convention established
                 commercial migration tools use):
@@ -594,7 +620,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
 `/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
-`/reconcile-load-counts`
+`/reconcile-load-counts`, `/assess-migration-readiness`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -922,6 +948,11 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   cross-checks source table row count → Load table row count →
   `bulkops`' most recent submitted/succeeded/failed counts per object,
   flagging anywhere they don't reconcile. Read-only.
+- `readiness.py` — migration readiness score (roadmap #65): one aggregate
+  go/no-go view per object, re-checking or re-presenting hard rules
+  6/7/12, `analyze-org-risk` coverage, `check-mapping-balance`, Email
+  Deliverability attestation, and `reconciliation.py`'s own row-count
+  reconciliation (#64) — no new checks invented. Read-only.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
   SQL-Server-only for now (see the "SQL backend" note above).

@@ -64,6 +64,7 @@ import adversarial_mock_data as amd
 import pass_summary as ps
 import dev_cycle as devc
 import reconciliation as rc
+import readiness as rdy
 
 
 def _ctx():
@@ -476,6 +477,51 @@ def reconcile_load_counts_cmd(object_names, schema, mapping_path, load_tables):
                 click.echo(f"  ! {flag}")
         else:
             click.echo("  Clean -- source/Load/bulkops counts reconcile.")
+
+
+@cli.command("assess-migration-readiness")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--schema", default="dbo")
+@click.option("--mapping-path", default=None, help="Mapping workbook -- enables the check-mapping-balance and row-count-reconciliation source-count gates.")
+@click.option("--migration-key", "migration_keys", multiple=True,
+              help="Object=Field, repeatable -- enables the Migration Key Integrity and Live Migration Key Validation gates for that object.")
+@click.option("--load-table", "load_tables", multiple=True, help="Object=TableName, repeatable -- overrides the <Object>_Load default.")
+def assess_migration_readiness_cmd(object_names, schema, mapping_path, migration_keys, load_tables):
+    """One aggregate go/no-go readiness view per object (roadmap #65) --
+    re-checks or re-presents every gate this framework already enforces
+    individually (hard rules 6/7/12, analyze-org-risk coverage,
+    check-mapping-balance, Email Deliverability attestation, and #64's
+    row-count reconciliation), instead of checking five different
+    tables/commands by hand. Read-only -- no new checks invented. A gate
+    left "not checked" (no --migration-key/--mapping-path given) is
+    reported but never blocks the overall verdict by itself; only an
+    explicit failure does."""
+    _, sf, engine = _ctx()
+
+    key_map = {}
+    for item in migration_keys:
+        if "=" not in item:
+            raise click.BadParameter(f"--migration-key must be Object=Field, got: {item!r}")
+        obj, _, field = item.partition("=")
+        key_map[obj] = field
+
+    load_table_map = {}
+    for item in load_tables:
+        if "=" not in item:
+            raise click.BadParameter(f"--load-table must be Object=TableName, got: {item!r}")
+        obj, _, table = item.partition("=")
+        load_table_map[obj] = table
+
+    results = rdy.assess_migration_readiness(
+        sf, engine, list(object_names), schema=schema,
+        migration_keys=key_map, mapping_path=mapping_path, load_tables=load_table_map,
+    )
+    for r in results:
+        verdict = "READY" if r["ready"] else "NOT READY"
+        click.echo(f"\n{r['object']} ({r['load_table']}): {verdict}")
+        for gate_name, gate in r["gates"].items():
+            symbol = "OK" if gate["ok"] else ("--" if gate["ok"] is None else "FAIL")
+            click.echo(f"  [{symbol}] {gate_name}: {gate['detail']}")
 
 
 @cli.command("enable-bulkops-logging")
