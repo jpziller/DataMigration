@@ -94,6 +94,14 @@ summarizes.
 | 56 | Duplicate target-field detection (scripts + spreadsheets) | **Built**, hard rule 14 | `check-mapping-balance` (extended), `import-csv-directory` | Raised directly: a single `CREATE TABLE`/`INSERT INTO` column list, or a single mapping-doc sheet, must never target the same field twice — different scripts/sheets doing so is fine and expected. `check-mapping-balance` reports both `duplicate_target_fields` and `duplicate_implemented_columns`; `import-csv-directory` refuses a CSV whose own header already repeats a column. |
 | 57 | Data model ERD diagrams — source subject-area models + target model, SDMN-inspired | **Built** | `generate-target-data-model`, `generate-source-data-model` | Mermaid ERDs approximating Salesforce Data Model Notation (verified against the real SDMN guide — its per-entity color/border coding and diamond relationship symbol genuinely can't be reproduced in Mermaid; its solid-vs-dashed identifying/non-identifying line distinction can, and maps onto master-detail vs lookup). Target model relationships are real (`load_order.build_dependency_edges()`); source model relationships are a naming-convention guess only, always labeled and reported for review, never presented as confirmed. |
 | 58 | Bidirectional convert: Data Transform JSON ↔ Code Extension Python | Not built — depends on #45 | — | Idea: JSON→Python translates the canvas Data Transform's `nodes`/`ui` export into an `entrypoint.py` against the `datacustomcode` SDK, for the node types #45 already confirmed (`load`/`formula`/`outputD360`) — safe today, since it's known structure to known SDK calls. Python→JSON is the harder direction: it inherits #45's own generation blocker (8/11 node types still unconfirmed) and only ever recognizes a constrained, canvas-representable subset of Python, refusing whatever falls outside it rather than guessing. |
+| 59 | Migration brief intake / project bootstrap | Not built — new feature, explicitly requested | — | Idea: a minimal structured file (objects in scope, target org, ticket, per-object notes) that a discovery-AI session hands off, and one command that validates every named object against live `describe()`, runs `analyze-load-order`, and scaffolds the Migration Run Book — turning "discovery just finished" into a concrete first command sequence instead of a cold start. |
+| 60 | Discovery question checklist generator | Not built — new feature, explicitly requested | — | Idea: given a candidate object list, generate the per-object questions an architect should ask the client — driven by real signals this framework already computes (`analyze-org-risk` finds active validation rules → ask about that business rule; object carries RecordTypes → ask about the mapping), not a generic template. |
+| 61 | Bulk-load failure triage assistant | Not built — new feature, explicitly requested | — | Idea: group a load's failures by normalized error signature (building on the review's `_normalize_error_signature()`) and map common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which mapping/transform column to check — turning "100 rows failed" into "1 root cause, here's where to look." |
+| 62 | Adversarial mock data generation | Not built — new feature, explicitly requested | — | Idea: a companion to `generate-mock-data`/`generate-related-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields) so validation-rule collisions surface during Dev testing, not during a real client load. |
+| 63 | Reset-dev-cycle command | Not built — new feature, explicitly requested | — | Idea: codify the manual reset ritual this project has done by hand every dogfooding cycle (drop mock/Load/staging tables, optionally purge org test data via `bulkops delete --where`) into one command, instead of remembering the steps each time. |
+| 64 | Row-count reconciliation report | Not built — new feature, explicitly requested | — | Idea: walk the load order and cross-check source row count → Load table row count → `bulkops` succeeded count per object, flagging anywhere rows silently disappeared (a too-aggressive filter, a bad `JOIN`) — a data-completeness auditor, not a per-tool spot check. |
+| 65 | Migration readiness score | Not built — new feature, explicitly requested | — | Idea: one aggregate go/no-go view across hard rules 6/7/12/15, `analyze-org-risk` coverage, mapping balance, and Email Deliverability attestation state per object — right now "are we ready" means checking five different tables/commands by hand. |
+| 66 | Auto-drafted client-facing pass summary | Not built — new feature, explicitly requested | — | Idea: draft a plain-English "here's what happened this pass" summary from `BulkOpsLog`/the Migration Run Book, ready to send a client stakeholder — nearly free given how much structured data this framework already logs. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -3155,6 +3163,197 @@ that wraps the CLI commands the way this repo's existing
 building this, once enough real DT exports exist to know the converter
 is worth shipping at all.
 
+## 59. Migration brief intake / project bootstrap (not built — new feature, explicitly requested)
+
+Raised directly off a description of how this framework actually gets
+used: an architect handles client discovery separately (with help from
+another AI session — use cases, which objects need migrating, special
+requirements), then hands that off to *this* framework to script,
+validate, and run. Today that hand-off is a cold start — nothing here
+reads a discovery output; the architect re-types the object list into
+the first `describe`/`analyze-load-order` call by hand.
+
+The idea: a minimal, deliberately simple structured file (YAML or JSON —
+decide at build time, not now) that a discovery-AI session could produce
+directly: objects in scope, a short note per object (why it's in scope,
+any special requirement already known), the target org alias, and a
+ticket/project reference (the Script Ticket Traceability Rule, #10,
+already requires one per script — this just captures it once at the
+project level instead of re-asking per file). One new command reads it
+and does the boring, mechanical first pass: confirms every named object
+is real via live `describe()` (a typo or a renamed object surfaces
+immediately, not three commands later), runs `analyze-load-order` across
+the whole set, and scaffolds a Migration Run Book via
+`generate-migration-run-book` with the object list already wired in.
+Deliberately does **not** try to guess mapping, field lists, or
+transform logic from the brief's notes — that's still `generate-mapping-doc`/
+`auto-map`'s job, on the real source tables, once they exist. This is
+strictly the "get the boilerplate out of the way so the real work can
+start" step, same scope discipline as `auto_mapper.py`'s own
+first-pass-only philosophy (Hard Rule 11).
+
+Keep the brief format itself minimal for v1 rather than over-specifying a
+rigid schema before a real discovery session shows what's actually
+useful — same "start empty, grow from real usage" discipline as
+`reference/field_synonyms.json`.
+
+## 60. Discovery question checklist generator (not built — new feature, explicitly requested)
+
+The companion to #59, running the other direction: instead of *starting*
+from a discovery output, generate the questions an architect should be
+*asking* during discovery, derived from what this framework already
+knows how to check rather than a generic template a human has to
+remember. Given a candidate object list (from a migration brief, or just
+typed in directly):
+
+- `analyze-org-risk` already finds active validation rules, Apex
+  triggers, workflow rules, and record-triggered Flows per object — turn
+  each one into a real question ("N active validation rule(s) found on
+  Account; confirm source data will satisfy `BillingCity` non-blank for
+  the rule that checks it" rather than a generic "any validation
+  rules?").
+- An object carrying `RecordTypeId` (the RecordType Resolution Rule, #15)
+  becomes "Does the client use Record Types on this object? Get the exact
+  DeveloperName for each one in scope."
+- `load_order.py`'s dependency graph surfaces an object with a
+  lookup/master-detail parent not yet in the candidate list — "This
+  object depends on `<Parent>`; confirm it's in scope too, or that target
+  records already exist for it."
+
+Mostly a new presentation layer over data `risk_analyzer.py`/`load_order.py`
+already fetch, not a new integration — the value is turning "what should
+I ask" into something derived from the org's actual complexity signals,
+not memory or a generic checklist template. Output could land as plain
+markdown, or as starter rows in a Migration Run Book's Pre-Migration
+phase (decide at build time which is more useful in practice).
+
+## 61. Bulk-load failure triage assistant (not built — new feature, explicitly requested)
+
+Builds directly on this session's ruthless-review fix to `bulkops.py`'s
+`failure_error_counts` (record-Id tokens normalized to `<ID>` so a
+recurring error reads as "known," not "novel," across runs). This item
+goes one step further: for a load's grouped failure signatures, map
+well-known Salesforce Bulk API error codes to a likely root cause and
+where to look, instead of leaving the architect to manually parse raw
+error strings row by row:
+
+- `DUPLICATE_VALUE` → check the migration key/external ID field for
+  genuine duplicates in the source, or cross-reference `analyze-org-risk`
+  for a duplicate rule/matching rule on that field.
+- `REQUIRED_FIELD_MISSING` → cross-reference the mapping doc's `Migrate
+  Data = Yes` rows for that field (the same check `check-required-mappings`,
+  #49, already implements) — was it left unmapped?
+- `STRING_TOO_LONG` → cross-reference `profile-sql-table`'s max observed
+  length for that source field against the target field's real length
+  from `describe()`.
+- `INVALID_CROSS_REFERENCE_KEY` → almost always a lookup/master-detail
+  field pointing at an Id that doesn't exist yet — check load order (#2)
+  for a same-parent-batch ordering problem (Hard Rule 6) before assuming
+  it's a data issue.
+
+A pattern-matching layer over a well-documented, stable Salesforce error
+vocabulary, cross-referenced against data this framework already
+collects — advisory only, same "suggests, never auto-fixes" posture as
+`auto_mapper.py`.
+
+## 62. Adversarial mock data generation (not built — new feature, explicitly requested)
+
+`generate-mock-data`/`generate-related-mock-data` (#6) currently generate
+happy-path data only — every row is well-formed by construction. This
+item is the deliberate opposite: a companion mode that provokes known
+failure classes on purpose, so a validation-rule collision or
+pre-flight-check gap surfaces during Dev testing, not for the first time
+against real client data or, worse, during a UAT pass:
+
+- A duplicate value on the migration key or another unique field (does
+  the fingerprint-based result mapping, Hard Rule 4, degrade the way
+  it's supposed to — an `ambiguous` count, not silent data loss?).
+- A string field intentionally longer than `describe()`'s max length for
+  it (`STRING_TOO_LONG`, cheaply cross-checked with #61 above once both
+  exist).
+- A required field deliberately left blank.
+- An invalid/nonexistent picklist value.
+- A lookup field pointing at an Id that doesn't exist.
+
+Where `analyze-org-risk` (#5) already knows a specific active validation
+rule's `ErrorDisplayField`, a row can be crafted to deliberately trip
+that exact rule — confirming `bulkops` surfaces the failure correctly
+rather than corrupting the batch, before the architect ever sees it
+happen for real. Same underlying Mockaroo/Snowfakery machinery as #6,
+just a `--adversarial` mode instead of (or alongside) the happy-path
+default.
+
+## 63. Reset-dev-cycle command (not built — new feature, explicitly requested)
+
+Codifies a ritual this project's own dogfooding did by hand, repeatedly,
+across this session (see `docs/ORCHESTRATOR_DESIGN.md`'s field notes: "a
+full reset — org records deleted, scripts/docs/SQLite wiped — before
+each of three consecutive full Dev-tier cycles"). One command instead of
+remembering the steps each time:
+
+- Drop `<Object>_Mock`, `<Object>_Load`, and any staging tables for a
+  given object list.
+- Optionally purge matching org test data via `bulkops <Object> delete
+  --where "..."` (#32, already built — this just sequences it), still
+  gated by the Live-Org Write Confirmation Rule (#2) like any other
+  delete.
+- Deliberately leaves `sql/transformations/*.sql` and mapping docs
+  untouched by default — those are the real, committed artifacts a full
+  reset is never supposed to erase without explicit, separate approval
+  (see `CLAUDE.md`'s own note on this under "Where things live").
+
+Purely a convenience wrapper around existing primitives (`DROP TABLE`,
+`bulkops delete`) — no new logic, just removing the "did I remember every
+step" risk of doing this by hand before every fresh iteration.
+
+## 64. Row-count reconciliation report (not built — new feature, explicitly requested)
+
+A data-completeness auditor spanning the whole load order, not a
+per-tool spot check. Walk `analyze-load-order`'s (#2) dependency
+sequence and, for each object, cross-check three numbers that should
+reconcile: the source table's row count, the `*_Load` table's row count
+(did the transform's `JOIN`s/`WHERE` clauses silently drop rows it
+shouldn't have?), and `bulkops`' most recent succeeded count from
+`BulkOpsLog` (#14) for that object. Flag any object where these three
+don't line up the way they're supposed to, instead of leaving that
+discovery to a human noticing "huh, that's fewer rows than I expected"
+during manual review. Entirely read-only, aggregating data every one of
+these tools already produces — the value is in cross-checking all three
+together in one pass, not new data collection.
+
+## 65. Migration readiness score (not built — new feature, explicitly requested)
+
+One aggregate go/no-go view instead of manually checking five different
+tables/commands to answer "are we actually ready for this pass." Per
+object: has the Parent-Batch Sort Rule (#6) been applied? Has the
+Migration Key Integrity Rule (#7) check passed clean? Has the Live
+Migration Key Validation Rule (#12) passed against the live org? Has
+`analyze-org-risk` (#5) actually been run for this object (the same
+"scanned vs. never scanned" signal `orchestrator.py` already needs and
+`risk_analyzer.py`'s `ScanCompleted` marker already makes checkable)? Has
+`check-mapping-balance` (#3) come back clean? Has Email Deliverability
+been attested for this pass (Hard Rule 9 — still a human attestation,
+never auto-checked, so this can only confirm the flag was passed on the
+most recent run, not verify the Setup value itself)? Aggregate into a
+per-object checklist plus one overall verdict — read-only, no new
+checks invented, purely a re-presentation of gates this framework
+already enforces individually.
+
+## 66. Auto-drafted client-facing pass summary (not built — new feature, explicitly requested)
+
+A plain-English "here's what happened this pass" draft, pulled from
+`BulkOpsLog` (#14) and the Migration Run Book (#16) for a given tab —
+ready to send a client stakeholder instead of a raw spreadsheet dump or
+a manually-written status email. Nearly free given how much structured
+data this framework already logs by the time a pass finishes: object
+count, total/succeeded/failed records per object, and (once #61 exists)
+a plain-language description of what went wrong for any object that
+didn't come back 100% clean, instead of a raw error code. Could reuse
+`solution_doc.py`'s existing Word-document-generation machinery
+(`docxtpl`) for a client-ready format, or start as plain Markdown first —
+same "ship the simple version, decide on polish later" discipline as
+#52's own v1 framing.
+
 ---
 
 ## End-to-end project workflow (vision, not built)
@@ -3164,6 +3363,18 @@ lifecycle, not just a set of standalone tools. Laid out end to end
 directly in one conversation, phase by phase, referencing what already
 exists and what's newly captured above rather than restating either:
 
+0. **Discovery** (new, upstream of this framework's own tools): the
+   architect handles client discovery separately — often with another AI
+   session's help — landing on which objects need migrating, the use
+   cases behind each one, and any special requirements. Two new ideas
+   bridge that into this framework instead of leaving it a cold start: a
+   discovery question checklist generator (#60), driven by real
+   complexity signals (`analyze-org-risk`, RecordTypes, load-order
+   dependencies) rather than a generic template, informs what to ask; a
+   migration brief intake (#59) then turns the discovery output into the
+   first real command sequence (`describe` validation, `analyze-load-order`,
+   a scaffolded Migration Run Book) instead of re-typing an object list by
+   hand.
 1. **Source ingestion**: read a client-provided directory of CSVs (or
    validate a later pass's files against what's already loaded) and
    build the Source SQL Server database from it — #46, the current gap.
@@ -3185,36 +3396,55 @@ exists and what's newly captured above rather than restating either:
    framework's job is to verify that gate, not to build the field itself.
 4. **Test each script individually, not end to end yet**: drive toward
    100% of rows loading per object, fixing the SQL when it doesn't
-   rather than accepting errors as normal at this stage. Two established
+   rather than accepting errors as normal at this stage. Established
    tools do double duty here: `bulkops delete --where`/`--dry-run` (#32)
    for the load → find a problem → back out → fix → reload cycle during
    iteration, and `analyze-org-risk` (#5) plus a reference-record pull
    (#51, new) when an architect hand-creates a record in the UI to show
    what "correct" actually looks like against the org's real automation.
-   The standing goal stated directly: our data should land looking
-   indistinguishable from a record created natively in the org — the
-   migration key is the *only* thing that should ever tell the two apart.
+   Two new ideas speed this cycle up directly: adversarial mock data
+   (#62) provokes known failure classes on purpose so a validation-rule
+   collision surfaces here, not during a real client load; a failure
+   triage assistant (#61) groups whatever does fail by normalized
+   signature and maps it to a likely root cause instead of leaving that
+   to manual error-string reading. A reset-dev-cycle command (#63)
+   codifies the "wipe and try again" ritual this project's own
+   dogfooding has done by hand every iteration. The standing goal stated
+   directly: our data should land looking indistinguishable from a
+   record created natively in the org — the migration key is the *only*
+   thing that should ever tell the two apart.
 5. **Document and diagram**: code review and documentation of the
-   scripts as they stabilize, plus a new, explicitly lower-stakes idea —
-   Mermaid process-flow diagrams generated from the Migration Run Book
-   (#52) for a visual instead of a spreadsheet-only view.
-6. **Full end-to-end runs**: once individual scripts are solid, run the
+   scripts as they stabilize, plus Mermaid process-flow diagrams
+   generated from the Migration Run Book (#52, built) for a visual
+   instead of a spreadsheet-only view.
+6. **Verify completeness before a full run** (new): a row-count
+   reconciliation report (#64) cross-checks source count → Load table
+   count → `bulkops` succeeded count per object, catching a silently
+   dropped row before it reaches a human's attention on its own; a
+   migration readiness score (#65) aggregates every gate this framework
+   already enforces individually (hard rules 6/7/12/15, `analyze-org-risk`
+   coverage, mapping balance, Email Deliverability attestation) into one
+   go/no-go view instead of five separate checks.
+7. **Full end-to-end runs**: once individual scripts are solid, run the
    real sequence — object by object, adapting batch size (#15) and
    retrying (#11) automatically, logging everything (#14/#16). Perfect
    completion isn't the bar; a UAT pass with a handful of genuinely
    unfixable source-data rows is a normal, reportable outcome, not a
    failure — call it out in the run book, report it to the client, and
    revisit with a subset reload later if needed. This is #53's
-   orchestrator, still waiting on the consent-model decision described
-   there before it gets built.
-7. **Keep the human in the loop, better than email**: #54's Slack/Teams
+   orchestrator, still waiting on a real UAT pass before Phase 2 gets
+   built.
+8. **Keep the human in the loop, better than email**: #54's Slack/Teams
    idea — starting with outbound alerts, with bidirectional chat-driven
-   control as the further-out, architecture-changing version.
+   control as the further-out, architecture-changing version — alongside
+   an auto-drafted client-facing pass summary (#66) pulled straight from
+   `BulkOpsLog`/the Migration Run Book, so reporting a pass's outcome
+   isn't a separately hand-written status email.
 
 This ties together #2 (load order), #3 (mapping doc), #4 (solution doc),
 #5 (org metadata risk), #6 (mock data), #7 (profiling), #10
 (auto-mapping), #11 (bulkops + retry), #14/#16 (logging + run book), #15
 (batch sizing), and #32 (purge-by-filter) into one pipeline, plus the
-gaps captured above (#46–#54) as the concrete next pieces. Scoping any
+gaps captured above (#46–#66) as the concrete next pieces. Scoping any
 one of them into a real build is the next step — this section is the
 shape of where it's all going, not a spec for any single piece of it.
