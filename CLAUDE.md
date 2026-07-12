@@ -416,6 +416,25 @@ venv may not be active in a fresh shell:
                 Source Ingestion Log Id" watermark — the two syncs never interfere with each other.
                 Also available as an opt-in automatic step on `import-csv-directory` itself via its
                 own `--run-book`/`--run-book-tab`.)
+                `.venv/Scripts/python.exe cli.py generate-run-book-flowchart migration_run_book.xlsx --tab Dev1 --output run_book_flowchart.md`
+                (roadmap #52: a Mermaid process-flow diagram straight from that tab's own Stage/
+                Object/Dependency/Status columns — deliberately simple v1, per the user's own framing
+                ("for now, you would just create mermaid"): one `subgraph` per phase banner, one node
+                per step, edges parsed ONLY from the Dependency column's real "After: X, Y" text (the
+                same shape `_load_order_rows()` itself writes for the Load phase) — never fabricated
+                top-to-bottom chaining, so a Pre-/Post-Migration item with no known dependency renders
+                as a standalone node rather than a guessed link. A parent name is resolved against
+                every other row's Object value via `script_numbering.matches_token()` — the same
+                whole-token match already used elsewhere in this module, since a Load-phase Object
+                cell is often a script filename ("010_account_load.sql"), not the bare name a
+                Dependency cell names ("After: Account"). An unresolved dependency mention (no
+                matching row in this tab) is dropped, not guessed at, and reported back rather than
+                silently vanishing. Node color reuses the workbook's own Status conditional-formatting
+                palette, so the diagram agrees visually with the spreadsheet. Read-only, no Salesforce/
+                SQL connection needed — just the local `.xlsx` file. GitHub/most Markdown renderers
+                already render the fenced ` ```mermaid ` block natively; Lucid supports paste-to-import.
+                A polished, hand-styled diagram elsewhere remains a named future stretch, not part of
+                this v1.)
 - Validate migration key: `.venv/Scripts/python.exe cli.py validate-external-id Account Legacy_Id__c`
                 (confirms the named field is genuinely externalId+unique in the live org's
                 describe() before it's trusted as a migration key — rule 12. Read-only, no
@@ -472,7 +491,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
-`/check-validators`, `/orchestrator-assess`
+`/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -789,7 +808,8 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   Data Cloud/D360 query and status tooling, dynamic batch-size recommendations,
   the Migration Run Book, reference-record pull/compare — roadmap #51,
   RecordType DeveloperName resolution — roadmap #36, SDMN-style Mermaid
-  data model ERDs — roadmap #57).
+  data model ERDs — roadmap #57, Mermaid process-flow diagrams from a
+  Migration Run Book tab — roadmap #52).
 - `validators/` — the validators library (see its own section above and
   `validators/README.md`): `validators/system/*.md` formalizes Hard Rules
   6/7/12/15 as named, retrievable checks; `validators/<Object>.md` (e.g.

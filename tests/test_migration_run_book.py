@@ -3,7 +3,9 @@ import pytest
 from migration_run_book import (
     _COLUMNS,
     _is_separator_row,
+    _mermaid_escape_label,
     _object_matches,
+    _parse_dependency_parents,
     _parse_template,
 )
 
@@ -80,3 +82,25 @@ def test_parse_template_rejects_data_row_with_wrong_cell_count(tmp_path):
     body = f"## Load\n{HEADER}\n{SEPARATOR}\n| Load | Account |\n"
     with pytest.raises(ValueError):
         _parse_template(_write_template(tmp_path, body))
+
+
+def test_parse_dependency_parents_none_yields_no_parents():
+    assert _parse_dependency_parents("None") == []
+    assert _parse_dependency_parents(None) == []
+    assert _parse_dependency_parents("") == []
+
+
+def test_parse_dependency_parents_single():
+    assert _parse_dependency_parents("After: Account") == ["Account"]
+
+
+def test_parse_dependency_parents_multiple_comma_separated():
+    assert _parse_dependency_parents("After: Account, Contact") == ["Account", "Contact"]
+
+
+def test_parse_dependency_parents_ignores_parallel_with_suffix():
+    assert _parse_dependency_parents("After: Account; parallel with: Opportunity") == ["Account"]
+
+
+def test_mermaid_escape_label_escapes_quotes_and_brackets():
+    assert _mermaid_escape_label('Say "hi" [now]') == "Say #quot;hi#quot; (now)"

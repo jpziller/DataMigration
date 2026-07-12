@@ -87,7 +87,7 @@ summarizes.
 | 49 | Migrate-flagged-but-unmapped field detection + suggestion | **Built**, refines #3/#10 | `check-required-mappings <Object> <MappingPath>` | Flags every mapping-doc row marked `Migrate Data = Yes` with no Target Field chosen, and attempts a `describe()`-driven suggestion via the same matching `auto-map` uses. Read-only — never writes into the doc; that's `auto-map`'s job. |
 | 50 | Migration-key/External ID field validation against live describe() | **Built**, hardens rules 4/7 | `validate-external-id <Object> <Field>` (hard rule 12) | Confirms a named target field is genuinely `externalId`+`unique` in the live org's describe() before it's trusted as a migration key — explicit object+field parameters (same convention as `CheckLoadTableDuplicateKeys`/`--external-id`), not auto-detected from the mapping doc. Read-only, exits nonzero on failure so it can gate a script. Not this framework's job to create that field, just to gate on it being correctly in place. |
 | 51 | Reference-record pull/compare tool | **Built** | `compare-reference-record <Object> <LoadTable> <RecordId> --migration-key <Field>` | Diffs a live, hand-created reference record against the Load table row its migration key corresponds to — matched by migration key (read off the live record), not `Id`, since a hand-created record was never loaded via `bulkops`. Read-only review aid; never writes back. |
-| 52 | Mermaid process-flow diagrams from the Migration Run Book | Not built — new feature, explicitly requested | — | Idea: generate a Mermaid flowchart from a run-book tab's Stage/Object/Dependency structure as a `.md` file — renders natively on GitHub, and is already the right input format for a Lucid Chart import later. |
+| 52 | Mermaid process-flow diagrams from the Migration Run Book | **Built** | `generate-run-book-flowchart <path> --tab <name> --output <path.md>` | Generates a Mermaid flowchart from a run-book tab's Stage/Object/Dependency/Status structure as a `.md` file — renders natively on GitHub, and is already the right input format for a Lucid Chart import later. One subgraph per phase, edges only from real "After: X" dependency text (never fabricated), node color matching the workbook's own Status palette. Read-only, no Salesforce/SQL connection needed. |
 | 53 | Supervised end-to-end load orchestrator | **Phase 1 built, tested, live-validated** — Phase 2 gated on a real UAT pass | `orchestrator-assess`, `enable-orchestrator-logging` | Deterministic tier assessment (`orchestrator.py`'s `assess_tier()`, `docs/ORCHESTRATOR_DESIGN.md`) live-validated against real `BulkOpsLog` history across all four tiers. Zero change to Hard Rule 2 — every `bulkops` call is exactly as `ask`-gated as before. The actual coarse-approval mechanism (Phase 2) isn't built yet, on purpose, until Stage 1 shadow mode runs against a real UAT-tier project. |
 | 54 | Chat-driven human-in-the-loop alerting/control (Slack/Teams) | Not built — roadmap idea per explicit request | — | Idea: outbound alerts to Slack/Teams instead of email (low-risk, near-term), and further out, driving a production run from Slack itself — the latter needs a real architecture decision (listener vs. polling) that would require revisiting `docs/SECURITY_OVERVIEW.md`'s current "no network listener" trust model. |
 | 55 | `REF_`-prefixed human-only audit columns, excluded from bulkops | **Built**, hard rule 13 | `--ref-prefix` (default `REF_`) | Raised directly from real DBAmp-era experience: a `REF_`-prefixed Load table column is a human-only SQL-side audit field, excluded from the auto-derived sent-column list and from the pre-flight "not a real field" check — never reaches the API, never aborts the load. |
@@ -2814,21 +2814,46 @@ by field. Wired up as `cli.py compare-reference-record <Object>
 <LoadTable> <RecordId> --migration-key <Field>` — read-only, a review/
 debugging aid; never writes anything back.
 
-## 52. Mermaid process-flow diagrams from the Migration Run Book (not built — new feature, explicitly requested)
+## 52. Mermaid process-flow diagrams from the Migration Run Book — BUILT (`migration_run_book.py`)
 
-Generate a Mermaid flowchart from a Migration Run Book tab's own
+Generates a Mermaid flowchart from a Migration Run Book tab's own
 structure (phases → steps → dependencies, straight off the Stage/Object/
 Dependency columns #16 already tracks) as a `.md` file. Deliberately
 simple for v1, per the user's own framing — "for now, you would just
-create mermaid" — emit the Mermaid syntax itself and stop there; GitHub
+create mermaid" — emits the Mermaid syntax itself and stops there; GitHub
 (and most modern Markdown renderers) already render ` ```mermaid ` code
 fences as real diagrams natively, no additional tooling required to get
 a visual result out of this. Lucid Chart itself supports importing
 Mermaid syntax directly (paste-to-import), so plain Mermaid is also
 already the right foundation for handing a diagram to Lucid later,
 without needing to build a direct Lucid API integration to get value
-from this. Building/saving a *polished*, styled diagram elsewhere is a
-named future stretch, explicitly not part of this item yet.
+from this. Building/saving a *polished*, styled diagram elsewhere remains
+a named future stretch, explicitly not part of this item.
+
+`generate_run_book_flowchart(path, tab_name)` in `migration_run_book.py`
+(`cli.py generate-run-book-flowchart`) reads the tab's own banner rows
+(phase boundaries) and data rows the exact same way
+`_iter_load_phase_rows()` already does elsewhere in that module — one
+`subgraph` per phase, one node per step labeled from the Object column.
+Edges come only from the Dependency column's real "After: X, Y" text
+(the shape `_load_order_rows()` itself writes for the Load phase) —
+never fabricated top-to-bottom chaining for phases with no known
+dependency (Pre-/Post-Migration items render as standalone nodes, which
+is honest: the Run Book genuinely doesn't know their order). A parent
+name is resolved against every other row's Object value via
+`script_numbering.matches_token()` — the same whole-token match already
+used to resolve a real script filename against a bare object name
+elsewhere in this module, since a Load-phase Object cell is often a
+script filename ("010_account_load.sql"), not the bare name a Dependency
+cell names ("After: Account"). An unresolved dependency mention (no
+matching row in this tab) is dropped, not guessed at, and reported back
+in the summary dict rather than silently disappearing — same "visible
+gap, not a silent guess" philosophy as #36's unmatched-`DeveloperName`
+NULL. Node color reuses the workbook's own Status conditional-formatting
+palette (Not Started/In Process/Completed/Issue/N/A), so the diagram
+agrees visually with the spreadsheet instead of inventing a second
+meaning for color. Read-only, no Salesforce/SQL connection needed — just
+the local `.xlsx` file — so it's safe to run without confirmation.
 
 ## 53. Supervised end-to-end load orchestrator — Phase 1 built, Phase 2 gated on a real UAT pass
 

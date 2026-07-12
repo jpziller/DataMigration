@@ -840,3 +840,157 @@ def sync_source_ingestion_to_run_book(engine, path, tab_name, schema="dbo"):
     ws.cell(row=_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID, column=2, value=new_rows[-1]["LogId"])
     _save_workbook(wb, path)
     return {"synced": len(new_rows), "inserted": inserted, "updated": updated}
+
+
+# --- Mermaid process-flow diagram (roadmap #52) --------------------------
+#
+# Deliberately simple for v1, per the user's own framing ("for now, you
+# would just create mermaid"): emit the Mermaid syntax itself off this
+# tab's own Stage/Object/Dependency/Status columns and stop there --
+# GitHub/most Markdown renderers already render a fenced ```mermaid```
+# block natively, and Lucid supports paste-to-import, so no further
+# tooling is needed to get value from this. A *polished*, hand-styled
+# diagram elsewhere is a named future stretch, not part of this item.
+
+_DEPENDENCY_AFTER_RE = re.compile(r"^After:\s*(.+?)(?:\s*;\s*parallel with:.*)?$", re.IGNORECASE)
+
+_STATUS_CSS_CLASS = {
+    "Not Started": "statusNotStarted",
+    "N/A": "statusNA",
+    "In Process": "statusInProcess",
+    "Completed": "statusCompleted",
+    "Issue": "statusIssue",
+}
+# Same five-state palette as _STATUS_FILLS/_STATUS_FONTS above -- the
+# flowchart's node coloring should visually agree with the workbook's own
+# conditional formatting, not invent a separate meaning for color.
+_STATUS_CLASS_DEFS = {
+    "statusNotStarted": "fill:#FFFFFF,stroke:#333333,color:#000000",
+    "statusNA": "fill:#C6EFCE,stroke:#375623,color:#000000",
+    "statusInProcess": "fill:#FFFF00,stroke:#333333,color:#000000",
+    "statusCompleted": "fill:#375623,stroke:#1f2937,color:#FFFFFF",
+    "statusIssue": "fill:#FF0000,stroke:#333333,color:#FFFFFF",
+}
+
+
+def _parse_dependency_parents(dependency_text):
+    """Extract the comma-separated parent names from a Dependency cell's
+    "After: X, Y[; parallel with: ...]" text -- the exact shape
+    _load_order_rows() itself writes. "None" or blank yields no parents.
+    The "parallel with" suffix names siblings at the same load level, not
+    a dependency, so it's never turned into an edge."""
+    if not dependency_text or str(dependency_text).strip().lower() == "none":
+        return []
+    m = _DEPENDENCY_AFTER_RE.match(str(dependency_text).strip())
+    if not m:
+        return []
+    return [p.strip() for p in m.group(1).split(",") if p.strip()]
+
+
+def _mermaid_escape_label(text):
+    """Escape a label for Mermaid's ["..."] node/subgraph syntax -- an
+    embedded double-quote or bracket would otherwise break out of the
+    node shape and corrupt the diagram."""
+    return str(text).replace('"', "#quot;").replace("[", "(").replace("]", ")")
+
+
+def generate_run_book_flowchart(path, tab_name):
+    """Generate a Mermaid flowchart straight from a Migration Run Book
+    tab's own structure: one subgraph per phase banner, one node per data
+    row (labeled from the Object column), edges parsed from the
+    Dependency column's "After: X, Y" text, and node color matching the
+    workbook's own Status conditional-formatting palette.
+
+    Parent names are resolved against every OTHER row's Object value in
+    this tab via script_numbering.matches_token() -- the same whole-token
+    match already used to resolve a real script filename against a bare
+    object name elsewhere in this module, since a Load-phase Object cell
+    is often a script filename ("010_account_load.sql"), not the bare
+    name a Dependency cell names ("After: Account"). A dependency name
+    with no matching row in this tab is dropped rather than guessed at --
+    returned in the summary dict's "unresolved_dependencies" list so a
+    caller can surface it, same "visible gap, not a silent guess"
+    philosophy as record_types.py's unmatched-DeveloperName NULL.
+
+    Returns (mermaid_text, summary_dict) -- mermaid_text is a complete
+    fenced ```mermaid code block, ready to write straight to a .md file."""
+    wb = openpyxl.load_workbook(path, data_only=True)
+    if tab_name not in wb.sheetnames:
+        raise ValueError(f"No tab named '{tab_name}' in {path}")
+    ws = wb[tab_name]
+
+    object_col = _COLUMNS.index("Object") + 1
+    dependency_col = _COLUMNS.index("Dependency") + 1
+    status_col = _COLUMNS.index("Status") + 1
+
+    phase_order = []
+    nodes_by_phase = {}
+    current_phase = None
+    node_counter = 0
+
+    row = _FIRST_DATA_ROW
+    while row <= ws.max_row:
+        object_value = ws.cell(row=row, column=object_col).value
+        if not object_value:
+            label = ws.cell(row=row, column=1).value
+            if label:
+                current_phase = label
+                if current_phase not in nodes_by_phase:
+                    nodes_by_phase[current_phase] = []
+                    phase_order.append(current_phase)
+            row += 1
+            continue
+        node_counter += 1
+        status = ws.cell(row=row, column=status_col).value or "Not Started"
+        dependency_text = ws.cell(row=row, column=dependency_col).value
+        nodes_by_phase.setdefault(current_phase, [])
+        if current_phase not in phase_order:
+            phase_order.append(current_phase)
+        nodes_by_phase[current_phase].append({
+            "id": f"n{node_counter}", "label": str(object_value),
+            "status": status, "dependency_text": dependency_text,
+        })
+        row += 1
+
+    all_nodes = [n for phase_nodes in nodes_by_phase.values() for n in phase_nodes]
+
+    lines = ["```mermaid", "flowchart TD"]
+    edges = []
+    unresolved = []
+    for phase_name in phase_order:
+        phase_nodes = nodes_by_phase.get(phase_name) or []
+        if not phase_nodes:
+            continue
+        subgraph_id = re.sub(r"\W+", "_", phase_name).strip("_") or "phase"
+        lines.append(f'    subgraph {subgraph_id}["{_mermaid_escape_label(phase_name)}"]')
+        for n in phase_nodes:
+            css_class = _STATUS_CSS_CLASS.get(n["status"], "statusNotStarted")
+            lines.append(f'        {n["id"]}["{_mermaid_escape_label(n["label"])}"]:::{css_class}')
+        lines.append("    end")
+
+        for n in phase_nodes:
+            for parent_name in _parse_dependency_parents(n["dependency_text"]):
+                match = next(
+                    (other for other in all_nodes
+                     if other is not n and sn.matches_token(parent_name, other["label"])),
+                    None,
+                )
+                if match:
+                    edges.append((match["id"], n["id"]))
+                else:
+                    unresolved.append(parent_name)
+
+    for parent_id, child_id in edges:
+        lines.append(f"    {parent_id} --> {child_id}")
+    for class_name, style in _STATUS_CLASS_DEFS.items():
+        lines.append(f"    classDef {class_name} {style}")
+    lines.append("```")
+
+    mermaid_text = "\n".join(lines)
+    summary = {
+        "phases": len([p for p in phase_order if nodes_by_phase.get(p)]),
+        "nodes": len(all_nodes),
+        "edges": len(edges),
+        "unresolved_dependencies": unresolved,
+    }
+    return mermaid_text, summary

@@ -193,3 +193,69 @@ def test_sync_source_ingestion_to_run_book_via_import_directory(sqlite_engine, t
     assert len(matches) == 1
     status_col = mrb._COLUMNS.index("Status") + 1
     assert matches[0][status_col - 1].value == "Completed"
+
+
+def test_generate_run_book_flowchart_draws_edges_from_real_load_order_dependency_text(sqlite_engine, tmp_path):
+    """End-to-end: _load_order_rows() (already exercised above) writes
+    real "After: Account" dependency text into the Load phase; the
+    flowchart generator must resolve that back into a real edge between
+    the two nodes, matching Account's node by whole-token match even
+    though its label is a script filename, not the bare object name."""
+    engine, _ = sqlite_engine
+    _seed_load_order(
+        engine,
+        rows=[("Account", 0, 1), ("Contact", 1, 2)],
+        edges=[("Contact", "Account")],
+    )
+    output_path = str(tmp_path / "run_book.xlsx")
+    mrb.generate_migration_run_book(
+        output_path, "Dev1", engine=engine, object_names=["Account", "Contact"], schema="dbo",
+    )
+
+    mermaid_text, summary = mrb.generate_run_book_flowchart(output_path, "Dev1")
+
+    assert summary["edges"] == 1
+    assert summary["unresolved_dependencies"] == []
+    assert mermaid_text.startswith("```mermaid\nflowchart TD")
+    assert mermaid_text.rstrip().endswith("```")
+    assert " --> " in mermaid_text
+
+
+def test_generate_run_book_flowchart_reports_unresolved_dependency(sqlite_engine, tmp_path):
+    """A Dependency mention with no matching row in this tab must be
+    dropped, not guessed at or raised -- surfaced in the summary instead.
+    _load_order_rows() itself only ever writes an in-scope dependency (see
+    its own edges filter), so this simulates the case by hand-editing the
+    Dependency cell after generation -- e.g. a human editing the tab
+    directly, or a future sync path that isn't scope-filtered the same way."""
+    engine, _ = sqlite_engine
+    _seed_load_order(engine, rows=[("Contact", 0, 1)])
+    output_path = str(tmp_path / "run_book.xlsx")
+    mrb.generate_migration_run_book(
+        output_path, "Dev1", engine=engine, object_names=["Contact"], schema="dbo",
+    )
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["Dev1"]
+    dependency_col = mrb._COLUMNS.index("Dependency") + 1
+    object_col = mrb._COLUMNS.index("Object") + 1
+    contact_row = next(
+        row[0].row for row in ws.iter_rows(min_row=mrb._FIRST_DATA_ROW)
+        if row[object_col - 1].value and "contact" in str(row[object_col - 1].value).lower()
+    )
+    ws.cell(row=contact_row, column=dependency_col, value="After: Account")
+    wb.save(output_path)
+
+    mermaid_text, summary = mrb.generate_run_book_flowchart(output_path, "Dev1")
+    assert summary["edges"] == 0
+    assert "Account" in summary["unresolved_dependencies"]
+
+
+def test_generate_run_book_flowchart_raises_when_tab_missing(sqlite_engine, tmp_path):
+    engine, _ = sqlite_engine
+    _seed_load_order(engine, rows=[("Account", 0, 1)])
+    output_path = str(tmp_path / "run_book.xlsx")
+    mrb.generate_migration_run_book(output_path, "Dev1", engine=engine, object_names=["Account"], schema="dbo")
+
+    with pytest.raises(ValueError, match="No tab named"):
+        mrb.generate_run_book_flowchart(output_path, "DoesNotExist")

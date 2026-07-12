@@ -1090,6 +1090,28 @@ def update_migration_run_book_cmd(path, tab_name, schema):
                    f"{source_result['updated']} filled in, {source_result['inserted']} inserted.")
 
 
+@cli.command("generate-run-book-flowchart")
+@click.argument("path")
+@click.option("--tab", "tab_name", required=True, help="Migration Run Book tab to diagram.")
+@click.option("--output", "output_path", required=True, help="Output .md file path (contains a fenced ```mermaid``` block).")
+def generate_run_book_flowchart_cmd(path, tab_name, output_path):
+    """Generate a Mermaid process-flow diagram (roadmap #52) straight from
+    a Migration Run Book tab's own Stage/Object/Dependency/Status columns
+    -- one subgraph per phase, one node per step, edges from the
+    Dependency column's "After: X" text, node color matching the
+    workbook's own Status palette. Deliberately simple for v1: read-only,
+    no Salesforce/SQL connection needed, just this local .xlsx file."""
+    mermaid_text, summary = mrb.generate_run_book_flowchart(path, tab_name)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write(mermaid_text)
+    click.echo(f"Wrote {output_path} ({summary['phases']} phase(s), {summary['nodes']} step(s), {summary['edges']} dependency edge(s))")
+    if summary["unresolved_dependencies"]:
+        click.echo(f"Unresolved dependency mention(s), dropped rather than guessed: {summary['unresolved_dependencies']}")
+
+
 @cli.command("analyze-org-risk")
 @click.argument("object_names", nargs=-1, required=True)
 @click.option("--mapping-path", default=None, help="Mapping workbook -- cross-references active validation rules' ErrorDisplayField against fields actually being migrated (Migrate Data == Yes).")
