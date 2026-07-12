@@ -365,6 +365,22 @@ venv may not be active in a fresh shell:
                 before running this with `--purge-org-where`, same as any other delete. `--dry-run`
                 reports the matched org record count without deleting anything. Omit
                 `--purge-org-where` entirely for a purely mirror-DB reset with zero live-org risk.)
+- Row-count reconciliation: `.venv/Scripts/python.exe cli.py reconcile-load-counts Account Contact
+                [--mapping-path mapping/Migration_Mapping.xlsx] [--load-table Account=Account_LoadV2]`
+                (roadmap #64: a data-completeness auditor spanning the whole load order, not a
+                per-tool spot check — cross-checks the source table's row count, the Load table's row
+                count (did the transform's `JOIN`s/`WHERE` clauses silently drop rows it shouldn't
+                have?), and `bulkops`' most recent submitted/succeeded/failed counts from
+                `dbo.BulkOpsLog`, flagging anywhere they don't reconcile: the Load table doesn't exist
+                yet, it has fewer rows than the source, it's never been loaded via `bulkops`, or its
+                current row count no longer matches what the most recent `bulkops` run actually
+                submitted (a stale prior run — the Load table changed since). Source-table discovery
+                reads a mapping doc's own "Source Object:" header cell for that object's sheet (the
+                exact cell `generate-mapping-doc` writes) — real, not guessed; omit `--mapping-path` to
+                skip the source-count half and still get the Load/`bulkops` cross-check.
+                `--load-table Object=TableName` overrides the `<Object>_Load` default naming
+                convention. Entirely read-only, aggregating data every one of these tools already
+                produces.)
 - Bulk load activity logging (opt-in, per schema — off by default, never
                 automatic; the same opt-in-per-database convention established
                 commercial migration tools use):
@@ -577,7 +593,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
-`/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`
+`/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
+`/reconcile-load-counts`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -901,6 +918,10 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   Hard-Rule-2-gated delete, not a separate mechanism. No skill wrapper —
   same reasoning as the main `bulkops` command itself, since this can
   trigger a real Salesforce delete depending on the flags passed.
+- `reconciliation.py` — row-count reconciliation report (roadmap #64):
+  cross-checks source table row count → Load table row count →
+  `bulkops`' most recent submitted/succeeded/failed counts per object,
+  flagging anywhere they don't reconcile. Read-only.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
   SQL-Server-only for now (see the "SQL backend" note above).

@@ -63,6 +63,7 @@ import failure_triage as ft
 import adversarial_mock_data as amd
 import pass_summary as ps
 import dev_cycle as devc
+import reconciliation as rc
 
 
 def _ctx():
@@ -439,6 +440,42 @@ def reset_dev_cycle_cmd(object_names, schema, purge_wheres, dry_run):
             click.echo(f"[dry run] {object_name}: {summary['matched']} record(s) match \"{where}\" -- nothing deleted.")
         else:
             click.echo(f"{object_name}: purged {summary.get('matched', 0)} record(s) matching \"{where}\".")
+
+
+@cli.command("reconcile-load-counts")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--schema", default="dbo")
+@click.option("--mapping-path", default=None, help="Mapping workbook -- enables the source-table row count via each object's own 'Source Object:' header cell.")
+@click.option("--load-table", "load_tables", multiple=True, help="Object=TableName, repeatable -- overrides the <Object>_Load default.")
+def reconcile_load_counts_cmd(object_names, schema, mapping_path, load_tables):
+    """Cross-check source table row count -> Load table row count ->
+    bulkops' most recent submitted/succeeded/failed counts (roadmap #64)
+    for each object, flagging anywhere they don't reconcile the way
+    they're supposed to. Read-only, aggregates data every one of these
+    tools already produces."""
+    _, _, engine = _ctx()
+    load_table_map = {}
+    for item in load_tables:
+        if "=" not in item:
+            raise click.BadParameter(f"--load-table must be Object=TableName, got: {item!r}")
+        obj, _, table = item.partition("=")
+        load_table_map[obj] = table
+
+    results = rc.reconcile_load_counts(
+        engine, list(object_names), schema=schema, mapping_path=mapping_path, load_tables=load_table_map,
+    )
+    for r in results:
+        click.echo(
+            f"\n{r['object']}: source={r['source_count'] if r['source_count'] is not None else 'n/a'}, "
+            f"load={r['load_count'] if r['load_count'] is not None else 'n/a'}, "
+            f"bulkops submitted/succeeded/failed="
+            f"{r['bulkops_submitted']}/{r['bulkops_succeeded']}/{r['bulkops_failed']}"
+        )
+        if r["flags"]:
+            for flag in r["flags"]:
+                click.echo(f"  ! {flag}")
+        else:
+            click.echo("  Clean -- source/Load/bulkops counts reconcile.")
 
 
 @cli.command("enable-bulkops-logging")

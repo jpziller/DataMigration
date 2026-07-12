@@ -99,7 +99,7 @@ summarizes.
 | 61 | Bulk-load failure triage assistant | **Built** | `triage-failures <table> [--object] [--mapping-path]` | Groups a load's failures by normalized error signature (`_normalize_error_signature()`) and maps common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which existing command to run next — turning "N rows failed" into "1 root cause, here's where to look." `--object`/`--mapping-path` enable real cross-references (mapping-doc/`ObjectAutomationRisk`) instead of static text alone. |
 | 62 | Adversarial mock data generation | **Built** | `generate-adversarial-mock-data <Object> --count N --scenario scenario:field:rows` | A companion to `generate-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields, bad lookup references) so validation-rule collisions surface during Dev testing, not during a real client load. Writes to `<Object>_Mock_Adversarial`, tagged via a `REF_`-prefixed column so the same table can go straight into a real `bulkops` call. |
 | 63 | Reset-dev-cycle command | **Built** | `reset-dev-cycle --objects Account Contact [--purge-org-where Object:WHERE] [--dry-run]` | Codifies the manual reset ritual this project did by hand every dogfooding cycle: drops every `_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given objects and clears their profiling rows (mirror-DB-only, always safe); `--purge-org-where` optionally also purges matching org test data via the same `bulkops delete --where` mechanism (#32) — hard rule 2 applies in full. No skill wrapper, same as `bulkops` itself. |
-| 64 | Row-count reconciliation report | Not built — new feature, explicitly requested | — | Idea: walk the load order and cross-check source row count → Load table row count → `bulkops` succeeded count per object, flagging anywhere rows silently disappeared (a too-aggressive filter, a bad `JOIN`) — a data-completeness auditor, not a per-tool spot check. |
+| 64 | Row-count reconciliation report | **Built** | `reconcile-load-counts <Objects> [--mapping-path] [--load-table Object=Table]` | Cross-checks source row count → Load table row count → `bulkops`' most recent submitted/succeeded/failed counts per object, flagging anywhere they don't reconcile (missing Load table, dropped rows, never loaded, or a stale prior run) — a data-completeness auditor, not a per-tool spot check. |
 | 65 | Migration readiness score | Not built — new feature, explicitly requested | — | Idea: one aggregate go/no-go view across hard rules 6/7/12/15, `analyze-org-risk` coverage, mapping balance, and Email Deliverability attestation state per object — right now "are we ready" means checking five different tables/commands by hand. |
 | 66 | Auto-drafted client-facing pass summary | **Built** | `generate-pass-summary <path> --tab <name> --output <path.md> [--load-table Object=Table]` | Drafts a plain-English "here's what happened this pass" summary from the Migration Run Book's own Load-phase results, ready to send a client stakeholder. `--load-table` optionally enriches any object's failures with a plain-language root cause via `triage-failures` (#61) instead of just a raw failed count — never guessed from the Run Book's own Object cell. |
 
@@ -3385,20 +3385,34 @@ Purely a convenience wrapper around existing primitives (`DROP TABLE`,
 `bulkops delete`) — no new logic, just removing the "did I remember every
 step" risk of doing this by hand before every fresh iteration.
 
-## 64. Row-count reconciliation report (not built — new feature, explicitly requested)
+## 64. Row-count reconciliation report — BUILT (`reconciliation.py`)
 
 A data-completeness auditor spanning the whole load order, not a
-per-tool spot check. Walk `analyze-load-order`'s (#2) dependency
-sequence and, for each object, cross-check three numbers that should
-reconcile: the source table's row count, the `*_Load` table's row count
-(did the transform's `JOIN`s/`WHERE` clauses silently drop rows it
-shouldn't have?), and `bulkops`' most recent succeeded count from
-`BulkOpsLog` (#14) for that object. Flag any object where these three
-don't line up the way they're supposed to, instead of leaving that
-discovery to a human noticing "huh, that's fewer rows than I expected"
-during manual review. Entirely read-only, aggregating data every one of
-these tools already produces — the value is in cross-checking all three
-together in one pass, not new data collection.
+per-tool spot check. `reconcile_load_counts()` (`cli.py
+reconcile-load-counts <Objects> [--mapping-path] [--load-table
+Object=Table]`) cross-checks three numbers per object: the source
+table's row count, the Load table's row count (did the transform's
+`JOIN`s/`WHERE` clauses silently drop rows it shouldn't have?), and
+`bulkops`' most recent submitted/succeeded/failed counts from
+`BulkOpsLog` (#14). Four flags, not just one: the Load table doesn't
+exist yet; it has fewer rows than the source; it's never been loaded via
+`bulkops` at all; or its current row count no longer matches what the
+most recent `bulkops` run actually submitted — a real addition beyond
+the original idea sketch above, catching a *stale* reconciliation (the
+Load table was rebuilt/changed after the last `bulkops` run) rather than
+just a row-count shortfall.
+
+Source-table discovery reads a mapping doc's own "Source Object:" header
+cell for that object's sheet — the exact cell `generate-mapping-doc`
+(`generate_mapping_workbook()`) already writes — real, not guessed;
+`--mapping-path` is optional, and omitting it just skips the
+source-count half (Load/`bulkops` cross-checking still runs). Load table
+naming defaults to `<Object>_Load`, matching this project's own
+overwhelming convention (the same default `reset-dev-cycle`/
+`pass_summary.py` already use); `--load-table Object=TableName`
+overrides it per object, never guessed. Entirely read-only, aggregating
+data every one of these tools already produces — the value is in
+cross-checking all three together in one pass, not new data collection.
 
 ## 65. Migration readiness score (not built — new feature, explicitly requested)
 
