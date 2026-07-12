@@ -62,6 +62,7 @@ import validators_lookup as vl
 import failure_triage as ft
 import adversarial_mock_data as amd
 import pass_summary as ps
+import dev_cycle as devc
 
 
 def _ctx():
@@ -398,6 +399,46 @@ def triage_failures_cmd(table, schema, error_column, object_name, mapping_path):
             click.echo(f"  - {step}")
         for extra in r["detail"]:
             click.echo(f"    -> {extra}")
+
+
+@cli.command("reset-dev-cycle")
+@click.option("--objects", "object_names", multiple=True, required=True, help="Salesforce object name(s), repeatable.")
+@click.option("--schema", default="dbo")
+@click.option("--purge-org-where", "purge_wheres", multiple=True,
+              help="Object:WHERE_CLAUSE, repeatable -- also purges matching org test data via a real "
+                   "bulkops delete (Hard Rule 2 -- confirm the target org first). Omit entirely to "
+                   "only reset mirror-DB tables.")
+@click.option("--dry-run", is_flag=True, help="With --purge-org-where: report matched org record counts without deleting anything.")
+def reset_dev_cycle_cmd(object_names, schema, purge_wheres, dry_run):
+    """Reset a Dev-cycle iteration (roadmap #63): drop every _Mock/
+    _Mock_Adversarial/_Load/_Load_Result/_Load_Retry/_Purge/_Purge_Result
+    table for the given objects, and clear their profiling data so the
+    next profile-salesforce/profile-sql-table call doesn't silently skip
+    re-profiling a rebuilt table. Never touches sql/transformations/*.sql,
+    mapping docs, or org-metadata caches (ObjectAutomationRisk,
+    RecordTypeMap, SourceRegistry/AutoMapSuggestions)."""
+    s, sf, engine = _ctx()
+    object_names = list(object_names)
+
+    result = devc.reset_dev_cycle_tables(engine, object_names, schema=schema)
+    if result["dropped"]:
+        click.echo(f"Dropped {len(result['dropped'])} table(s):")
+        for t in result["dropped"]:
+            click.echo(f"  {t}")
+    else:
+        click.echo("No mock/load/purge tables found to drop for these objects.")
+    if result["profiling_cleared"]:
+        click.echo(f"Cleared profiling data for: {', '.join(result['profiling_cleared'])}")
+
+    for item in purge_wheres:
+        if ":" not in item:
+            raise click.BadParameter(f"--purge-org-where must be Object:WHERE_CLAUSE, got: {item!r}")
+        object_name, _, where = item.partition(":")
+        summary = devc.purge_org_test_data(sf, engine, object_name, where, schema=schema, dry_run=dry_run)
+        if dry_run:
+            click.echo(f"[dry run] {object_name}: {summary['matched']} record(s) match \"{where}\" -- nothing deleted.")
+        else:
+            click.echo(f"{object_name}: purged {summary.get('matched', 0)} record(s) matching \"{where}\".")
 
 
 @cli.command("enable-bulkops-logging")

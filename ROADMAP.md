@@ -98,7 +98,7 @@ summarizes.
 | 60 | Discovery question checklist generator | Not built — new feature, explicitly requested | — | Idea: given a candidate object list, generate the per-object questions an architect should ask the client — driven by real signals this framework already computes (`analyze-org-risk` finds active validation rules → ask about that business rule; object carries RecordTypes → ask about the mapping), not a generic template. |
 | 61 | Bulk-load failure triage assistant | **Built** | `triage-failures <table> [--object] [--mapping-path]` | Groups a load's failures by normalized error signature (`_normalize_error_signature()`) and maps common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which existing command to run next — turning "N rows failed" into "1 root cause, here's where to look." `--object`/`--mapping-path` enable real cross-references (mapping-doc/`ObjectAutomationRisk`) instead of static text alone. |
 | 62 | Adversarial mock data generation | **Built** | `generate-adversarial-mock-data <Object> --count N --scenario scenario:field:rows` | A companion to `generate-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields, bad lookup references) so validation-rule collisions surface during Dev testing, not during a real client load. Writes to `<Object>_Mock_Adversarial`, tagged via a `REF_`-prefixed column so the same table can go straight into a real `bulkops` call. |
-| 63 | Reset-dev-cycle command | Not built — new feature, explicitly requested | — | Idea: codify the manual reset ritual this project has done by hand every dogfooding cycle (drop mock/Load/staging tables, optionally purge org test data via `bulkops delete --where`) into one command, instead of remembering the steps each time. |
+| 63 | Reset-dev-cycle command | **Built** | `reset-dev-cycle --objects Account Contact [--purge-org-where Object:WHERE] [--dry-run]` | Codifies the manual reset ritual this project did by hand every dogfooding cycle: drops every `_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given objects and clears their profiling rows (mirror-DB-only, always safe); `--purge-org-where` optionally also purges matching org test data via the same `bulkops delete --where` mechanism (#32) — hard rule 2 applies in full. No skill wrapper, same as `bulkops` itself. |
 | 64 | Row-count reconciliation report | Not built — new feature, explicitly requested | — | Idea: walk the load order and cross-check source row count → Load table row count → `bulkops` succeeded count per object, flagging anywhere rows silently disappeared (a too-aggressive filter, a bad `JOIN`) — a data-completeness auditor, not a per-tool spot check. |
 | 65 | Migration readiness score | Not built — new feature, explicitly requested | — | Idea: one aggregate go/no-go view across hard rules 6/7/12/15, `analyze-org-risk` coverage, mapping balance, and Email Deliverability attestation state per object — right now "are we ready" means checking five different tables/commands by hand. |
 | 66 | Auto-drafted client-facing pass summary | **Built** | `generate-pass-summary <path> --tab <name> --output <path.md> [--load-table Object=Table]` | Drafts a plain-English "here's what happened this pass" summary from the Migration Run Book's own Load-phase results, ready to send a client stakeholder. `--load-table` optionally enriches any object's failures with a plain-language root cause via `triage-failures` (#61) instead of just a raw failed count — never guessed from the Run Book's own Object cell. |
@@ -3343,24 +3343,43 @@ on file yet to build that suggestion from without a second live Tooling
 API call or a schema change to that table. A natural follow-up once
 `ErrorDisplayField` is persisted there too.
 
-## 63. Reset-dev-cycle command (not built — new feature, explicitly requested)
+## 63. Reset-dev-cycle command — BUILT (`dev_cycle.py`)
 
 Codifies a ritual this project's own dogfooding did by hand, repeatedly,
-across this session (see `docs/ORCHESTRATOR_DESIGN.md`'s field notes: "a
-full reset — org records deleted, scripts/docs/SQLite wiped — before
-each of three consecutive full Dev-tier cycles"). One command instead of
-remembering the steps each time:
+across earlier sessions (see `docs/ORCHESTRATOR_DESIGN.md`'s field notes:
+"a full reset — org records deleted, scripts/docs/SQLite wiped — before
+each of three consecutive full Dev-tier cycles"). `reset_dev_cycle_tables()`
+(`cli.py reset-dev-cycle --objects Account Contact ...`) drops every
+`_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/
+`_Purge_Result` table for the given objects — idempotent, a table that's
+already gone is silently skipped — and clears their `dbo.FieldProfile`/
+`FieldProfileValues` rows too, a real addition beyond the original idea
+sketch above: without it, roadmap #47's own "skip re-profiling an
+already-profiled object" behavior would silently treat a dropped-and-
+rebuilt table as still current on the next Dev cycle, since the
+profiling row itself would still be sitting there claiming otherwise.
 
-- Drop `<Object>_Mock`, `<Object>_Load`, and any staging tables for a
-  given object list.
-- Optionally purge matching org test data via `bulkops <Object> delete
-  --where "..."` (#32, already built — this just sequences it), still
-  gated by the Live-Org Write Confirmation Rule (#2) like any other
-  delete.
-- Deliberately leaves `sql/transformations/*.sql` and mapping docs
-  untouched by default — those are the real, committed artifacts a full
-  reset is never supposed to erase without explicit, separate approval
-  (see `CLAUDE.md`'s own note on this under "Where things live").
+`purge_org_test_data()` is a thin, undisguised pass-through to
+`bulkops.py`'s own `purge_by_filter()` (#32) — not a separate delete
+mechanism, exactly the same one, wired up via `--purge-org-where
+Object:WHERE_CLAUSE` (repeatable). A real Salesforce delete, so the
+Live-Org Write Confirmation Rule (#2) applies in full; `--dry-run`
+reports the matched count without deleting anything, same as
+`purge_by_filter()` always has. Deliberately no skill wrapper in
+`.claude/commands/` — same reasoning as the main `bulkops` command
+itself never getting one, since this command can trigger a real delete
+depending on which flags are passed.
+
+Deliberately leaves `sql/transformations/*.sql`, mapping docs, and every
+org-metadata-derived cache (`dbo.ObjectAutomationRisk`, `dbo.RecordTypeMap`,
+`dbo.SourceRegistry`/`AutoMapSuggestions`) untouched — those are either
+real, committed artifacts a reset must never silently erase, or reflect
+the target org's own state (which a Dev-cycle reset doesn't change), not
+this project's own iteration-specific mock/test data. "Any staging
+tables" from the original idea sketch above was dropped from scope:
+`source_ingestion.py`'s staging tables are named after the source CSV
+file, not the Salesforce object, so there's no reliable naming
+convention to derive them from an object list without guessing.
 
 Purely a convenience wrapper around existing primitives (`DROP TABLE`,
 `bulkops delete`) — no new logic, just removing the "did I remember every

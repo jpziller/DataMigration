@@ -345,6 +345,26 @@ venv may not be active in a fresh shell:
                 file to check yet. Read-only, advisory only — never changes data, never re-runs
                 `bulkops` itself. `table` is the same load table or `<table>_Result` table
                 `bulkops-retry` already reads.)
+- Reset a Dev cycle: `.venv/Scripts/python.exe cli.py reset-dev-cycle --objects Account Contact
+                [--purge-org-where "Account:AccountNumber LIKE 'MOCKACCT-%'"] [--dry-run]`
+                (roadmap #63: codifies the manual reset ritual this project's own dogfooding did by
+                hand, repeatedly, across earlier sessions — drops every `_Mock`/`_Mock_Adversarial`/
+                `_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given
+                objects, and clears their `dbo.FieldProfile`/`FieldProfileValues` rows so the next
+                `profile-salesforce`/`profile-sql-table` call doesn't silently skip re-profiling a
+                rebuilt table (roadmap #47's own skip-if-already-profiled behavior would otherwise
+                misread a dropped-and-rebuilt table as still current). Always leaves
+                `sql/transformations/*.sql`, mapping docs, and every org-metadata-derived cache
+                (`dbo.ObjectAutomationRisk`, `dbo.RecordTypeMap`, `dbo.SourceRegistry`/
+                `AutoMapSuggestions`) untouched — those are either real, committed artifacts a reset
+                must never silently erase, or reflect the target org's own state, not this project's
+                iteration-specific mock/test data. `--purge-org-where Object:WHERE_CLAUSE` (repeatable)
+                optionally also purges matching org test data via the exact same `bulkops delete
+                --where` mechanism (#32) — a real Salesforce delete, so the Live-Org Write
+                Confirmation Rule (#2) applies in full; state the target org and get confirmation
+                before running this with `--purge-org-where`, same as any other delete. `--dry-run`
+                reports the matched org record count without deleting anything. Omit
+                `--purge-org-where` entirely for a purely mirror-DB reset with zero live-org risk.)
 - Bulk load activity logging (opt-in, per schema — off by default, never
                 automatic; the same opt-in-per-database convention established
                 commercial migration tools use):
@@ -872,6 +892,15 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   `failure_triage.py`'s plain-language root cause via an explicit
   `--load-table` mapping (never guessed from a Run Book row's Object
   cell, which may be a bare object name or a script filename).
+- `dev_cycle.py` — reset-dev-cycle command (roadmap #63): drops every
+  `_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/
+  `_Purge`/`_Purge_Result` table for a given object list and clears their
+  profiling rows (mirror-DB-only, always safe); optionally also purges
+  matching org test data via a thin, undisguised pass-through to
+  `bulkops.py`'s own `purge_by_filter()` (#32) — the exact same
+  Hard-Rule-2-gated delete, not a separate mechanism. No skill wrapper —
+  same reasoning as the main `bulkops` command itself, since this can
+  trigger a real Salesforce delete depending on the flags passed.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
   SQL-Server-only for now (see the "SQL backend" note above).
