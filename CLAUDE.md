@@ -195,6 +195,28 @@ venv may not be active in a fresh shell:
                 Latitude/Longitude subfields. `--count NAME=N-M` (e.g. `Contact=1-2`) randomizes
                 the per-parent count via Snowfakery's own `random_number()` instead of a flat N —
                 a statistical split, not a guaranteed exact percentage.)
+- Adversarial mock data (roadmap #62): `.venv/Scripts/python.exe cli.py generate-adversarial-mock-data
+                Account --count 50 --scenario duplicate_key:MigrationID__c:2 --scenario missing_required:Name:2`
+                (a companion to `generate-mock-data`'s happy-path generation: takes the same
+                describe()-derived Mockaroo schema (`mock_data.py`) and deliberately corrupts a chosen,
+                disjoint subset of rows to provoke known Salesforce Bulk API failure classes on
+                purpose, so a validation-rule collision or pre-flight-check gap surfaces during Dev
+                testing — not for the first time against real client data, or worse, during a UAT
+                pass. `--scenario scenario:field:rows`, repeatable, one of `duplicate_key`
+                (DUPLICATE_VALUE — two-plus rows share one value), `oversized_string` (STRING_TOO_LONG
+                — a value deliberately exceeds the target's real describe() length), `missing_required`
+                (REQUIRED_FIELD_MISSING — a genuinely required field left blank; raises if the named
+                field isn't actually required), `invalid_picklist` (a picklist/combobox field gets a
+                value that isn't one of its real picklistValues), or `bad_reference`
+                (INVALID_CROSS_REFERENCE_KEY — a reference field, never included in a normal
+                happy-path mock run since there's no target Id to point at yet, gets a well-formed-
+                looking but real-org-guaranteed-nonexistent Id). Every field/scenario pairing is
+                validated against live `describe()` before anything is corrupted. Writes to
+                `<Object>_Mock_Adversarial` — never `<Object>_Mock`, so this never mixes into or
+                overwrites the normal happy-path mock table — tagging every corrupted row's scenario
+                in a `REF_AdversarialScenario` column; `REF_`-prefixed (hard rule 13) so `bulkops`
+                never sends it to Salesforce, meaning the same table can go straight into a real
+                `bulkops` call as-is. Never touches Salesforce itself.)
 - Mapping doc:  `.venv/Scripts/python.exe cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts`
                 `.venv/Scripts/python.exe cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts`
                 (one workbook, one tab per object — reuse the SAME output path for every object in
@@ -460,6 +482,20 @@ venv may not be active in a fresh shell:
                 already render the fenced ` ```mermaid ` block natively; Lucid supports paste-to-import.
                 A polished, hand-styled diagram elsewhere remains a named future stretch, not part of
                 this v1.)
+                `.venv/Scripts/python.exe cli.py generate-pass-summary migration_run_book.xlsx --tab Dev1 --output pass_summary.md`
+                (roadmap #66: a plain-English, client-facing "here's what happened this pass" draft
+                pulled straight from that tab's own Load-phase results — object count, total/succeeded/
+                failed records per object — ready to send a client stakeholder instead of a raw
+                spreadsheet dump or a manually-written status email. Plain Markdown for v1, same "ship
+                the simple version, decide on polish later" discipline as `generate-run-book-flowchart`'s
+                own v1 framing; `solution_doc.py`'s `docxtpl` machinery is there to reuse later for a
+                client-ready Word format if that's ever wanted instead. `--load-table Object=TableName`
+                (repeatable) enables a plain-language root cause per failure signature via
+                `triage-failures` (#61) for that object instead of just a raw failed count — deliberately
+                never guessed: an object left out of `--load-table` just points at the Run Book's own
+                Notes/Error Details columns, since a Run Book row's Object cell may be a bare object
+                name or a script filename (`020_contact_load.sql`), neither of which reliably gives the
+                real SQL Load table name on its own.)
 - Validate migration key: `.venv/Scripts/python.exe cli.py validate-external-id Account Legacy_Id__c`
                 (confirms the named field is genuinely externalId+unique in the live org's
                 describe() before it's trusted as a migration key — rule 12. Read-only, no
@@ -494,13 +530,17 @@ retry), hard rules 6/7's tooling, and `import-csv-directory`'s CSV
 staging — works on both backends. `risk_analyzer.py`, `migration_run_book.py`,
 `mapping_doc.py`, and `snowfakery_data.py` have also been ported to
 `sql_dialect.py` (orchestrator Phase 1 needed the first of those; the
-others followed the same pattern). The SQL-Server-only cleansing/matching
-function library (`sql/functions/cleansing|matching|lookups`) and the
-remaining data-architect tools (`profiling.py`, `auto_mapper.py`,
-`mock_data.py`, `solution_doc.py`, `load_order.py`, `parquet_import.py`,
-`record_types.py`, `reference_record.py`) are **SQL-Server-only for now**
-— a deliberate scope boundary, not an oversight; port one incrementally
-via the same `sql_dialect.py` helpers whenever a real SQLite project
+others followed the same pattern). `mock_data.py`'s own table-DDL step
+(`create_mock_table()`) was ported too, once roadmap #62's
+`adversarial_mock_data.py` needed it to be real-SQLite-testable — the rest
+of `mock_data.py` (the Mockaroo schema-derivation logic) never touched SQL
+directly to begin with. The SQL-Server-only cleansing/matching function
+library (`sql/functions/cleansing|matching|lookups`) and the remaining
+data-architect tools (`profiling.py`, `auto_mapper.py`, `solution_doc.py`,
+`load_order.py`, `parquet_import.py`, `record_types.py`,
+`reference_record.py`) are **SQL-Server-only for now** — a deliberate
+scope boundary, not an oversight; port one incrementally via the same
+`sql_dialect.py` helpers whenever a real SQLite project
 actually needs it.
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
@@ -517,7 +557,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
-`/triage-failures`
+`/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -819,6 +859,19 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   well-known Salesforce Bulk API error codes to a likely root cause and
   which existing command to run next. Advisory only — never changes
   data, never re-runs `bulkops`.
+- `adversarial_mock_data.py` — adversarial mock data generation (roadmap
+  #62): reuses `mock_data.py`'s describe()-derived Mockaroo schema
+  directly, then deliberately corrupts a chosen, disjoint subset of rows
+  per requested scenario to provoke known Bulk API failure classes on
+  purpose. Writes to `<Object>_Mock_Adversarial`, tagging each corrupted
+  row's scenario in a `REF_`-prefixed column (hard rule 13) so `bulkops`
+  never sends it to Salesforce.
+- `pass_summary.py` — auto-drafted client-facing pass summary (roadmap
+  #66): drafts a plain-English Markdown summary from a Migration Run
+  Book tab's own Load-phase results, optionally enriched per-object with
+  `failure_triage.py`'s plain-language root cause via an explicit
+  `--load-table` mapping (never guessed from a Run Book row's Object
+  cell, which may be a bare object name or a script filename).
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
   SQL-Server-only for now (see the "SQL backend" note above).

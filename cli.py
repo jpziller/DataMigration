@@ -60,6 +60,8 @@ import orchestrator as orch
 import script_numbering as sn
 import validators_lookup as vl
 import failure_triage as ft
+import adversarial_mock_data as amd
+import pass_summary as ps
 
 
 def _ctx():
@@ -815,6 +817,43 @@ def generate_mock_data_cmd(object_name, count, schema):
             click.echo(f"  {name} ({typ})")
 
 
+@cli.command("generate-adversarial-mock-data")
+@click.argument("object_name")
+@click.option("--count", default=50, help="Total mock rows to generate -- must be >= the sum of every --scenario's row count.")
+@click.option("--scenario", "scenarios", multiple=True, required=True,
+              help="scenario:field:rows, repeatable -- scenario is one of duplicate_key/oversized_string/"
+                   "missing_required/invalid_picklist/bad_reference. Rows are assigned to scenarios in "
+                   "disjoint ranges in the order given, so a row has at most one deliberate corruption.")
+@click.option("--schema", default="dbo")
+def generate_adversarial_mock_data_cmd(object_name, count, scenarios, schema):
+    """Deliberately provoke known Salesforce Bulk API failure classes in
+    mock data (roadmap #62), so a validation-rule collision or pre-flight-
+    check gap surfaces during Dev testing, not during a real client load.
+    Writes to <Object>_Mock_Adversarial (never <Object>_Mock), tagging
+    every corrupted row's scenario in REF_AdversarialScenario -- REF_-
+    prefixed (hard rule 13) so bulkops.py never sends it to Salesforce;
+    the table can go straight into a real bulkops call as-is."""
+    s, sf, engine = _ctx()
+    scenario_map = {}
+    for item in scenarios:
+        parts = item.split(":")
+        if len(parts) != 3 or not parts[2].isdigit():
+            raise click.BadParameter(f"--scenario must be scenario:field:rows, got: {item!r}")
+        name, field, rows = parts
+        scenario_map[name] = {"field": field, "rows": int(rows)}
+
+    rows_written, applied, skipped = amd.generate_adversarial_mock_data(
+        sf, engine, object_name, count, s.mockaroo_api_key, scenario_map, schema=schema,
+    )
+    click.echo(f"Wrote {rows_written} mock row(s) to {schema}.{object_name}_Mock_Adversarial")
+    for a in applied:
+        click.echo(f"  {a['scenario']}: {a['rows']} row(s) corrupted on {a['field']} (see REF_AdversarialScenario)")
+    if skipped:
+        click.echo(f"Skipped {len(skipped)} field(s) with no mock mapping (reference/multipicklist/etc.):")
+        for name, typ in skipped:
+            click.echo(f"  {name} ({typ})")
+
+
 @cli.command("generate-related-mock-data")
 @click.argument("object_names", nargs=-1, required=True)
 @click.option("--count", "counts", multiple=True, required=True,
@@ -1146,6 +1185,38 @@ def generate_run_book_flowchart_cmd(path, tab_name, output_path):
     click.echo(f"Wrote {output_path} ({summary['phases']} phase(s), {summary['nodes']} step(s), {summary['edges']} dependency edge(s))")
     if summary["unresolved_dependencies"]:
         click.echo(f"Unresolved dependency mention(s), dropped rather than guessed: {summary['unresolved_dependencies']}")
+
+
+@cli.command("generate-pass-summary")
+@click.argument("path")
+@click.option("--tab", "tab_name", required=True, help="Migration Run Book tab to summarize.")
+@click.option("--output", "output_path", required=True, help="Output .md file path.")
+@click.option("--schema", default="dbo")
+@click.option("--load-table", "load_tables", multiple=True,
+              help="Object=TableName, repeatable -- enables a plain-language root cause (via triage-failures) "
+                   "for that object's failures instead of just a raw failed count. Never guessed: an object "
+                   "left out just points at the Run Book's own Notes/Error Details columns.")
+def generate_pass_summary_cmd(path, tab_name, output_path, schema, load_tables):
+    """Draft a plain-English, client-facing pass summary (roadmap #66)
+    from a Migration Run Book tab's own Load-phase results -- object
+    count, total/succeeded/failed records, and (with --load-table) a
+    plain-language root cause per failure signature via triage-failures
+    (#61). Plain Markdown for v1."""
+    _, _, engine = _ctx()
+    load_table_map = {}
+    for item in load_tables:
+        if "=" not in item:
+            raise click.BadParameter(f"--load-table must be Object=TableName, got: {item!r}")
+        obj, _, table = item.partition("=")
+        load_table_map[obj] = table
+
+    summary_text = ps.generate_pass_summary(path, tab_name, engine=engine, schema=schema, load_tables=load_table_map)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write(summary_text)
+    click.echo(f"Wrote {output_path}")
 
 
 @cli.command("analyze-org-risk")

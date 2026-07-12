@@ -97,11 +97,11 @@ summarizes.
 | 59 | Migration brief intake / project bootstrap | Not built — new feature, explicitly requested | — | Idea: a minimal structured file (objects in scope, target org, ticket, per-object notes) that a discovery-AI session hands off, and one command that validates every named object against live `describe()`, runs `analyze-load-order`, and scaffolds the Migration Run Book — turning "discovery just finished" into a concrete first command sequence instead of a cold start. |
 | 60 | Discovery question checklist generator | Not built — new feature, explicitly requested | — | Idea: given a candidate object list, generate the per-object questions an architect should ask the client — driven by real signals this framework already computes (`analyze-org-risk` finds active validation rules → ask about that business rule; object carries RecordTypes → ask about the mapping), not a generic template. |
 | 61 | Bulk-load failure triage assistant | **Built** | `triage-failures <table> [--object] [--mapping-path]` | Groups a load's failures by normalized error signature (`_normalize_error_signature()`) and maps common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which existing command to run next — turning "N rows failed" into "1 root cause, here's where to look." `--object`/`--mapping-path` enable real cross-references (mapping-doc/`ObjectAutomationRisk`) instead of static text alone. |
-| 62 | Adversarial mock data generation | Not built — new feature, explicitly requested | — | Idea: a companion to `generate-mock-data`/`generate-related-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields) so validation-rule collisions surface during Dev testing, not during a real client load. |
+| 62 | Adversarial mock data generation | **Built** | `generate-adversarial-mock-data <Object> --count N --scenario scenario:field:rows` | A companion to `generate-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields, bad lookup references) so validation-rule collisions surface during Dev testing, not during a real client load. Writes to `<Object>_Mock_Adversarial`, tagged via a `REF_`-prefixed column so the same table can go straight into a real `bulkops` call. |
 | 63 | Reset-dev-cycle command | Not built — new feature, explicitly requested | — | Idea: codify the manual reset ritual this project has done by hand every dogfooding cycle (drop mock/Load/staging tables, optionally purge org test data via `bulkops delete --where`) into one command, instead of remembering the steps each time. |
 | 64 | Row-count reconciliation report | Not built — new feature, explicitly requested | — | Idea: walk the load order and cross-check source row count → Load table row count → `bulkops` succeeded count per object, flagging anywhere rows silently disappeared (a too-aggressive filter, a bad `JOIN`) — a data-completeness auditor, not a per-tool spot check. |
 | 65 | Migration readiness score | Not built — new feature, explicitly requested | — | Idea: one aggregate go/no-go view across hard rules 6/7/12/15, `analyze-org-risk` coverage, mapping balance, and Email Deliverability attestation state per object — right now "are we ready" means checking five different tables/commands by hand. |
-| 66 | Auto-drafted client-facing pass summary | Not built — new feature, explicitly requested | — | Idea: draft a plain-English "here's what happened this pass" summary from `BulkOpsLog`/the Migration Run Book, ready to send a client stakeholder — nearly free given how much structured data this framework already logs. |
+| 66 | Auto-drafted client-facing pass summary | **Built** | `generate-pass-summary <path> --tab <name> --output <path.md> [--load-table Object=Table]` | Drafts a plain-English "here's what happened this pass" summary from the Migration Run Book's own Load-phase results, ready to send a client stakeholder. `--load-table` optionally enriches any object's failures with a plain-language root cause via `triage-failures` (#61) instead of just a raw failed count — never guessed from the Run Book's own Object cell. |
 
 Also load-bearing but not numbered above: `replicate` (org → SQL) and the
 `sql/transformations/*.sql` transform pattern are the core migration
@@ -3285,32 +3285,63 @@ live Salesforce failure — there was no real failure sitting in the
 mirror DB to point it at when this was built, and manufacturing one
 against the live org wasn't judged worth a real write just for a demo.
 
-## 62. Adversarial mock data generation (not built — new feature, explicitly requested)
+## 62. Adversarial mock data generation — BUILT (`adversarial_mock_data.py`)
 
-`generate-mock-data`/`generate-related-mock-data` (#6) currently generate
-happy-path data only — every row is well-formed by construction. This
-item is the deliberate opposite: a companion mode that provokes known
-failure classes on purpose, so a validation-rule collision or
-pre-flight-check gap surfaces during Dev testing, not for the first time
-against real client data or, worse, during a UAT pass:
+`generate-mock-data`/`generate-related-mock-data` (#6) generate
+happy-path data only — every row is well-formed by construction.
+`generate_adversarial_mock_data()` (`cli.py generate-adversarial-mock-data
+<Object> --count N --scenario scenario:field:rows`, repeatable) is the
+deliberate opposite: reuses `mock_data.py`'s own describe()-derived
+Mockaroo schema directly, then corrupts a chosen, disjoint slice of rows
+per scenario, so a validation-rule collision or pre-flight-check gap
+surfaces during Dev testing, not for the first time against real client
+data or, worse, during a UAT pass. Five scenarios shipped, each mapped to
+one of `triage-failures`' (#61) own known error codes:
 
-- A duplicate value on the migration key or another unique field (does
-  the fingerprint-based result mapping, Hard Rule 4, degrade the way
-  it's supposed to — an `ambiguous` count, not silent data loss?).
-- A string field intentionally longer than `describe()`'s max length for
-  it (`STRING_TOO_LONG`, cheaply cross-checked with `triage-failures`,
-  #61, now that it's built).
-- A required field deliberately left blank.
-- An invalid/nonexistent picklist value.
-- A lookup field pointing at an Id that doesn't exist.
+- `duplicate_key` — two or more rows share one migration-key value
+  (`DUPLICATE_VALUE`).
+- `oversized_string` — a value deliberately exceeds the target field's
+  real `describe()` length (`STRING_TOO_LONG`).
+- `missing_required` — a genuinely required field is left blank
+  (`REQUIRED_FIELD_MISSING`) — raises if the named field isn't actually
+  required (nillable or defaulted), so a miswired scenario can't silently
+  test nothing.
+- `invalid_picklist` — a picklist/combobox field gets a value that isn't
+  one of its real `picklistValues`.
+- `bad_reference` — a reference field (never part of a normal happy-path
+  mock run — `mock_data.py` skips references entirely, since there's no
+  target Id to point at yet) gets a well-formed-looking, 18-char,
+  real-org-guaranteed-nonexistent Id (`INVALID_CROSS_REFERENCE_KEY`).
 
-Where `analyze-org-risk` (#5) already knows a specific active validation
-rule's `ErrorDisplayField`, a row can be crafted to deliberately trip
-that exact rule — confirming `bulkops` surfaces the failure correctly
-rather than corrupting the batch, before the architect ever sees it
-happen for real. Same underlying Mockaroo/Snowfakery machinery as #6,
-just a `--adversarial` mode instead of (or alongside) the happy-path
-default.
+Writes to `<Object>_Mock_Adversarial` — never `<Object>_Mock`, so this
+never mixes into or overwrites the normal happy-path mock table — tagging
+every corrupted row's scenario in a `REF_AdversarialScenario` column
+(`REF_`-prefixed, hard rule 13, so `bulkops` never sends it to
+Salesforce). The same table can go straight into a real, separately-
+confirmed `bulkops` call to watch the pipeline handle each provoked
+failure for real. Every field/scenario pairing is validated against live
+`describe()` before anything is corrupted (wrong field type for the
+scenario raises immediately, rather than silently corrupting something
+that doesn't test what was asked for).
+
+Building this required porting `mock_data.py`'s own `create_mock_table()`
+off raw SQL-Server-only T-SQL onto `sql_dialect.py` (same pattern as
+`risk_analyzer.py`/`migration_run_book.py`/`mapping_doc.py`'s own ports)
+— `adversarial_mock_data.py` needed it to be real-SQLite-testable, and
+this project's own testing convention is a real engine, not a mock. Zero
+behavior change against SQL Server: `MssqlDialect.sf_type_to_sql()` calls
+the exact same `type_map` function `create_mock_table()` used directly
+before. `mock_data.py` had no test coverage at all before this — both it
+and the new module are now covered against a real SQLite engine.
+
+Deliberately NOT attempted here, same disclosed gap as `triage-failures`'
+own `DUPLICATE_VALUE` limit: deriving a scenario automatically from an
+active validation rule's `ErrorDisplayField`. `risk_analyzer.py`'s
+`dbo.ObjectAutomationRisk` only persists a `ValidationRule`'s ItemName/
+IsActive/Detail (ErrorMessage) today, not `ErrorDisplayField` — nothing
+on file yet to build that suggestion from without a second live Tooling
+API call or a schema change to that table. A natural follow-up once
+`ErrorDisplayField` is persisted there too.
 
 ## 63. Reset-dev-cycle command (not built — new feature, explicitly requested)
 
@@ -3368,21 +3399,35 @@ per-object checklist plus one overall verdict — read-only, no new
 checks invented, purely a re-presentation of gates this framework
 already enforces individually.
 
-## 66. Auto-drafted client-facing pass summary (not built — new feature, explicitly requested)
+## 66. Auto-drafted client-facing pass summary — BUILT (`pass_summary.py`)
 
-A plain-English "here's what happened this pass" draft, pulled from
-`BulkOpsLog` (#14) and the Migration Run Book (#16) for a given tab —
-ready to send a client stakeholder instead of a raw spreadsheet dump or
-a manually-written status email. Nearly free given how much structured
-data this framework already logs by the time a pass finishes: object
-count, total/succeeded/failed records per object, and — now that
-`triage-failures` (#61) is built — a plain-language description of what
-went wrong for any object that didn't come back 100% clean, instead of a
-raw error code. Could reuse
-`solution_doc.py`'s existing Word-document-generation machinery
-(`docxtpl`) for a client-ready format, or start as plain Markdown first —
-same "ship the simple version, decide on polish later" discipline as
-#52's own v1 framing.
+A plain-English "here's what happened this pass" draft, pulled from the
+Migration Run Book's (#16) own Load-phase rows for a given tab — ready to
+send a client stakeholder instead of a raw spreadsheet dump or a
+manually-written status email. `generate_pass_summary()` (`cli.py
+generate-pass-summary <path> --tab <name> --output <path.md>`) reads
+`migration_run_book.py`'s own `_iter_load_phase_rows()` (no changes
+needed to that module) for object count and total/succeeded/failed
+records per object, then composes a Markdown narrative: an overview line,
+a per-object results table, and a "Known issues" section for anything
+that didn't come back 100% clean.
+
+`--load-table Object=TableName` (repeatable) optionally enriches that
+section with a real, plain-language root cause per failure signature via
+`triage-failures` (#61) instead of just a raw failed count — deliberately
+never auto-derived from the Run Book's own Object cell, which may hold a
+bare object name or a real script filename (`020_contact_load.sql`, once
+`set-mapping-script`/the Load-phase sync has run) — neither reliably
+gives the actual SQL Load table name (`Contact_Load`) on its own, so
+guessing it would risk quietly triaging the wrong table, or none at all.
+An object left out of `--load-table` just gets a pointer at the Run
+Book's own Notes/Error Details columns instead — always correct, if less
+specific.
+
+Plain Markdown for v1, not `solution_doc.py`'s `docxtpl`-based Word
+generation — same "ship the simple version, decide on polish later"
+discipline as #52's own v1 framing; that machinery is there to reuse
+later if a client-ready Word format is ever wanted instead.
 
 ---
 

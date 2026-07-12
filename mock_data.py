@@ -14,7 +14,8 @@ import pandas as pd
 import requests
 from sqlalchemy import text
 
-from type_map import sf_type_to_sql, is_compound
+import sql_dialect
+from type_map import is_compound
 
 MOCKAROO_URL = "https://api.mockaroo.com/api/generate.json"
 
@@ -194,17 +195,24 @@ def truncate_to_field_lengths(df, fields):
 
 def create_mock_table(engine, schema, table_name, fields):
     """CREATE (drop-and-recreate) [schema].[table_name] with one NULL-able
-    column per field, typed via type_map.sf_type_to_sql -- shared table-DDL
-    step both mock-data backends use for their own <Object>_Mock output."""
+    column per field, typed via this engine's own dialect
+    (sql_dialect.py) -- shared table-DDL step both mock-data backends use
+    for their own <Object>_Mock output. Ported from raw T-SQL to
+    sql_dialect.py so this (and adversarial_mock_data.py, roadmap #62,
+    which reuses this directly) is real-SQLite-testable, same pattern as
+    risk_analyzer.py/migration_run_book.py/mapping_doc.py's own ports
+    this session -- zero behavior change against SQL Server, since
+    MssqlDialect.sf_type_to_sql() calls this exact type_map function."""
+    d = sql_dialect.for_engine(engine)
+    qualified = d.qualify(schema, table_name)
+    already_exists = d.table_exists(engine, schema, table_name)
     cols_sql = ",\n    ".join(
-        f'[{f["name"]}] {sf_type_to_sql(f)} NULL' for f in fields
+        f"{d.quote_ident(f['name'])} {d.sf_type_to_sql(f)} NULL" for f in fields
     )
     with engine.begin() as cx:
-        cx.execute(text(
-            f"IF OBJECT_ID('{schema}.{table_name}', 'U') IS NOT NULL "
-            f"DROP TABLE [{schema}].[{table_name}];"
-        ))
-        cx.execute(text(f"CREATE TABLE [{schema}].[{table_name}] (\n    {cols_sql}\n);"))
+        if already_exists:
+            cx.execute(text(f"DROP TABLE {qualified};"))
+        cx.execute(text(f"CREATE TABLE {qualified} (\n    {cols_sql}\n);"))
 
 
 def generate_mock_object_data(sf, engine, object_name, count, api_key, schema="dbo"):
