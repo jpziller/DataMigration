@@ -3979,6 +3979,19 @@ discipline CLAUDE.md already states for SQLite. Not a reason to avoid
 this — just a reason not to promise more than `sql_dialect.py`'s own
 seam actually delivers on day one.
 
+**Docker placeholder already exists** (roadmap #68): `docs/DOCKER.md`'s
+own "What this doesn't (yet) do" section already flags this exact gap —
+"PostgreSQL as a second database option (roadmap #69) isn't built yet —
+once it lands, this compose file is the natural place to add a
+`postgres` service alongside (or instead of) `sqlserver`." No actual
+`postgres` service, image, or env var exists in `docker-compose.yml`
+today — this is a documented intention, not a stub already sitting in
+the compose file. When `PostgresDialect` lands, the compose-side work is
+a new service block (official `postgres` image, its own healthcheck,
+its own `POSTGRES_PASSWORD`-style env var alongside `MSSQL_SA_PASSWORD`)
+plus a `docker/init-db.sh` branch for whichever backend `SQL_BACKEND`
+selects — not a redesign of the two-service shape already in place.
+
 ## 70. FAQ: Fivetran / Apache Hop — why they're not part of this framework (researched — not pursued, out of scope)
 
 Two more technologies raised directly, alongside Docker/PostgreSQL above
