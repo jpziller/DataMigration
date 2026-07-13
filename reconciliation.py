@@ -62,7 +62,11 @@ def _latest_bulkops_row(engine, d, object_name, schema="dbo"):
     )
     with engine.connect() as cx:
         row = cx.execute(text(query), {"obj": object_name}).mappings().first()
-    return dict(row) if row else None
+    # Normalized to lowercase keys rather than accessed by exact case --
+    # see orchestrator.py's own _row_to_current() for the identical fix
+    # and why it's needed (Postgres returns an unquoted column lowercased
+    # in its own query results, unlike SQL Server/SQLite).
+    return sql_dialect.lower_keys(row) if row else None
 
 
 def reconcile_load_counts(engine, object_names, schema="dbo", mapping_path=None, load_tables=None):
@@ -95,10 +99,10 @@ def reconcile_load_counts(engine, object_names, schema="dbo", mapping_path=None,
             )
         if bulkops_row is None and load_count is not None:
             flags.append("Never loaded via bulkops yet (no BulkOpsLog row for this object).")
-        if bulkops_row is not None and load_count is not None and bulkops_row["RecordsSubmitted"] != load_count:
+        if bulkops_row is not None and load_count is not None and bulkops_row["recordssubmitted"] != load_count:
             flags.append(
                 f"Load table now has {load_count} row(s), but the most recent bulkops run submitted "
-                f"{bulkops_row['RecordsSubmitted']} -- this may reflect a stale prior run; rerun bulkops "
+                f"{bulkops_row['recordssubmitted']} -- this may reflect a stale prior run; rerun bulkops "
                 "to pick up the current Load table."
             )
 
@@ -106,9 +110,9 @@ def reconcile_load_counts(engine, object_names, schema="dbo", mapping_path=None,
             "object": object_name,
             "source_table": source_table, "source_count": source_count,
             "load_table": load_table, "load_count": load_count,
-            "bulkops_submitted": bulkops_row["RecordsSubmitted"] if bulkops_row else None,
-            "bulkops_succeeded": bulkops_row["RecordsSucceeded"] if bulkops_row else None,
-            "bulkops_failed": bulkops_row["RecordsFailed"] if bulkops_row else None,
+            "bulkops_submitted": bulkops_row["recordssubmitted"] if bulkops_row else None,
+            "bulkops_succeeded": bulkops_row["recordssucceeded"] if bulkops_row else None,
+            "bulkops_failed": bulkops_row["recordsfailed"] if bulkops_row else None,
             "flags": flags,
         })
 

@@ -149,14 +149,26 @@ def _validation_rule_candidates(engine, object_name, schema="dbo"):
     if not d.table_exists(engine, schema, "ObjectAutomationRisk"):
         return []
     with engine.connect() as cx:
+        # IsActive is bound as a real Python True, not a literal `1` in
+        # the SQL text -- found via live Postgres testing: IsActive is a
+        # genuine BOOLEAN column there (risk_analyzer.py's own DDL), and
+        # Postgres raises "operator does not exist: boolean = integer"
+        # for `IsActive = 1`, unlike SQL Server's BIT/SQLite's INTEGER
+        # columns which both tolerate the literal fine (see
+        # batch_advisor.py's own identical fix).
         rows = cx.execute(
             text(
                 f"SELECT ItemName, Detail FROM {d.qualify(schema, 'ObjectAutomationRisk')} "
-                "WHERE ObjectName = :obj AND CheckType = 'ValidationRule' AND IsActive = 1"
+                "WHERE ObjectName = :obj AND CheckType = 'ValidationRule' AND IsActive = :is_active"
             ),
-            {"obj": object_name},
+            {"obj": object_name, "is_active": True},
         ).mappings().all()
-    return [{"name": r["ItemName"], "message": r["Detail"]} for r in rows]
+    # Normalized to lowercase keys rather than accessed by exact case --
+    # see orchestrator.py's own _row_to_current() for the identical fix
+    # and why it's needed (Postgres returns an unquoted column lowercased
+    # in its own query results, unlike SQL Server/SQLite).
+    rows = [sql_dialect.lower_keys(r) for r in rows]
+    return [{"name": r["itemname"], "message": r["detail"]} for r in rows]
 
 
 def triage_failures(engine, table, schema="dbo", error_column="Error",

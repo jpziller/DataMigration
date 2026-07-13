@@ -309,12 +309,25 @@ class PostgresDialect(SqlDialect):
             ).fetchone() is not None
 
     def column_exists(self, engine, schema, table, column):
+        # column_name compared via LOWER() on both sides, not an exact
+        # match -- found via live Postgres testing: this codebase creates
+        # most columns bare/unquoted (see bulkops.py's own CREATE TABLE
+        # comment for why), which Postgres folds to lowercase in the
+        # catalog, while every caller here still passes the
+        # originally-declared Pascal-case name (e.g. "BatchSize"). An
+        # exact-case comparison against `information_schema.columns` --
+        # unlike table_exists() above, where table names are always
+        # created via self.qualify() and therefore quoted/case-preserved
+        # -- silently always returned False, so
+        # enable_bulkops_logging()'s own upgrade-column-exists check
+        # thought a column was still missing on every single run, even
+        # right after creating it.
         with engine.connect() as cx:
             return cx.execute(
                 text(
                     "SELECT 1 FROM information_schema.columns "
                     "WHERE table_schema = :schema AND table_name = :table "
-                    "AND column_name = :column"
+                    "AND LOWER(column_name) = LOWER(:column)"
                 ),
                 {"schema": schema, "table": table, "column": column},
             ).fetchone() is not None

@@ -4056,24 +4056,100 @@ own inline version. Verified live against a real Postgres 16 container:
 `update-migration-run-book`'s `BulkOpsLog` sync, and its
 `SourceIngestionLog` sync all produced correct results end-to-end.
 
+**Follow-up pass, same day: `readiness.py` fixed too.**
+`assess_migration_readiness()`'s `_email_deliverability_gate()` had the
+identical bare-vs-exact-case read (`row["Operation"]`/
+`row["EmailDeliverability"]` from its own `BulkOpsLog` query) — fixed via
+the same `sql_dialect.lower_keys()` helper. Verified live against a real
+Postgres 16 container by calling the gate function directly (a full
+`assess_migration_readiness()` run also needs a live Salesforce
+connection for two of its other gates, out of scope for this
+Postgres-specific check): correctly resolved `ok: True` with the
+attested `'system-email-only'` value from a real logged row.
+`readiness.py`'s other gates (`_sort_column_gate`/`_org_risk_gate`) only
+ever use `.scalar()`, never row-mapping key access, so they had no
+version of this bug to begin with.
+
+**Follow-up pass, same day: `reconciliation.py` fixed too.**
+`_latest_bulkops_row()` returned `dict(row)` with whatever case the
+driver gave back (exact case on mssql/sqlite, lowercase on Postgres),
+and `reconcile_load_counts()` then read `bulkops_row["RecordsSubmitted"]`/
+`["RecordsSucceeded"]`/`["RecordsFailed"]` by exact case in three places
+— including the actual stale-prior-run comparison
+(`bulkops_row["RecordsSubmitted"] != load_count`), not just a display
+value. Fixed by returning `sql_dialect.lower_keys(row)` instead of a
+plain `dict(row)`. Verified live against a real Postgres 16 container
+with two cases, not just the happy path: a clean reconciliation (Load
+table row count matches the most recent `BulkOpsLog` submission, zero
+flags) and a genuinely mismatched one (Load table grew after the last
+bulkops run — correctly raised the "may reflect a stale prior run" flag,
+proving the comparison itself works on Postgres, not just that reading
+the row doesn't crash). This also means `assess-migration-readiness`'s
+own `row_count_reconciliation` gate (which calls
+`reconcile_load_counts()` directly) is now fully covered too.
+
+**Follow-up pass, same day: `batch_advisor.py` and `failure_triage.py`
+fixed too — plus two more genuinely new bug classes found, not just the
+read-side pattern.** `batch_advisor.py` turned out NOT to have the
+case-folding read bug at all: its history/heuristic queries use plain
+`.fetchall()` with positional tuple unpacking
+(`last_batch_size, last_lock_errors = rows[0]`) and a `dict()` keyed by
+**data values** (`CheckType` strings like `"ApexTrigger"`, never column
+names) — both immune to case-folding by construction, confirmed by
+reading the code before assuming it needed the same fix as everywhere
+else. What live testing found instead, in both files:
+
+- **A genuinely new bug class**: `_automation_adjustment()`
+  (`batch_advisor.py`) and `_validation_rule_candidates()`
+  (`failure_triage.py`) both hardcode `IsActive = 1` as a literal in the
+  SQL text. `IsActive` is a real `BOOLEAN` column on Postgres
+  (`risk_analyzer.py`'s own DDL, from the very first follow-up pass
+  above) — Postgres raises `operator does not exist: boolean = integer`
+  outright, where SQL Server's `BIT`/SQLite's `INTEGER` both tolerate the
+  literal fine. Fixed by binding `True` as a real query parameter
+  (`:is_active`) instead of a literal in the SQL text, letting each
+  backend's own driver coerce it correctly for its actual column type.
+- **A bug in `PostgresDialect.column_exists()` itself, not a caller**:
+  found while re-testing `batch_advisor.py`'s history adjustment, which
+  reported "`BulkOpsLog` exists but predates batch-size tracking" on a
+  table that had just been created *with* that column. `column_exists()`
+  compared `column_name = :column` (exact case) against
+  `information_schema.columns` — correct for `table_exists()` (table
+  names are always created via `self.qualify()`, therefore quoted and
+  case-preserved) but wrong for columns, which this codebase creates
+  bare/lowercase-folded almost everywhere (per the second follow-up pass
+  above). Fixed with `LOWER(column_name) = LOWER(:column)`; verified live
+  that this still correctly resolves `SourceIngestionLog.RowCount` (the
+  one genuinely case-preserved, quoted column) in both its original case
+  and lowercase, not just the newly-fixed bare columns.
+
+`failure_triage.py` also had the ordinary read-side pattern
+(`r["ItemName"]`/`r["Detail"]`) on top of its own `IsActive = 1` —
+fixed via `sql_dialect.lower_keys()`, same as everywhere else.
+
 **What's still genuinely open — not fixed in this pass, stated
-plainly**: the identical pattern still exists, unfixed, in
-`readiness.py`, `reconciliation.py`, `batch_advisor.py`, and
-`failure_triage.py` (`auto_mapper.py`/`profiling.py`/
-`data_model_diagram.py`/`record_types.py`/`reference_record.py` do the
-same thing against their own SQL-Server-only tables, out of scope here
-regardless). Don't assume `SQL_BACKEND=postgresql` is safe for
-`reconcile-load-counts`/`assess-migration-readiness`/
-`recommend-batch-size`/`triage-failures` until those are fixed too — the
-shared `row_get()`/`lower_keys()` helpers already exist and are tested;
-applying them file-by-file is what's left. Everything genuinely verified
-live today: `PostgresDialect` itself, `replicate`/`bulkops`'s own
-writeback path, hard rules 6/7's `load_table_prep.py`,
+plainly**: `auto_mapper.py`/`profiling.py`/`data_model_diagram.py`/
+`record_types.py`/`reference_record.py` weren't touched — they're
+SQL-Server-only tables, out of scope for `SQL_BACKEND=postgresql`
+regardless. No other file in the codebase currently reads/writes
 `BulkOpsLog`/`OrchestratorRunEvent`/`SourceIngestionLog`/
-`ObjectDependency`/`ObjectLoadOrder`/`ObjectAutomationRisk` DDL + writes
-+ reads, `orchestrator-assess`, `generate-migration-run-book`, and
-`update-migration-run-book` (both its `BulkOpsLog` and
-`SourceIngestionLog` syncs).
+`ObjectDependency`/`ObjectLoadOrder`/`ObjectAutomationRisk`, so — as far
+as this project's own grep-for-every-reference audit this pass and the
+three before it could find — the case-folding read pattern and the
+`IsActive`-style boolean-literal pattern are both now fully closed for
+`SQL_BACKEND=postgresql` across every module that touches these tables.
+Everything genuinely verified live today: `PostgresDialect` itself
+(including the `column_exists()` fix), `replicate`/`bulkops`'s own
+writeback path, hard rules 6/7's `load_table_prep.py`, `BulkOpsLog`/
+`OrchestratorRunEvent`/`SourceIngestionLog`/`ObjectDependency`/`ObjectLoadOrder`/
+`ObjectAutomationRisk` DDL + writes + reads, `orchestrator-assess`,
+`generate-migration-run-book`, `update-migration-run-book` (both its
+`BulkOpsLog` and `SourceIngestionLog` syncs), `reconcile-load-counts`,
+`recommend-batch-size` (all three of its seed/automation/history
+layers), `suggest-batch-heuristics`, `triage-failures`'s
+`ObjectAutomationRisk` cross-reference, and `assess-migration-readiness`'s
+own `email_deliverability_attested` and `row_count_reconciliation`
+gates.
 
 **Why this, specifically, over other possible third backends**: Postgres
 is free, genuinely production-grade (unlike SQLite, which this project

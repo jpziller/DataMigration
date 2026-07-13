@@ -89,12 +89,20 @@ def _automation_adjustment(engine, heuristics, object_name, schema):
         return 0, rationale
 
     with engine.connect() as cx:
+        # IsActive is bound as a real Python True, not a literal `1` in
+        # the SQL text -- found via live Postgres testing: IsActive is a
+        # genuine BOOLEAN column there (risk_analyzer.py's own DDL), and
+        # Postgres raises "operator does not exist: boolean = integer"
+        # for `IsActive = 1`, unlike SQL Server's BIT/SQLite's INTEGER
+        # columns which both tolerate the literal fine. A bound parameter
+        # lets each backend's own driver coerce True correctly for its
+        # actual column type instead of assuming one literal works everywhere.
         counts = dict(cx.execute(
             text(
                 f"SELECT CheckType, COUNT(*) FROM {d.qualify(schema, 'ObjectAutomationRisk')} "
-                "WHERE ObjectName = :obj AND IsActive = 1 GROUP BY CheckType"
+                "WHERE ObjectName = :obj AND IsActive = :is_active GROUP BY CheckType"
             ),
-            {"obj": object_name},
+            {"obj": object_name, "is_active": True},
         ).fetchall())
 
     if not counts:

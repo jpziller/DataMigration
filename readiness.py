@@ -169,9 +169,15 @@ def _email_deliverability_gate(engine, d, schema, object_name):
         row = cx.execute(text(query), {"obj": object_name}).mappings().first()
     if row is None:
         return {"ok": None, "detail": "Not checked -- no BulkOpsLog row for this object yet."}
-    if (row["Operation"] or "").lower() == "delete":
+    # Normalized to lowercase keys once here rather than accessed by exact
+    # case -- see orchestrator.py's own _row_to_current() for the
+    # identical fix and why it's needed (Postgres returns an unquoted
+    # column lowercased in its own query results, unlike SQL Server/
+    # SQLite).
+    row = sql_dialect.lower_keys(row)
+    if (row["operation"] or "").lower() == "delete":
         return {"ok": None, "detail": "Most recent run was a delete -- Email Deliverability attestation not required."}
-    value = row["EmailDeliverability"]
+    value = row["emaildeliverability"]
     ok = bool(value)
     detail = f"Attested as '{value}' on the most recent run." if ok \
         else "No Email Deliverability attestation recorded on the most recent run."

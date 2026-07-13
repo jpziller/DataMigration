@@ -690,14 +690,27 @@ functions (`_load_order_rows()`, `sync_run_book_from_log()`,
 helper, `sql_dialect.lower_keys()` (lowercase every key once instead of
 routing ~15 individual field accesses through `row_get()`) —
 `orchestrator.py`'s own `_row_to_current()` now calls this too instead of
-its own inline version. **What's still open**: the identical pattern
-still exists, unfixed, in `readiness.py`, `reconciliation.py`,
-`batch_advisor.py`, and `failure_triage.py` — don't assume
-`SQL_BACKEND=postgresql` is safe for `reconcile-load-counts`/
-`assess-migration-readiness`/`recommend-batch-size`/`triage-failures`
-until those are fixed too. See `ROADMAP.md` #69 for the full, dated
-account of what's verified live vs. still open — including a structural
-bug found and fixed along the way, where an earlier edit had accidentally
+its own inline version. `readiness.py`'s `_email_deliverability_gate()`
+and `reconciliation.py`'s `_latest_bulkops_row()`/
+`reconcile_load_counts()` (including the actual stale-prior-run
+comparison, not just a display value) are fixed the same way.
+`failure_triage.py`'s `_validation_rule_candidates()` is fixed too, plus
+one more real bug in the same family found along the way and fixed in
+both `batch_advisor.py` and `failure_triage.py`: both hardcoded
+`IsActive = 1` as a SQL literal against a genuine Postgres `BOOLEAN`
+column, which Postgres rejects outright (`operator does not exist:
+boolean = integer`) — fixed by binding `True` as a real query parameter
+instead. That in turn surfaced a bug in `PostgresDialect.column_exists()`
+itself (not a caller): it compared column names by exact case, which
+works for table names (always quoted via `qualify()`) but not for the
+columns this codebase creates bare almost everywhere — fixed with
+`LOWER(column_name) = LOWER(:column)`. A repo-wide grep confirmed no
+other module reads/writes these six tables, so as of this pass the
+case-folding and boolean-literal patterns are both fully closed for
+`SQL_BACKEND=postgresql`. See `ROADMAP.md` #69 for the full, dated
+account of what's verified live vs. still open —
+including a structural bug found and fixed along the way,
+where an earlier edit had accidentally
 stripped `SqlDialect`'s own `@abstractmethod` enforcement without
 breaking any test (every concrete dialect still fully implements its own
 methods independently, so it was invisible at runtime).
