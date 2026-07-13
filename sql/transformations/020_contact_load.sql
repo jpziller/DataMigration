@@ -7,15 +7,18 @@
    AccountId is populated instead of NULL.
 
    Migration key MigrationID__c is regenerated from _MockRowId, same as
-   Account_Load -- see 010_account_load.sql's header. */
+   Account_Load -- see 010_account_load.sql's header.
 
-DROP TABLE IF EXISTS "dbo"."Contact_Load";
+   Ported to real T-SQL -- see 010_account_load.sql's header for why
+   (SELECT ... INTO instead of CREATE TABLE ... AS SELECT; Id/Error no
+   longer added here since bulk_op() already adds them automatically). */
 
-CREATE TABLE "dbo"."Contact_Load" AS
+DROP TABLE IF EXISTS [dbo].[Contact_Load];
+
 SELECT
     m._MockRowId AS LoadId,
-    CAST(m._MockRowId AS TEXT) AS MigrationID__c,
-    a."Id" AS AccountId,
+    CAST(m._MockRowId AS NVARCHAR(50)) AS MigrationID__c,
+    a.Id AS AccountId,
     m.LastName,
     m.FirstName,
     m.Salutation,
@@ -49,8 +52,6 @@ SELECT
     m.ContactSource,
     m.Level__c,
     m.Languages__c
-FROM "dbo"."Contact_Mock" m
-JOIN "dbo"."Account_Load" a ON a.LoadId = m._ParentMockRef;
-
-ALTER TABLE "dbo"."Contact_Load" ADD "Id" TEXT NULL;
-ALTER TABLE "dbo"."Contact_Load" ADD "Error" TEXT NULL;
+INTO [dbo].[Contact_Load]
+FROM [dbo].[Contact_Mock] m
+JOIN [dbo].[Account_Load] a ON a.LoadId = m._ParentMockRef;

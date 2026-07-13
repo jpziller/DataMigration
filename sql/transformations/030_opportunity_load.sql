@@ -8,16 +8,17 @@
    of NULL.
 
    Migration key MigrationID__c is regenerated from _MockRowId, same as
-   Account_Load/Contact_Load -- see 010_account_load.sql's header. */
+   Account_Load/Contact_Load -- see 010_account_load.sql's header.
 
-DROP TABLE IF EXISTS "dbo"."Opportunity_Load";
+   Ported to real T-SQL -- see 010_account_load.sql's header for why. */
 
-CREATE TABLE "dbo"."Opportunity_Load" AS
+DROP TABLE IF EXISTS [dbo].[Opportunity_Load];
+
 SELECT
     m._MockRowId AS LoadId,
-    CAST(m._MockRowId AS TEXT) AS MigrationID__c,
-    c."Id" AS ContactId,
-    acc."Id" AS AccountId,
+    CAST(m._MockRowId AS NVARCHAR(50)) AS MigrationID__c,
+    c.Id AS ContactId,
+    acc.Id AS AccountId,
     m.IsPrivate,
     m.Name,
     m.Description,
@@ -35,9 +36,7 @@ SELECT
     m.OrderNumber__c,
     m.CurrentGenerators__c,
     m.MainCompetitors__c
-FROM "dbo"."Opportunity_Mock" m
-JOIN "dbo"."Contact_Load" c ON c.LoadId = m._ParentMockRef
-JOIN "dbo"."Account_Load" acc ON acc.LoadId = m."_SecondaryParentRef_Account";
-
-ALTER TABLE "dbo"."Opportunity_Load" ADD "Id" TEXT NULL;
-ALTER TABLE "dbo"."Opportunity_Load" ADD "Error" TEXT NULL;
+INTO [dbo].[Opportunity_Load]
+FROM [dbo].[Opportunity_Mock] m
+JOIN [dbo].[Contact_Load] c ON c.LoadId = m._ParentMockRef
+JOIN [dbo].[Account_Load] acc ON acc.LoadId = m._SecondaryParentRef_Account;

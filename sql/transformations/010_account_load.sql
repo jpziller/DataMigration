@@ -7,14 +7,21 @@
    FLS for MigrationID__c on Account/Contact/Opportunity/Task is granted
    via the MigrationFieldAccess permission set (force-app/main/default/
    permissionsets/MigrationFieldAccess.permissionset-meta.xml), not the
-   Admin profile -- see CLAUDE.md hard rule 8. */
+   Admin profile -- see CLAUDE.md hard rule 8.
 
-DROP TABLE IF EXISTS "dbo"."Account_Load";
+   Ported to real T-SQL from an earlier SQLite-flavored draft (this
+   project is configured for the mssql backend) -- CREATE TABLE ... AS
+   SELECT isn't valid T-SQL syntax at all; SELECT ... INTO is the
+   equivalent. Id/Error columns are no longer added here -- bulk_op()'s
+   own writeback already adds them automatically when missing (see
+   bulkops.py's _writeback_inplace), so doing it here too was always
+   redundant. */
 
-CREATE TABLE "dbo"."Account_Load" AS
+DROP TABLE IF EXISTS [dbo].[Account_Load];
+
 SELECT
     _MockRowId AS LoadId,
-    CAST(_MockRowId AS TEXT) AS MigrationID__c,
+    CAST(_MockRowId AS NVARCHAR(50)) AS MigrationID__c,
     Name,
     Type,
     BillingStreet,
@@ -56,7 +63,5 @@ SELECT
     UpsellOpportunity__c,
     SLASerialNumber__c,
     SLAExpirationDate__c
-FROM "dbo"."Account_Mock";
-
-ALTER TABLE "dbo"."Account_Load" ADD "Id" TEXT NULL;
-ALTER TABLE "dbo"."Account_Load" ADD "Error" TEXT NULL;
+INTO [dbo].[Account_Load]
+FROM [dbo].[Account_Mock];

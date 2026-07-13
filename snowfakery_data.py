@@ -152,6 +152,38 @@ def _fix_snowfakery_datetime_strings(df, mapped_fields):
     return df
 
 
+def _parse_datetime_fields_to_real_datetime64(df, mapped_fields):
+    """Parse every real describe()-"datetime" field still holding a plain
+    string (as left by _fix_snowfakery_datetime_strings(), which only fixes
+    the separator, not the dtype) into a real, tz-naive pandas datetime64
+    column.
+
+    sql_dialect.py's own normalize_datetime_columns() only acts on a
+    genuine datetime64 column -- MssqlDialect's is a documented no-op,
+    relying on "pyodbc's own native datetime handling already round-trips a
+    real Python/pandas datetime object into DATETIME2 correctly." A plain
+    string parameter bound against a DATETIME2 column instead breaks
+    pyodbc's fast_executemany outright (mssql "Invalid character value for
+    cast specification") -- confirmed via a minimal repro, not assumed;
+    found via a real dogfood run, not a synthetic test. Tz-naive
+    specifically: DATETIME2 has no offset component, and a tz-aware
+    Timestamp bound via fast_executemany separately breaks with a
+    different error ("String data, right truncation"), also confirmed via
+    repro. Parsing here gives normalize_datetime_columns() what its own
+    no-op already assumes: mssql passes the real datetime straight through
+    to pyodbc; sqlite's own branch still re-stringifies it with the
+    correct 'T' separator either way."""
+    df = df.copy()
+    for field in mapped_fields:
+        if field["type"] != "datetime":
+            continue
+        name = field["name"]
+        if name not in df.columns:
+            continue
+        df[name] = pd.to_datetime(df[name], errors="coerce", utc=True).dt.tz_localize(None)
+    return df
+
+
 def object_field_schema(sf, object_name):
     """Return (fields, skipped) for one object -- fields is a list of
     (describe_field, snowfakery_value_spec) tuples; skipped mirrors
@@ -407,7 +439,9 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
             secondary_random_parents, fields_by_object, polymorphic_children)
 
 
-def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo", stage_dir="_stage"):
+def run_recipe(engine, recipe_path, object_names, fields_by_object, primary_parent=None,
+                secondary_exact_parents=None, secondary_random_parents=None,
+                polymorphic_children=None, schema="dbo", stage_dir="_stage"):
     """Run a recipe built by build_recipe() and load each object's rows
     into [schema].[<object_name>_Mock]. Returns {object_name: rows_written}.
 
@@ -422,6 +456,21 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
     let another object's generated values leak in. Using the exact field
     list this recipe actually generated for each object avoids that
     entirely.
+
+    primary_parent/secondary_exact_parents/secondary_random_parents/
+    polymorphic_children are build_recipe()'s own other return values,
+    needed for the same column-leakage reason: after filtering to one
+    object's ROWS (`_table == name`), the DataFrame still carries every
+    OTHER object's bookkeeping columns too (row-filtering doesn't drop
+    columns from a pandas DataFrame built from the union of every record
+    type) -- found via a real dogfood run, not a synthetic test: Task's
+    own cohort-only columns (`_ParentType`, `_SecondaryParentRef_Contact`,
+    `_SecondaryParentRef_Account`) were leaking into `Contact_Mock` as
+    entirely-NULL columns, and an all-NULL column defeats pyodbc's
+    fast_executemany type inference (mssql's `Invalid character value for
+    cast specification`). Only the bookkeeping columns this exact object
+    legitimately has are kept, computed from these four dicts rather than
+    inferred from column presence.
     """
     os.makedirs(stage_dir, exist_ok=True)
     json_path = os.path.join(stage_dir, os.path.splitext(os.path.basename(recipe_path))[0] + ".json")
@@ -429,6 +478,27 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
 
     all_records = pd.read_json(json_path)
     rows_written = {}
+
+    polymorphic_children = polymorphic_children or {}
+    primary_parent = primary_parent or {}
+
+    legit_secondary_parents = {}
+    for name in object_names:
+        legit_secondary_parents[name] = set(
+            (secondary_exact_parents or {}).get(name, [])
+        ) | set((secondary_random_parents or {}).get(name, []))
+    for child, info in polymorphic_children.items():
+        legit_secondary_parents[child] = legit_secondary_parents.get(child, set()) | set(info["extra_refs"])
+
+    # _ParentMockRef only means something for an object that's actually
+    # nested under a primary parent (a plain child) or a polymorphic
+    # cohort child -- a root object (e.g. Account) never has this key set
+    # on its own rows, but the column still appears in the merged
+    # DataFrame because OTHER objects have it. _ParentType only means
+    # something for a polymorphic cohort child (e.g. Task) -- no other
+    # object ever sets it.
+    has_parent_mock_ref = {name for name in object_names if name in primary_parent or name in polymorphic_children}
+    has_parent_type = set(polymorphic_children)
 
     d = sql_dialect.for_engine(engine)
 
@@ -440,14 +510,37 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, schema="dbo"
             continue
 
         mapped_fields = [f for f, _spec in fields_by_object[name]]
-        keep_cols = [f["name"] for f in mapped_fields] + [
-            c for c in ("id", "_ParentMockRef", "_ParentType") if c in object_rows.columns
-        ] + [c for c in object_rows.columns if c.startswith("_SecondaryParentRef_")]
+        secondary_cols = [f"_SecondaryParentRef_{p}" for p in legit_secondary_parents.get(name, set())]
+        bookkeeping_cols = ["id"]
+        if name in has_parent_mock_ref:
+            bookkeeping_cols.append("_ParentMockRef")
+        if name in has_parent_type:
+            bookkeeping_cols.append("_ParentType")
+        keep_cols = [f["name"] for f in mapped_fields] + bookkeeping_cols + secondary_cols
         object_rows = object_rows[[c for c in keep_cols if c in object_rows.columns]].copy()
         object_rows = object_rows.rename(columns={"id": "_MockRowId"})
 
+        # pd.read_json() above reads ALL object types' records at once --
+        # any bookkeeping int column that's NaN for some OTHER object's
+        # rows (e.g. _ParentMockRef is never set on a root object like
+        # Account) gets upcast to float64 for the WHOLE DataFrame, and
+        # that dtype survives even after filtering down to just this
+        # object's own (never-NaN) rows: a real value like
+        # _ParentMockRef=1 round-trips as the Python float 1.0, not the
+        # int 1. Binding a float against a genuinely INT-typed SQL Server
+        # column breaks pyodbc's fast_executemany parameter binding
+        # (mssql "Invalid character value for cast specification") --
+        # found via a real dogfood run, not a synthetic test. Cast to
+        # pandas' nullable Int64 so a real value round-trips as a real
+        # int and a missing one round-trips as NULL, not NaN-as-float.
+        int_bookkeeping_cols = [c for c in ("_MockRowId", "_ParentMockRef", *secondary_cols)
+                                 if c in object_rows.columns]
+        for col in int_bookkeeping_cols:
+            object_rows[col] = object_rows[col].astype("Int64")
+
         object_rows = truncate_to_field_lengths(object_rows, mapped_fields)
         object_rows = _fix_snowfakery_datetime_strings(object_rows, mapped_fields)
+        object_rows = _parse_datetime_fields_to_real_datetime64(object_rows, mapped_fields)
 
         int_type = d.sf_type_to_sql({"type": "int"})
         extra_cols_sql = []

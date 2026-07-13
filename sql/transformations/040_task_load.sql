@@ -2,14 +2,15 @@
    (hard rule 10). Builds Task_Load from Task_Mock -- the interesting case
    here is WhatId, a genuinely polymorphic Salesforce lookup (confirmed
    live via describe(): ~90 possible target types, including both Account
-   and Opportunity). generate-related-mock-data split Task generation into
-   two independent cohorts (one nested under Account, one under
-   Opportunity), tagging each row with a literal _ParentType discriminator
-   -- this transform resolves WhatId with a CASE on that discriminator,
-   joining whichever Load table's real Id actually applies per row. A
-   plain single JOIN can't express this: a given Task row's WhatId is
-   either an Account Id or an Opportunity Id, never both, and never
-   resolvable without knowing which cohort produced it.
+   and Opportunity -- see validators/Task.md). generate-related-mock-data
+   split Task generation into two independent cohorts (one nested under
+   Account, one under Opportunity), tagging each row with a literal
+   _ParentType discriminator -- this transform resolves WhatId with a
+   CASE on that discriminator, joining whichever Load table's real Id
+   actually applies per row. A plain single JOIN can't express this: a
+   given Task row's WhatId is either an Account Id or an Opportunity Id,
+   never both, and never resolvable without knowing which cohort
+   produced it.
 
    Run this script a second time (rebuild) after BOTH the Account and
    Opportunity loads have completed, so WhatId is populated instead of
@@ -27,23 +28,24 @@
    them at all (see _is_interdependent_field()); Task_Mock still carries
    them from before that fix, so this transform explicitly leaves them out
    of the SELECT list rather than sending Salesforce values it will
-   reject. */
+   reject.
 
-DROP TABLE IF EXISTS "dbo"."Task_Load";
+   Ported to real T-SQL -- see 010_account_load.sql's header for why. */
 
-CREATE TABLE "dbo"."Task_Load" AS
+DROP TABLE IF EXISTS [dbo].[Task_Load];
+
 SELECT
     m._MockRowId AS LoadId,
-    CAST(m._MockRowId AS TEXT) AS MigrationID__c,
+    CAST(m._MockRowId AS NVARCHAR(50)) AS MigrationID__c,
     CASE m._ParentType
-        WHEN 'Account' THEN acc_direct."Id"
-        WHEN 'Opportunity' THEN opp."Id"
+        WHEN 'Account' THEN acc_direct.Id
+        WHEN 'Opportunity' THEN opp.Id
     END AS WhatId,
     CASE
-        WHEN m._SecondaryParentRef_Contact IS NOT NULL THEN con."Id"
+        WHEN m._SecondaryParentRef_Contact IS NOT NULL THEN con.Id
     END AS WhoId,
     CASE
-        WHEN m._SecondaryParentRef_Account IS NOT NULL THEN acc_secondary."Id"
+        WHEN m._SecondaryParentRef_Account IS NOT NULL THEN acc_secondary.Id
     END AS REF_AccountId,
     m.Subject,
     m.ActivityDate,
@@ -56,14 +58,15 @@ SELECT
     m.CallObject,
     m.ReminderDateTime,
     m.IsReminderSet
-FROM "dbo"."Task_Mock" m
-LEFT JOIN "dbo"."Account_Load" acc_direct
+INTO [dbo].[Task_Load]
+FROM [dbo].[Task_Mock] m
+LEFT JOIN [dbo].[Account_Load] acc_direct
     ON m._ParentType = 'Account' AND acc_direct.LoadId = m._ParentMockRef
-LEFT JOIN "dbo"."Opportunity_Load" opp
+LEFT JOIN [dbo].[Opportunity_Load] opp
     ON m._ParentType = 'Opportunity' AND opp.LoadId = m._ParentMockRef
-LEFT JOIN "dbo"."Contact_Load" con
+LEFT JOIN [dbo].[Contact_Load] con
     ON con.LoadId = m._SecondaryParentRef_Contact
-LEFT JOIN "dbo"."Account_Load" acc_secondary
+LEFT JOIN [dbo].[Account_Load] acc_secondary
     ON acc_secondary.LoadId = m._SecondaryParentRef_Account;
 
 /* REF_AccountId is a human-only, SQL-side audit column (hard rule 13,
@@ -72,6 +75,3 @@ LEFT JOIN "dbo"."Account_Load" acc_secondary
    pre-flight check, since it's redundant with WhatId whenever _ParentType
    = 'Account' and only genuinely different (a real cross-reference) when
    _ParentType = 'Opportunity'. */
-
-ALTER TABLE "dbo"."Task_Load" ADD "Id" TEXT NULL;
-ALTER TABLE "dbo"."Task_Load" ADD "Error" TEXT NULL;

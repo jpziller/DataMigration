@@ -1105,7 +1105,14 @@ def generate_related_mock_data_cmd(object_names, counts, schema):
             f"({', '.join(info['targets'])}), tagged via _ParentType{note}"
         )
 
-    rows_written = sfd.run_recipe(engine, recipe_path, object_names, fields_by_object, schema=schema)
+    rows_written = sfd.run_recipe(
+        engine, recipe_path, object_names, fields_by_object,
+        primary_parent=primary_parent,
+        secondary_exact_parents=secondary_exact_parents,
+        secondary_random_parents=secondary_random_parents,
+        polymorphic_children=polymorphic_children,
+        schema=schema,
+    )
     for name in object_names:
         click.echo(f"Wrote {rows_written.get(name, 0)} mock row(s) to {schema}.{name}_Mock")
         skipped = skipped_by_object.get(name, [])

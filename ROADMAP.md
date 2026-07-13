@@ -453,6 +453,42 @@ its own Contact's Account) and confirmed the ancestor-chain fix above:
 all 12 generated Cases' Account reference matched their own Contact's
 Account exactly after nesting `Case` under `Contact` instead of `Account`.
 
+**Found and fixed three more real bugs via a full end-to-end dogfood run**
+(bootstrap-project through a live `bulkops` load, not a synthetic test):
+Snowfakery's combined JSON output unions every requested object type's
+columns into one flat DataFrame, and `run_recipe()`'s own column-keeping
+logic checked only "is this column present after filtering to this
+object's rows" — which doesn't drop columns, so it kept ANY
+`_SecondaryParentRef_<X>`/`_ParentType` column present anywhere in the
+merged data, not just the ones this specific object actually has. A
+polymorphic child's (`Task`) own cohort-only columns leaked into a plain
+child (`Contact_Mock`) as entirely-NULL columns. Fixed by threading
+`build_recipe()`'s own `primary_parent`/`secondary_exact_parents`/
+`secondary_random_parents`/`polymorphic_children` return values through to
+`run_recipe()`, so each object's bookkeeping columns are computed from
+real recipe structure, not column presence. Two knock-on effects of that
+same union: (1) an entirely-NULL leaked int column, and separately (2) a
+legitimate `_ParentMockRef`/`_SecondaryParentRef_*` value that's NaN for
+some OTHER object's rows anywhere in the union, upcasts that WHOLE column
+to `float64` even after filtering — e.g. `_ParentMockRef=1` round-trips as
+the Python float `1.0`, not the int `1` — which broke mssql's
+`fast_executemany` parameter binding against a real `INT` column (`Invalid
+character value for cast specification`); fixed by casting these
+bookkeeping columns to pandas' nullable `Int64` before insert. (3) A
+`datetime`-typed field (e.g. `Contact.EmailBouncedDate`) was still a plain
+Python string after `_fix_snowfakery_datetime_strings()`'s separator fix
+(that function only reformats the string, never the dtype) — binding a
+plain string against a real `DATETIME2` column via `fast_executemany`
+breaks the same way, confirmed via a minimal repro; fixed by parsing it to
+a genuine, tz-naive pandas `datetime64` column
+(`_parse_datetime_fields_to_real_datetime64()`) before insert, since
+`sql_dialect.py`'s own `MssqlDialect.normalize_datetime_columns()` is a
+documented no-op that assumes exactly that dtype already. All three only
+ever surfaced against the real `mssql` backend (SQLite has no strict
+column typing to violate) — a genuine argument for occasionally dogfooding
+this module against SQL Server directly rather than only via its SQLite
+integration tests.
+
 `Faker` (the library Snowfakery itself wraps) is a lower-priority
 alternative worth knowing about too as a *standalone* backend — no API
 key, no rate limit, works fully offline — for whenever Mockaroo's
@@ -3640,3 +3676,55 @@ This ties together #2 (load order), #3 (mapping doc), #4 (solution doc),
 gaps captured above (#46–#66) as the concrete next pieces. Scoping any
 one of them into a real build is the next step — this section is the
 shape of where it's all going, not a spec for any single piece of it.
+
+## 67. Methodology PowerPoint deck + deep-dive PDF manual (not built — roadmap idea per explicit request)
+
+Raised directly: a PowerPoint presentation explaining the whole
+methodology — what this framework can do, the order of things, diagrams
+showing the flow of steps — aimed at a **technical audience** for now,
+with appendix slides specifically covering security. No feature should be
+skipped, however small. Alongside it, a **PDF document** that goes deeper
+than the deck, pulling the same information into manual-length detail.
+
+Two separate deliverables, not one document at two zoom levels:
+
+1. **PowerPoint deck** — the methodology story: what the framework is
+   (SQL-centric, SQL Server as the integration hub, git-versioned
+   transforms), the end-to-end flow (bootstrap → discovery → profiling →
+   mapping → transform build → hard-rule gates 6/7/12/15 → load →
+   readiness/reconciliation → pass summary — the same sequence #53's
+   orchestrator and this session's full dogfood run both exercise),
+   and a walk through every command surface (`cli.py` verb, matching
+   `.claude/commands/*.md` skill) grouped by phase rather than
+   alphabetically. Diagrams should reuse this framework's own generation
+   tooling rather than being hand-drawn twice: `generate-target-data-model`/
+   `generate-source-data-model` (#57, Mermaid SDMN-style ERDs) and the
+   Migration Run Book's own Mermaid process-flow diagrams (#52) are
+   already real, checked-in artifacts a deck could screenshot or embed
+   rather than redraw. **Appendix**: security — the credential inventory,
+   trust boundaries, and code-enforced vs. convention-enforced controls
+   `docs/SECURITY_OVERVIEW.md` already documents, restructured for a
+   slide format rather than duplicated by hand (so the deck can't drift
+   from that document without both being touched).
+2. **PDF manual** — the same material at real depth: every hard rule
+   (1–15) with its rationale, every System Validator, every CLI command's
+   full option surface, the opt-in logging tables and what each column
+   means, the batch-size/orchestrator threshold files and how they're
+   tuned, source ingestion drift detection, the Migration Run Book's full
+   phase structure — effectively a bound version of `CLAUDE.md` + `README.md`
+   + `docs/*` + `ROADMAP.md`'s "BUILT" sections, organized for a reader
+   working through it linearly rather than jumping between files.
+
+Neither exists yet. Open build questions once this is scoped for real:
+whether the deck is generated (a Python-built `.pptx` via `python-pptx`,
+kept in sync with the codebase like every other generated artifact this
+framework produces — mapping docs, solution docs, run books) or hand-
+authored once and maintained manually; same question for the PDF (rendered
+from Markdown via a toolchain, vs. hand-assembled in a word processor).
+Given this framework's own consistent pattern — generated artifacts that
+can't silently drift from the code that produced them (`solution_doc.py`,
+`migration_run_book.py`, the data model diagram generators) — a generated
+deck/PDF pulling from the same source-of-truth files (`CLAUDE.md`,
+`ROADMAP.md`, `docs/SECURITY_OVERVIEW.md`) is the more consistent direction,
+but that's a real design decision for whoever scopes the actual build, not
+decided here.
