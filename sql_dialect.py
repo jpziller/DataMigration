@@ -63,33 +63,6 @@ class SqlDialect(ABC):
         now needs updating in exactly one place, not five."""
         return {"mssql": mssql_type, "sqlite": sqlite_type, "postgres": postgres_type}[self.backend_key]
 
-
-def row_get(row, key):
-    """Case-insensitive lookup against a SQLAlchemy RowMapping (from
-    `.mappings().first()`/`.all()`) -- needed because Postgres folds an
-    unquoted column name to lowercase not just for matching but for the
-    catalog name itself, so a query result's actual keys come back
-    lowercased (`row["LogId"]` raises `NoSuchColumnError` there) even
-    though SQL Server/SQLite both preserve/return whatever case a column
-    was originally declared with. Exact-case access is tried first (the
-    fast, common-case path for mssql/sqlite); the slower case-insensitive
-    scan only runs as a fallback, so this is a safe drop-in replacement
-    for `row[key]` on every backend, not just Postgres. Confirmed live:
-    orchestrator.py's own `row["LogId"]` failed against a real Postgres
-    instance until routed through this. NOT YET applied to every other
-    module with the identical pattern (migration_run_book.py/readiness.py/
-    reconciliation.py/batch_advisor.py/failure_triage.py and others also
-    do `row["ExactCase"]`-style access against these same tables) -- see
-    ROADMAP.md #69 for the full, honest list of what's still open."""
-    try:
-        return row[key]
-    except Exception:
-        lowered = key.lower()
-        for k in row.keys():
-            if k.lower() == lowered:
-                return row[k]
-        raise
-
     @abstractmethod
     def qualify(self, schema, table):
         """Quoted schema.table identifier for raw SQL text."""
@@ -139,6 +112,38 @@ def row_get(row, key):
         """Return df with any datetime64-dtype column converted to a
         string representation safe for this backend's own to_sql() write
         path -- see SqliteDialect's own docstring for why this exists."""
+
+
+def row_get(row, key):
+    """Case-insensitive lookup against a SQLAlchemy RowMapping (from
+    `.mappings().first()`/`.all()`) -- needed because Postgres folds an
+    unquoted column name to lowercase not just for matching but for the
+    catalog name itself, so a query result's actual keys come back
+    lowercased (`row["LogId"]` raises `NoSuchColumnError` there) even
+    though SQL Server/SQLite both preserve/return whatever case a column
+    was originally declared with. Exact-case access is tried first (the
+    fast, common-case path for mssql/sqlite); the slower case-insensitive
+    scan only runs as a fallback, so this is a safe drop-in replacement
+    for `row[key]` on every backend, not just Postgres. Confirmed live:
+    orchestrator.py's own `row["LogId"]` failed against a real Postgres
+    instance until routed through this."""
+    try:
+        return row[key]
+    except Exception:
+        lowered = key.lower()
+        for k in row.keys():
+            if k.lower() == lowered:
+                return row[k]
+        raise
+
+
+def lower_keys(row):
+    """Lowercase every key of a SQLAlchemy RowMapping (or plain dict) --
+    the simpler fix when MANY fields of one row get accessed by exact-
+    case key throughout a function, as an alternative to calling
+    row_get() at every individual call site. See row_get()'s own
+    docstring for why this is needed at all."""
+    return {k.lower(): v for k, v in dict(row).items()}
 
 
 class MssqlDialect(SqlDialect):

@@ -366,8 +366,17 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
                 text(f"SELECT ChildObject, ParentObject FROM {d.qualify(schema, 'ObjectDependency')}")
             ).mappings().all()
 
-    order_rows = [r for r in order_rows if r["ObjectName"] in in_scope]
-    order_rows.sort(key=lambda r: (r["LoadSequence"] is None, r["LoadSequence"]))
+    # Normalized to lowercase keys once here rather than accessed by exact
+    # case throughout this function -- found via live Postgres testing
+    # (see orchestrator.py's own _row_to_current() fix for the identical
+    # issue): an unquoted column comes back lowercased in a Postgres
+    # result set even though SQL Server/SQLite both preserve the
+    # originally-declared case.
+    order_rows = [sql_dialect.lower_keys(r) for r in order_rows]
+    edge_rows = [sql_dialect.lower_keys(r) for r in edge_rows]
+
+    order_rows = [r for r in order_rows if r["objectname"] in in_scope]
+    order_rows.sort(key=lambda r: (r["loadsequence"] is None, r["loadsequence"]))
 
     # Self-referencing fields (e.g. Account.ParentId -> Account) are their
     # own load_order.py concept (a two-pass load, not a cross-object
@@ -376,20 +385,20 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
     # multiple self-ref fields) are deduped with a set.
     parents_of = {}
     for e in edge_rows:
-        if e["ChildObject"] == e["ParentObject"]:
+        if e["childobject"] == e["parentobject"]:
             continue
-        if e["ChildObject"] in in_scope and e["ParentObject"] in in_scope:
-            parents_of.setdefault(e["ChildObject"], set()).add(e["ParentObject"])
+        if e["childobject"] in in_scope and e["parentobject"] in in_scope:
+            parents_of.setdefault(e["childobject"], set()).add(e["parentobject"])
 
     level_members = {}
     for r in order_rows:
-        level_members.setdefault(r["LoadLevel"], []).append(r["ObjectName"])
+        level_members.setdefault(r["loadlevel"], []).append(r["objectname"])
 
     rows = []
     for r in order_rows:
-        obj = r["ObjectName"]
+        obj = r["objectname"]
         parents = sorted(parents_of.get(obj, []))
-        siblings = sorted(n for n in level_members.get(r["LoadLevel"], []) if n != obj)
+        siblings = sorted(n for n in level_members.get(r["loadlevel"], []) if n != obj)
 
         parts = [f"After: {', '.join(parents)}" if parents else "None"]
         if siblings:
@@ -670,20 +679,26 @@ def _insert_load_row(ws, object_name, phase_prefix="load"):
 
 
 def _apply_log_result(ws, row_idx, log_row, git_info=None):
-    submitted = log_row["RecordsSubmitted"]
-    succeeded = log_row["RecordsSucceeded"]
-    failed = log_row["RecordsFailed"]
+    # Normalized to lowercase keys once here rather than accessed by exact
+    # case throughout this function -- see orchestrator.py's own
+    # _row_to_current() for the identical fix and why it's needed
+    # (Postgres returns an unquoted column lowercased in its own query
+    # results, unlike SQL Server/SQLite).
+    log_row = sql_dialect.lower_keys(log_row)
+    submitted = log_row["recordssubmitted"]
+    succeeded = log_row["recordssucceeded"]
+    failed = log_row["recordsfailed"]
 
     values = {
         "Status": "Issue" if failed else "Completed",
-        "Person Responsible": log_row["RunBy"],
-        "Begin Time": log_row["StartedAt"],
-        "End Time": log_row["CompletedAt"],
+        "Person Responsible": log_row["runby"],
+        "Begin Time": log_row["startedat"],
+        "End Time": log_row["completedat"],
         "Total Records": submitted,
         "Success Records": succeeded,
         "Failed Records": failed,
-        "Notes": f"Auto-synced from {log_row['TargetSchema']}.BulkOpsLog #{log_row['LogId']} "
-                 f"({log_row['Operation']}, {log_row['JobCount']} job(s)).",
+        "Notes": f"Auto-synced from {log_row['targetschema']}.BulkOpsLog #{log_row['logid']} "
+                 f"({log_row['operation']}, {log_row['jobcount']} job(s)).",
     }
     for col_name, value in values.items():
         col_idx = _COLUMNS.index(col_name) + 1
@@ -700,7 +715,7 @@ def _apply_log_result(ws, row_idx, log_row, git_info=None):
     # matched a stale/illustrative script that has since been replaced),
     # so this is re-resolved on every sync rather than trusted from
     # whatever's already in the cell.
-    filename = sn.script_filename_for(log_row["ObjectName"], _TRANSFORMS_DIR)
+    filename = sn.script_filename_for(log_row["objectname"], _TRANSFORMS_DIR)
     if filename:
         object_idx = _COLUMNS.index("Object") + 1
         cell = ws.cell(row=row_idx, column=object_idx, value=filename)
@@ -748,39 +763,48 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
     if not new_rows:
         return {"synced": 0, "inserted": 0, "updated": 0}
 
+    # Normalized to lowercase keys once here -- see _apply_log_result()'s
+    # own docstring for why (Postgres returns an unquoted column
+    # lowercased in its own query results, unlike SQL Server/SQLite).
+    new_rows = [sql_dialect.lower_keys(r) for r in new_rows]
+
     git_info = gi.get_git_info()
     inserted, updated = 0, 0
     for log_row in new_rows:
-        target_row = _find_pending_load_row(ws, log_row["ObjectName"])
+        target_row = _find_pending_load_row(ws, log_row["objectname"])
         if target_row is None:
-            target_row = _insert_load_row(ws, log_row["ObjectName"])
+            target_row = _insert_load_row(ws, log_row["objectname"])
             inserted += 1
         else:
             updated += 1
         _apply_log_result(ws, target_row, log_row, git_info=git_info)
 
-    ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["LogId"])
+    ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["logid"])
     _save_workbook(wb, path)
     return {"synced": len(new_rows), "inserted": inserted, "updated": updated}
 
 
 def _apply_source_ingestion_result(ws, row_idx, log_row, schema):
-    row_count = log_row["RowCount"]
-    is_blocked = log_row["Status"] == "drift_blocked"
+    # Normalized to lowercase keys once here -- see _apply_log_result()'s
+    # own docstring for why (Postgres returns an unquoted column
+    # lowercased in its own query results, unlike SQL Server/SQLite).
+    log_row = sql_dialect.lower_keys(log_row)
+    row_count = log_row["rowcount"]
+    is_blocked = log_row["status"] == "drift_blocked"
 
     values = {
         "Status": "Issue" if is_blocked else "Completed",
-        "Person Responsible": log_row["RunBy"],
-        "Begin Time": log_row["StartedAt"],
-        "End Time": log_row["CompletedAt"],
-        "Notes": f"Auto-synced from {schema}.SourceIngestionLog #{log_row['LogId']} ({log_row['Status']}).",
+        "Person Responsible": log_row["runby"],
+        "Begin Time": log_row["startedat"],
+        "End Time": log_row["completedat"],
+        "Notes": f"Auto-synced from {schema}.SourceIngestionLog #{log_row['logid']} ({log_row['status']}).",
     }
     if not is_blocked:
         values["Total Records"] = row_count
         values["Success Records"] = row_count
         values["Failed Records"] = 0
-    if is_blocked and log_row["DriftDetails"]:
-        values["Error Details"] = log_row["DriftDetails"]
+    if is_blocked and log_row["driftdetails"]:
+        values["Error Details"] = log_row["driftdetails"]
 
     for col_name, value in values.items():
         col_idx = _COLUMNS.index(col_name) + 1
@@ -827,17 +851,22 @@ def sync_source_ingestion_to_run_book(engine, path, tab_name, schema="dbo"):
     if not new_rows:
         return {"synced": 0, "inserted": 0, "updated": 0}
 
+    # Normalized to lowercase keys once here -- see _apply_log_result()'s
+    # own docstring for why (Postgres returns an unquoted column
+    # lowercased in its own query results, unlike SQL Server/SQLite).
+    new_rows = [sql_dialect.lower_keys(r) for r in new_rows]
+
     inserted, updated = 0, 0
     for log_row in new_rows:
-        target_row = _find_pending_load_row(ws, log_row["TableName"], phase_prefix="pre")
+        target_row = _find_pending_load_row(ws, log_row["tablename"], phase_prefix="pre")
         if target_row is None:
-            target_row = _insert_load_row(ws, log_row["TableName"], phase_prefix="pre")
+            target_row = _insert_load_row(ws, log_row["tablename"], phase_prefix="pre")
             inserted += 1
         else:
             updated += 1
         _apply_source_ingestion_result(ws, target_row, log_row, schema)
 
-    ws.cell(row=_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID, column=2, value=new_rows[-1]["LogId"])
+    ws.cell(row=_HEADER_ROW_LAST_SYNCED_SOURCE_LOG_ID, column=2, value=new_rows[-1]["logid"])
     _save_workbook(wb, path)
     return {"synced": len(new_rows), "inserted": inserted, "updated": updated}
 

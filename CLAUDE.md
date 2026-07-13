@@ -684,15 +684,23 @@ third branch, not just a type swap) and the column-name case-folding
 gap that live testing turned up along the way (Postgres folds an
 unquoted reference to lowercase — both at `CREATE TABLE` and in a query's
 own result set — while SQL Server/SQLite don't; `sql_dialect.row_get()`
-is the fix for the read side). **What's still open**: the same
-exact-case `row["X"]`-style read pattern `orchestrator.py` had also
-exists, unfixed, in `migration_run_book.py`, `readiness.py`,
-`reconciliation.py`, `batch_advisor.py`, and `failure_triage.py` — don't
-assume `SQL_BACKEND=postgresql` is safe for `update-migration-run-book`/
-`reconcile-load-counts`/`assess-migration-readiness`/
-`recommend-batch-size`/`triage-failures` until that's fixed too. See
-`ROADMAP.md` #69 for the full, dated account of what's verified live vs.
-still open.
+is the fix for the read side). `migration_run_book.py`'s three affected
+functions (`_load_order_rows()`, `sync_run_book_from_log()`,
+`sync_source_ingestion_to_run_book()`) are fixed too, via a second shared
+helper, `sql_dialect.lower_keys()` (lowercase every key once instead of
+routing ~15 individual field accesses through `row_get()`) —
+`orchestrator.py`'s own `_row_to_current()` now calls this too instead of
+its own inline version. **What's still open**: the identical pattern
+still exists, unfixed, in `readiness.py`, `reconciliation.py`,
+`batch_advisor.py`, and `failure_triage.py` — don't assume
+`SQL_BACKEND=postgresql` is safe for `reconcile-load-counts`/
+`assess-migration-readiness`/`recommend-batch-size`/`triage-failures`
+until those are fixed too. See `ROADMAP.md` #69 for the full, dated
+account of what's verified live vs. still open — including a structural
+bug found and fixed along the way, where an earlier edit had accidentally
+stripped `SqlDialect`'s own `@abstractmethod` enforcement without
+breaking any test (every concrete dialect still fully implements its own
+methods independently, so it was invisible at runtime).
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,

@@ -4021,25 +4021,59 @@ way — verified against a real, throwaway Postgres 16 container
   fallback) and fixed both spots in `orchestrator.py` specifically, since
   that's what this pass was scoped to.
 
-**What's still genuinely open — not fixed in this pass, stated plainly**:
-the identical bare-vs-exact-case read pattern `orchestrator.py` had also
-exists, unfixed, in `migration_run_book.py`, `readiness.py`,
-`reconciliation.py`, `batch_advisor.py`, `failure_triage.py`, and
-probably others that read these same tables back via
-`row["ExactCase"]`-style access (`auto_mapper.py`/`profiling.py`/
+**Follow-up pass, same day: `migration_run_book.py` fixed too, plus a
+structural bug found while starting this pass.** Before touching
+`migration_run_book.py`, re-verifying `sql_dialect.py` turned up a real
+defect from the *first* follow-up pass above: the edit that added
+`row_get()` had accidentally landed its whole body, unindented, between
+`SqlDialect.pick_type()` and the ABC's own `@abstractmethod`
+declarations — which silently re-nested every one of `qualify`/
+`quote_ident`/`table_exists`/etc. as dead, unreachable functions *inside*
+`row_get()`'s own body instead of leaving them as `SqlDialect`'s abstract
+methods. No test caught it and nothing broke at runtime (every concrete
+dialect still fully implements its own `qualify`/etc. independently, so
+losing the ABC's enforcement was invisible in practice) — but
+`SqlDialect.__abstractmethods__` was silently empty, meaning a future
+fourth dialect that forgot to implement a method would no longer be
+caught at instantiation time. Fixed by moving `row_get()` (and a new
+`lower_keys()` helper, below) to their correct place *after* the full
+`SqlDialect` class body; confirmed via `ast.parse()` and
+`SqlDialect.__abstractmethods__` that all eleven abstract methods are
+back where they belong.
+
+With that fixed, `migration_run_book.py`'s three affected functions
+(`_load_order_rows()` — `ObjectLoadOrder`/`ObjectDependency` reads;
+`sync_run_book_from_log()`/`_apply_log_result()` — `BulkOpsLog` reads;
+`sync_source_ingestion_to_run_book()`/`_apply_source_ingestion_result()`
+— `SourceIngestionLog` reads) all had the identical bare-vs-exact-case
+read pattern `orchestrator.py` had. Rather than routing each of the ~15
+individual field accesses through `sql_dialect.row_get()` one at a time,
+added a second shared helper, `sql_dialect.lower_keys(row)` (lowercase
+every key once, then reference lowercase consistently) — `orchestrator.py`'s
+own `_row_to_current()` was refactored to call this too instead of its
+own inline version. Verified live against a real Postgres 16 container:
+`generate-migration-run-book` (exercising `_load_order_rows()`),
+`update-migration-run-book`'s `BulkOpsLog` sync, and its
+`SourceIngestionLog` sync all produced correct results end-to-end.
+
+**What's still genuinely open — not fixed in this pass, stated
+plainly**: the identical pattern still exists, unfixed, in
+`readiness.py`, `reconciliation.py`, `batch_advisor.py`, and
+`failure_triage.py` (`auto_mapper.py`/`profiling.py`/
 `data_model_diagram.py`/`record_types.py`/`reference_record.py` do the
 same thing against their own SQL-Server-only tables, out of scope here
-regardless). `sql_dialect.row_get()` is built and tested for exactly
-this, but applying it file-by-file is real, separate follow-up work, not
-completed today — don't assume `SQL_BACKEND=postgresql` is safe for
-`update-migration-run-book`/`reconcile-load-counts`/
-`assess-migration-readiness`/`recommend-batch-size`/`triage-failures`
-until it is. Everything genuinely verified today: `PostgresDialect`
-itself, `replicate`/`bulkops`'s own writeback path, hard rules 6/7's
-`load_table_prep.py`, and `BulkOpsLog`/`OrchestratorRunEvent`/
-`SourceIngestionLog`/`ObjectDependency`/`ObjectLoadOrder`/
-`ObjectAutomationRisk` DDL + writes + (for `orchestrator-assess`
-specifically) reads.
+regardless). Don't assume `SQL_BACKEND=postgresql` is safe for
+`reconcile-load-counts`/`assess-migration-readiness`/
+`recommend-batch-size`/`triage-failures` until those are fixed too — the
+shared `row_get()`/`lower_keys()` helpers already exist and are tested;
+applying them file-by-file is what's left. Everything genuinely verified
+live today: `PostgresDialect` itself, `replicate`/`bulkops`'s own
+writeback path, hard rules 6/7's `load_table_prep.py`,
+`BulkOpsLog`/`OrchestratorRunEvent`/`SourceIngestionLog`/
+`ObjectDependency`/`ObjectLoadOrder`/`ObjectAutomationRisk` DDL + writes
++ reads, `orchestrator-assess`, `generate-migration-run-book`, and
+`update-migration-run-book` (both its `BulkOpsLog` and
+`SourceIngestionLog` syncs).
 
 **Why this, specifically, over other possible third backends**: Postgres
 is free, genuinely production-grade (unlike SQLite, which this project

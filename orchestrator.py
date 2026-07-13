@@ -276,9 +276,10 @@ def _row_to_current(row):
     "RecordsSubmitted") even though SQL Server/SQLite both preserve the
     originally-declared case, so a plain row.get("RecordsSubmitted")
     silently returned None (not even a crash) for every field on
-    Postgres. Lowercasing once here is simpler than routing every one of
-    these through sql_dialect.row_get() individually."""
-    row = {k.lower(): v for k, v in dict(row).items()}
+    Postgres. Lowercasing once here (sql_dialect.lower_keys()) is simpler
+    than routing every one of these through sql_dialect.row_get()
+    individually."""
+    row = sql_dialect.lower_keys(row)
     raw = row.get("failureerrorcounts")
     failure_error_counts = json.loads(raw) if raw else {}
     return {
