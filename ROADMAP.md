@@ -489,6 +489,46 @@ column typing to violate) — a genuine argument for occasionally dogfooding
 this module against SQL Server directly rather than only via its SQLite
 integration tests.
 
+**A fourth real bug, in `bulkops.py` itself, only surfaced once the mock
+data actually reached a live `bulkops` insert**: fixing bug (3) above (a
+real `datetime64` column, not a string, so mssql's `fast_executemany`
+would accept it) created a genuine regression on the *outbound* side —
+`bulk_op()`'s own `payload.to_csv(csv_path, index=False)` had no datetime
+formatting at all, so a real `datetime64` column read back from SQL Server
+serialized via pandas' own default (space-separated, no `T`) straight into
+the Bulk API CSV, which Salesforce's XSD dateTime parser rejected on every
+submitted row (`Contact.EmailBouncedDate` — "is not a valid value for the
+type xsd:dateTime"). This is a pre-existing gap in `bulk_op()`, not
+specific to Snowfakery — any load table with a genuine `datetime`/
+`datetime2` source column, from any project, would hit the same failure;
+the Snowfakery path just exposed it for the first time. Fixed by
+reformatting any `datetime64`-dtype column to the XSD `T`-separated string
+right before `to_csv()`, using the exact same convention
+`sql_dialect.SqliteDialect.normalize_datetime_columns()` already uses on
+the inbound side.
+
+That fix then surfaced a **second, pre-existing and already-documented**
+gap in `bulk_op()`'s own docstring (Hard Rule 4, fingerprint result
+mapping): the default fingerprint uses every `sent` column, and "a single
+echoed-back column that Salesforce reformats, e.g. a datetime field,
+otherwise breaks matching for the whole row." Confirmed live: the first
+Contact insert attempt (before the CSV fix) failed all 8 rows uniformly,
+and fingerprint matching worked fine (failures apparently echo the
+submitted value back verbatim). Once the CSV fix let the same 8 rows
+actually succeed on retry, **every** row's fingerprint failed to match
+(`succeeded: 0, failed: 0` reported, though all 8 real Contacts were
+confirmed created live) — Salesforce evidently echoes a *successful*
+row's datetime field back reformatted (e.g. with milliseconds/`Z`), unlike
+a failed one. `cli.py bulkops` already has the documented escape hatch for
+exactly this (`--fingerprint-columns`, "the migration key column alone is
+normally the safest choice") — used for the remaining Opportunity/Task
+loads in this same dogfood run, both of which succeeded cleanly first
+try. Worth calling out here since this is genuinely easy to trip on the
+first time a load table sends any datetime field at all, not just under
+Snowfakery: **any object with a sent datetime-typed field should pass
+`--fingerprint-columns <migration key>` up front**, not just after hitting
+this the hard way.
+
 `Faker` (the library Snowfakery itself wraps) is a lower-priority
 alternative worth knowing about too as a *standalone* backend — no API
 key, no rate limit, works fully offline — for whenever Mockaroo's

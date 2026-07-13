@@ -339,6 +339,31 @@ def _write_bulkops_log_row(engine, schema, row):
         ), row)
 
 
+def _format_datetime_columns_for_csv(payload):
+    """Reformat any real datetime64-dtype column to the XSD 'T'-separated
+    string form Salesforce's Bulk API requires, right before writing the
+    outbound CSV.
+
+    A load table column that's a genuine datetime64 dtype (read back from
+    a real SQL datetime/datetime2 column, not a pre-formatted string)
+    otherwise serializes via pandas' own default str(datetime) --
+    space-separated, no 'T' -- which is a real XSD dateTime parse failure
+    against the Bulk API ("is not a valid value for the type
+    xsd:dateTime"), not merely non-canonical. Confirmed live via a real
+    dogfood run: Contact.EmailBouncedDate failed on every submitted row
+    this way. sql_dialect.py's own normalize_datetime_columns() only fixes
+    this on the WRITE side (into a mirror-DB table); this is the
+    outbound-to-Salesforce side, a pre-existing gap this framework hadn't
+    hit until a real datetime64 column reached bulk_op() for the first
+    time -- not specific to any one mock-data path, since any load table
+    built from a genuine SQL datetime column would hit it the same way."""
+    payload = payload.copy()
+    for col in payload.columns:
+        if pd.api.types.is_datetime64_any_dtype(payload[col]):
+            payload[col] = payload[col].dt.strftime("%Y-%m-%dT%H:%M:%S").where(payload[col].notna(), None)
+    return payload
+
+
 def bulk_op(sf, engine, object_name, operation, source_table,
             send_columns=None, external_id=None, fingerprint_columns=None,
             key_column="LoadId", id_column="Id", error_column="Error",
@@ -523,7 +548,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
         successes, failures = pd.DataFrame(), pd.DataFrame()
         echo_cols = []
     else:
-        payload = submit_df[sent].copy()
+        payload = _format_datetime_columns_for_csv(submit_df[sent].copy())
         payload.to_csv(csv_path, index=False)
 
         handler = getattr(sf.bulk2, object_name)

@@ -74,6 +74,30 @@ def test_create_table_replicate_bulk_op_writeback_roundtrip(sqlite_engine, tmp_p
     assert pd.isna(result.loc[result["LegacyId__c"] == "A2", "Id"].iloc[0])
 
 
+def test_format_datetime_columns_for_csv_reformats_real_datetime64():
+    # Found via a real dogfood run, not a synthetic test: a load table
+    # column that's a genuine pandas datetime64 dtype (e.g. read back from
+    # a real SQL datetime/datetime2 column, not a pre-formatted string)
+    # used to serialize via payload.to_csv()'s own default -- space-
+    # separated, no 'T' -- which Salesforce's Bulk API rejects outright
+    # ("is not a valid value for the type xsd:dateTime"). Can't be
+    # reproduced through a full SQLite round-trip (SQLite has no native
+    # datetime type -- any column always comes back as a plain string), so
+    # this exercises bulk_op()'s own extracted formatting helper directly
+    # against a real datetime64 column instead.
+    df = pd.DataFrame({
+        "LegacyId__c": ["A1", "A2"],
+        "SomeDate__c": pd.to_datetime(["2024-12-07T21:41:05", None]),
+    })
+    assert pd.api.types.is_datetime64_any_dtype(df["SomeDate__c"])
+
+    out = bo._format_datetime_columns_for_csv(df)
+    assert out["SomeDate__c"].iloc[0] == "2024-12-07T21:41:05"
+    assert pd.isna(out["SomeDate__c"].iloc[1])
+    # non-datetime columns untouched
+    assert list(out["LegacyId__c"]) == ["A1", "A2"]
+
+
 def test_build_retry_table_captures_only_failed_rows(sqlite_engine, tmp_path):
     engine, _ = sqlite_engine
     df = pd.DataFrame({
