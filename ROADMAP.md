@@ -3843,21 +3843,55 @@ SQL-Server-only tooling listed in CLAUDE.md's "SQL backend" section —
 `sql/functions/`, `profiling.py`, `auto_mapper.py`, etc. — only exercises
 for real against `mssql`).
 
-**What shipped**: `docker-compose.yml` defines three services — `sqlserver`
+**What shipped**: `docker-compose.yml` defines two services — `sqlserver`
 (SQL Server 2022 Developer Edition, free/non-production, a named volume
-for persistence, a `sqlcmd`-based healthcheck), `sqlserver-init` (a
-one-shot, idempotent container that creates the empty mirror database
-once `sqlserver` is healthy, then exits — `docker/init-db.sh`), and `app`
-(this repo's Python environment — `Dockerfile` installs the Microsoft
-ODBC Driver 18, `mssql-tools18`/`sqlcmd`, and the Salesforce CLI on top
-of `python:3.12-slim-bookworm`, then `pip install -r requirements.txt`;
-the repo itself is bind-mounted rather than copied in, so host edits are
-live with no rebuild needed). `docker compose up -d` then `docker compose
-exec app python cli.py <verb>` replaces README.md's steps 3–7 (Python
-venv, SQL Server engine, SSMS, the ODBC driver, creating the database)
-entirely. Doesn't change anything about Hard Rule 1 (mirror-DB-only
-writes) or any other Hard Rule — purely a packaging change for the exact
-same architecture, not a design change.
+for persistence) and `app` (this repo's Python environment — `Dockerfile`
+installs the Microsoft ODBC Driver 18, `mssql-tools18`/`sqlcmd`, and the
+Salesforce CLI on top of `python:3.12-slim-bookworm`, then `pip install -r
+requirements.txt`; the repo itself is bind-mounted rather than copied in,
+so host edits are live with no rebuild needed). `docker compose up -d`
+then `docker compose exec app python cli.py <verb>` replaces README.md's
+steps 3–7 (Python venv, SQL Server engine, SSMS, the ODBC driver, creating
+the database) entirely. Doesn't change anything about Hard Rule 1
+(mirror-DB-only writes) or any other Hard Rule — purely a packaging
+change for the exact same architecture, not a design change.
+
+**A brutal post-build review caught real problems in the first pass,
+fixed before this was considered done — worth recording, not just
+quietly patched**:
+- The original design had a *separate* one-shot `sqlserver-init` service
+  and `sqlserver`'s own healthcheck both calling `sqlcmd` from *inside
+  the `mcr.microsoft.com/mssql/server` image itself* — an unverified
+  assumption (that image is the SQL Server engine, not a tools image; its
+  bundling `sqlcmd` was never actually confirmed) that could have quietly
+  blocked the entire stack from ever starting if wrong, since `app`
+  depended on that init step completing successfully. Fixed by removing
+  `sqlserver-init` entirely: `sqlserver`'s healthcheck now does a
+  dependency-free bash TCP check instead, and the mirror-database
+  creation step (`docker/init-db.sh`) runs at `app`'s own startup, using
+  that container's own **verified** `mssql-tools18` install (the
+  Dockerfile everyone can read installs it directly) — with a real retry
+  loop (up to 120s), since a TCP-up healthcheck doesn't guarantee SQL
+  Server can authenticate a login yet.
+- The Dockerfile's `gnupg2` package name is a real risk on Debian
+  12/bookworm (Debian merged `gnupg`/`gnupg2` long ago; the transitional
+  package isn't reliably present) — changed to the canonical `gnupg`.
+- Installing the Salesforce CLI via Debian's own default `nodejs`/`npm`
+  apt packages was fragile — distro-packaged Node lags behind current
+  LTS, and Salesforce's own install docs specifically warn against this
+  for exactly that reason. Changed to NodeSource's own setup script,
+  pinned to a specific Node major version deliberately (same "pin it,
+  bump it on purpose" discipline as any other dependency here), not
+  "whatever the distro happens to ship."
+- `docs/DOCKER.md`'s own "inspecting the mirror DB from inside the
+  container" example referenced `$MSSQL_SA_PASSWORD` — a variable never
+  actually set inside the `app` container (only `sqlserver` gets it
+  directly; `app` only gets the derived `SQL_PWD`) — fixed to reference
+  the variable that's actually there. Also added `DEBIAN_FRONTEND=
+  noninteractive` (a latent risk of an unexpected interactive apt prompt
+  hanging an automated build) and fixed a markdown heading that was
+  accidentally split across two lines in the original doc, silently
+  breaking how that section rendered.
 
 **The three real open questions from the original idea, resolved**:
 - *SQL Server licensing*: `MSSQL_PID: Developer` — free, full-featured,

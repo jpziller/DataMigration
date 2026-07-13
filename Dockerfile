@@ -5,15 +5,25 @@
 # is actually run; this file only builds the `app` image.
 FROM python:3.12-slim-bookworm
 
+# Prevents apt-get from ever blocking on an unexpected interactive prompt
+# during an automated build (e.g. a transitive dependency pulling in
+# tzdata's own debconf prompt) -- a real risk otherwise, not a
+# hypothetical one, since ACCEPT_EULA below only covers the two packages
+# that specifically check for it.
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Microsoft ODBC Driver 18 for SQL Server + mssql-tools18 (sqlcmd) --
 # pyodbc (every mssql-backend command in this repo) needs the driver at
 # runtime; sqlcmd lets CLAUDE.md's own "look at SQL Server directly"
 # read-only workflow work inside this container too, not just on a host
 # Windows machine with SSMS. unixodbc-dev provides both the ODBC driver
 # manager pyodbc links against and its headers (a source build fallback
-# if no prebuilt pyodbc wheel matches this exact image).
+# if no prebuilt pyodbc wheel matches this exact image). `gnupg` (not
+# `gnupg2` -- Debian merged the two packages long ago, and the
+# transitional `gnupg2` package name is not reliably present across every
+# Debian release) provides `gpg` for the apt keyring step below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates gnupg2 unixodbc-dev \
+        curl ca-certificates gnupg unixodbc-dev \
     && curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
     && curl -sSL https://packages.microsoft.com/config/debian/12/prod.list \
@@ -32,7 +42,19 @@ ENV PATH="$PATH:/opt/mssql-tools18/bin"
 # (sf_client.py's connect_salesforce()) never shells out to this binary
 # at all, so it's fine to skip auth setup for this binary entirely on
 # those two modes.
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+#
+# Deliberately uses NodeSource's own setup script for a current Node LTS,
+# NOT Debian's default `nodejs`/`npm` apt packages -- found in review:
+# distro-packaged Node lags behind current releases, and Salesforce's own
+# CLI install docs specifically warn against relying on it for exactly
+# this reason (a future `sf` CLI bump past whatever Node version bookworm
+# ships would otherwise silently break `cli` auth mode). Pin the major
+# version here deliberately rather than always tracking "current" --
+# bump it the same deliberate way any other pinned dependency in this
+# repo would be.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && npm install --global @salesforce/cli \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
