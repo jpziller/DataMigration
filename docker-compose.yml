@@ -51,13 +51,17 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
-      # Optional, only for SF_AUTH_MODE=cli -- reuse an org already authed
-      # on the HOST via `sf org login web` (jwt/password mode needs none
-      # of this -- see docs/DOCKER.md's auth-mode guidance). Uncomment and
-      # adjust the host side for your OS:
+      # Does NOT work as a way to reuse SF_AUTH_MODE=cli's host login --
+      # confirmed live (2026-07-13): current `sf` CLI versions store org
+      # auth in the host OS's native credential store (Windows Credential
+      # Manager / macOS Keychain / libsecret), not in a plaintext file
+      # under ~/.sf, so there is nothing here for a Linux container to
+      # reach no matter how this mount is configured. Left commented out
+      # for reference only -- see docs/DOCKER.md's auth-mode section for
+      # the full finding. Use jwt or password mode instead (neither needs
+      # this mount, or the `sf` binary, at all).
       #   Windows : ${USERPROFILE}/.sf:/root/.sf
       #   Mac/Linux: ${HOME}/.sf:/root/.sf
-      # - ${USERPROFILE}/.sf:/root/.sf
     env_file:
       - .env
     environment:

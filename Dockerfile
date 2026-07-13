@@ -27,7 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
     && curl -sSL https://packages.microsoft.com/config/debian/12/prod.list \
-        | sed 's#deb #deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] #' \
         > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
@@ -51,9 +50,15 @@ ENV PATH="$PATH:/opt/mssql-tools18/bin"
 # ships would otherwise silently break `cli` auth mode). Pin the major
 # version here deliberately rather than always tracking "current" --
 # bump it the same deliberate way any other pinned dependency in this
-# repo would be.
+# repo would be. Node 20 was correct when this pin was first written, but
+# is stale now: a current `sf` CLI's bundled undici calls
+# worker_threads.markAsUncloneable(), only added in Node v22.10.0, so
+# Node 20 crashes on startup with "TypeError: webidl.util.
+# markAsUncloneable is not a function" -- confirmed against Node's own
+# release docs and Salesforce's 2026 guidance, which recommends Node 22
+# (Maintenance LTS through ~April 2027) or 24 (current).
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install --global @salesforce/cli \
     && rm -rf /var/lib/apt/lists/* /root/.npm

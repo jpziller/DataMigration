@@ -41,7 +41,13 @@ they differ. **Follow this order** — later steps depend on earlier ones
 **Using Docker instead?** `docker compose up -d` replaces steps 3–7 below
 (Python venv, SQL Server engine, SSMS, the ODBC driver, creating the
 database) with one command — same architecture, just containerized. See
-[`docs/DOCKER.md`](docs/DOCKER.md).
+[`docs/DOCKER.md`](docs/DOCKER.md). One auth-mode caveat specific to the
+container: `cli` mode below does **not** work inside it — Salesforce's
+CLI now stores org auth in the host OS's own keychain, which a Linux
+container can't reach. Use `jwt` or `password` for anything running in
+Docker; `cli` is unaffected on a host-installed venv. See
+`docs/DOCKER.md`'s "Choosing a Salesforce auth mode inside the
+container" section for the full finding.
 
 **Using SQLite instead (`SQL_BACKEND=sqlite`)?** Skip steps 4–7 entirely
 (SQL Server, SSMS, the ODBC driver, and creating a database) — SQLite needs
@@ -259,7 +265,12 @@ keeping it in git per-object as you build it out.)
   secrets in the repo. Note: the May 27, 2026 CLI security update redacts the
   access token from `sf org display`, so the framework pulls it via
   `sf org auth show-access-token`. Confirm that command's `--json` result shape
-  on your installed CLI (`sf_client.py` handles both known shapes).
+  on your installed CLI (`sf_client.py` handles both known shapes). That same
+  update also moved the underlying org authorization itself into the host
+  OS's native keychain rather than a plaintext file — fine on a host venv
+  (this is exactly that), but it means `cli` mode **cannot** be reused
+  inside the Docker container (see `docs/DOCKER.md`'s auth-mode section) —
+  use `jwt`/`password` there instead.
 - **`jwt`** — connected-app JWT bearer flow. The right choice for CI or an
   unattended migration runner. Needs a connected app + cert (`server.key`).
   **As of Spring '26, Salesforce disabled creating new legacy Connected

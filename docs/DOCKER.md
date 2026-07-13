@@ -83,36 +83,47 @@ docker compose exec app bash
 ## Choosing a Salesforce auth mode inside the container
 
 `SF_AUTH_MODE` (from your mounted `.env`, per `sf_client.py`) works
-differently here than on a host machine:
+differently here than on a host machine — **`cli` mode does not work
+inside this container at all.** Use `jwt` or `password` for anything
+running in Docker.
 
 - **`jwt` (recommended for this setup)** — pure Python, no browser, no
   shelling out to the `sf` binary at all (`connect_salesforce()` calls
   `simple_salesforce`'s own JWT bearer flow directly). Works immediately
   with zero extra container config: mount (or just keep) `server.key` at
   the repo root as usual — it's already inside the container via the
-  bind mount.
+  bind mount. Needs `SF_USERNAME`/`SF_CONSUMER_KEY` for the target org's
+  own Connected App / External Client App (see README.md's "Auth modes"
+  section) — these are per-org, so a different target org than the one
+  your Connected App was set up against needs its own Consumer Key, not
+  a reused one.
 - **`password`** — same story: pure Python, no `sf` CLI involved, works
   immediately.
-- **`cli`** — reuses an org already authed via `sf org login web`, which
-  needs a real browser and doesn't work headlessly inside the container.
-  The workaround: run `sf org login web --alias ...` **on your host**
-  (normal browser flow, exactly like README.md's step 8), then mount your
-  host's `sf` CLI config directory into the container so the *already-
-  authenticated* org is reusable from inside it. Uncomment the relevant
-  line in `docker-compose.yml`'s `app.volumes` and adjust for your OS:
-  ```yaml
-  # Windows
-  - ${USERPROFILE}/.sf:/root/.sf
-  # Mac/Linux
-  - ${HOME}/.sf:/root/.sf
-  ```
-  Then `docker compose up -d` again to pick up the new mount. If `sf org
-  display --target-org <alias>` fails inside the container
-  (`docker compose exec app sf org display --target-org YOUR_ALIAS`),
-  double-check the mounted path actually matches where your `sf` install
-  stores auth data (verify on the host with `sf config get target-org`
-  after a successful login, since the exact directory has changed across
-  CLI versions).
+- **`cli` — confirmed broken inside this container, not just
+  inconvenient.** This section used to document a `~/.sf` bind-mount
+  workaround (reuse a host `sf org login web` session from inside the
+  container). That workaround **no longer works, full stop** — confirmed
+  live (2026-07-13) against a Summer '26 `sf` CLI: as part of
+  Salesforce's May 27, 2026 CLI credential-security update, `sf` stopped
+  storing org authorization in a plaintext file under `~/.sf` and now
+  stores the actual token in the **host OS's native credential store**
+  (Windows Credential Manager / macOS Keychain / `libsecret` on Linux).
+  Mounting `~/.sf` into the container only ever exposes logs and cache
+  (`deploy-cache.json`, `manifestCache`, `sf-*.log`) — there is no
+  `orgs/` directory with auth JSON to find on either side of the mount,
+  because the real secret lives in a host-OS keychain a Linux container
+  has no way to reach. `sf org display --target-org <alias>` inside the
+  container fails with `NamedOrgNotFoundError: No authorization
+  information found for <alias>` regardless of how the mount path is
+  configured — this is an architecture limitation of the current CLI,
+  not a path/typo to fix. `docker-compose.yml`'s `app.volumes` keeps the
+  mount line commented out for reference only.
+
+  **`cli` mode itself is completely fine outside Docker** — a
+  host-installed venv (README.md's own setup path) reaches the OS
+  keychain natively, so nothing here affects that workflow. The
+  limitation is specific to reusing a host login *from inside a Linux
+  container*.
 
 ## Inspecting the mirror DB
 
