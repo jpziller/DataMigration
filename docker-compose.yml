@@ -52,14 +52,12 @@ services:
     volumes:
       - .:/app
       # Does NOT work as a way to reuse SF_AUTH_MODE=cli's host login --
-      # confirmed live (2026-07-13): current `sf` CLI versions store org
-      # auth in the host OS's native credential store (Windows Credential
-      # Manager / macOS Keychain / libsecret), not in a plaintext file
-      # under ~/.sf, so there is nothing here for a Linux container to
-      # reach no matter how this mount is configured. Left commented out
-      # for reference only -- see docs/DOCKER.md's auth-mode section for
-      # the full finding. Use jwt or password mode instead (neither needs
-      # this mount, or the `sf` binary, at all).
+      # confirmed live (2026-07-13), current `sf` CLI stores org auth in
+      # the host OS's own keychain, unreachable from a Linux container no
+      # matter how this is mounted. Left commented out for reference only
+      # -- see docs/DOCKER.md's auth-mode section for the full finding
+      # (canonical explanation lives there, not here). Use jwt/password
+      # instead.
       #   Windows : ${USERPROFILE}/.sf:/root/.sf
       #   Mac/Linux: ${HOME}/.sf:/root/.sf
     env_file:

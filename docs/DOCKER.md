@@ -99,31 +99,25 @@ running in Docker.
   a reused one.
 - **`password`** — same story: pure Python, no `sf` CLI involved, works
   immediately.
-- **`cli` — confirmed broken inside this container, not just
-  inconvenient.** This section used to document a `~/.sf` bind-mount
-  workaround (reuse a host `sf org login web` session from inside the
-  container). That workaround **no longer works, full stop** — confirmed
-  live (2026-07-13) against a Summer '26 `sf` CLI: as part of
-  Salesforce's May 27, 2026 CLI credential-security update, `sf` stopped
-  storing org authorization in a plaintext file under `~/.sf` and now
-  stores the actual token in the **host OS's native credential store**
-  (Windows Credential Manager / macOS Keychain / `libsecret` on Linux).
-  Mounting `~/.sf` into the container only ever exposes logs and cache
-  (`deploy-cache.json`, `manifestCache`, `sf-*.log`) — there is no
-  `orgs/` directory with auth JSON to find on either side of the mount,
-  because the real secret lives in a host-OS keychain a Linux container
-  has no way to reach. `sf org display --target-org <alias>` inside the
-  container fails with `NamedOrgNotFoundError: No authorization
-  information found for <alias>` regardless of how the mount path is
-  configured — this is an architecture limitation of the current CLI,
-  not a path/typo to fix. `docker-compose.yml`'s `app.volumes` keeps the
-  mount line commented out for reference only.
+- **`cli` does not work inside this container — use `jwt`/`password`
+  instead.** `cli` mode itself is completely fine outside Docker (a
+  host-installed venv reaches the OS keychain natively); the limitation
+  is specific to reusing a host login *from inside a Linux container*.
 
-  **`cli` mode itself is completely fine outside Docker** — a
-  host-installed venv (README.md's own setup path) reaches the OS
-  keychain natively, so nothing here affects that workflow. The
-  limitation is specific to reusing a host login *from inside a Linux
-  container*.
+  Why: as part of Salesforce's May 27, 2026 CLI credential-security
+  update, `sf` stopped storing org authorization in a plaintext file
+  under `~/.sf` and now stores the actual token in the **host OS's
+  native credential store** (Windows Credential Manager / macOS Keychain
+  / `libsecret` on Linux) — a Linux container has no way to reach a
+  Windows/macOS keychain entry through any bind mount. Confirmed live
+  (2026-07-13): mounting `~/.sf` into the container only ever exposes
+  logs and cache (`deploy-cache.json`, `manifestCache`, `sf-*.log`),
+  never an `orgs/` directory with auth JSON, and `sf org display
+  --target-org <alias>` inside the container fails with
+  `NamedOrgNotFoundError` regardless of the mount path. This section
+  used to document a `~/.sf` bind-mount workaround for exactly this —
+  it no longer works, full stop; `docker-compose.yml`'s `app.volumes`
+  keeps the mount line commented out for reference only.
 
 ## Inspecting the mirror DB
 

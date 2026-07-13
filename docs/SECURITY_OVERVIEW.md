@@ -47,6 +47,18 @@ SQL Server "SF_Migration"        Salesforce org (via simple-salesforce /
  of any kind)
 ```
 
+**Optional containerized variant** (`Dockerfile`/`docker-compose.yml`,
+roadmap #68): the same `cli.py`/SQL Server/Salesforce architecture above,
+just running inside Docker rather than directly on the operator's host —
+not a new top-level actor. One trust-boundary-relevant difference worth
+naming here rather than only in `docs/DOCKER.md`: the default `cli`
+auth mode's credential (see §3) lives in the host OS's own keychain as of
+the May 2026 CLI update, which a Linux container has no way to reach —
+`cli` mode is simply unusable inside this container, `jwt`/`password`
+only. Nothing else about the trust model changes; see `docs/DOCKER.md`
+for the full container-specific auth-mode finding and §9 for this
+variant's own supply-chain surface.
+
 Two purely local surfaces worth naming for completeness (no network
 involvement beyond what's above): the Migration Run Book
 (`migration_run_book.py`) shells out to the local `git` binary
@@ -83,7 +95,7 @@ default:
 
 | Credential | Where it lives | How it's obtained | Notes |
 |---|---|---|---|
-| Salesforce session (default `cli` auth mode) | In-process memory only, for the process lifetime | `sf org auth show-access-token` (delegates to the Salesforce CLI's own token storage) | Never written to `.env`, never logged. The May 2026 CLI security update redacts it from `sf org display`, which is why `sf_client.py` calls the dedicated token command instead. |
+| Salesforce session (default `cli` auth mode) | In-process memory only, for the process lifetime | `sf org auth show-access-token` (delegates to the Salesforce CLI's own token storage) | Never written to `.env`, never logged. The May 2026 CLI security update redacts it from `sf org display`, which is why `sf_client.py` calls the dedicated token command instead. **That same update also moved the underlying token storage itself into the host OS's native keychain** (Windows Credential Manager / macOS Keychain / `libsecret`) rather than a plaintext file — fine for a host-installed venv, but it means this credential is **not reachable from inside the optional Docker container** (§2) no matter how `~/.sf` is mounted; `jwt`/`password` mode only there. See `docs/DOCKER.md`'s auth-mode section for the full finding. |
 | Salesforce JWT cert / connected-app key | `server.key` on disk (path set in `.env`) | Provisioned once by whoever sets up the connected app (an **External Client App** as of Spring '26 — legacy Connected App creation is disabled; see `ROADMAP.md` #18) | `.gitignore`'d (`server.crt`, the public half, is also gitignored — org/app-specific generated material, not template content); never read or printed by this framework outside the auth call itself. |
 | Data Cloud tenant token (`data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-profile`, `list-data-graphs` — `data-cloud-status`'s six checks don't need it, plain core-org SOQL) | In-process memory only, for the duration of a single CLI invocation | A second OAuth hop off an already-valid core-org session (`POST {instance}/services/a360/token`, `grant_type=urn:salesforce:grant-type:external:cdp`) — see `ROADMAP.md` #18 | `data_cloud.py`; a genuinely separate host (`*.c360a.salesforce.com`) and access token from the core org's, so treat it as its own credential, not an extension of the core session. |
 | Salesforce username/password/security token (`password` mode) | `.env` | Manually configured | Documented as the "dev fallback only" mode in `README.md` -- weakest of the three, avoid in any shared/production environment. |
@@ -249,6 +261,19 @@ exception is the optional DBHub MCP server (§2), fetched via `npx` rather
 than pinned in this repo -- flag it explicitly if evaluating this framework
 for adoption.
 
+**The optional Docker variant** (`Dockerfile`, roadmap #68) has its own
+supply-chain surface, separate from the packages above: the base image
+(`python:3.12-slim-bookworm`), Microsoft's own ODBC Driver 18/
+`mssql-tools18` apt repo (added via a `curl`-fetched GPG key + Microsoft's
+own `prod.list`, not pinned to a specific package version), NodeSource's
+Node 22 setup script (`curl -fsSL https://deb.nodesource.com/setup_22.x |
+bash -`, a `curl | bash` pattern, not vendored/checksum-verified), and
+`npm install --global @salesforce/cli` (no version pin — always installs
+whatever is current at build time). Flag this the same way as the DBHub
+`npx` case above if this container is evaluated for adoption; none of it
+is in the critical Salesforce/SQL Server data path itself, but it is
+still code executing during the image build.
+
 `.github/workflows/tests.yml` (roadmap #42) runs the pure-logic test suite
 on every push/PR: `permissions: contents: read` (least privilege, no
 write/deploy access), and its two GitHub Actions (`actions/checkout`,
@@ -279,7 +304,14 @@ adoption.
 
 ---
 
-*Last reviewed against the codebase during the 2026-07-12 ruthless-review
+*Last reviewed against the codebase during the 2026-07-13 Docker-environment
+pass (roadmap #68): added the optional containerized variant to §2, the
+cli-mode-in-container credential-reachability finding to §3 (Salesforce's
+May 2026 CLI update moved org auth into the host OS keychain, unreachable
+from a Linux container — confirmed live), and the Docker image's own
+supply-chain surface to §9 — none of this existed in the codebase as of
+the prior 2026-07-12 pass below. Previously reviewed during the
+2026-07-12 ruthless-review
 pass (covering the 8 new roadmap #52/#59-66 features -- `generate-run-book-
 flowchart`, `triage-failures`, `generate-adversarial-mock-data`,
 `generate-pass-summary`, `reset-dev-cycle`, `reconcile-load-counts`,

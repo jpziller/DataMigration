@@ -35,12 +35,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PATH="$PATH:/opt/mssql-tools18/bin"
 
-# Salesforce CLI -- only needed for SF_AUTH_MODE=cli (reusing an org
-# already authed on the HOST via `sf org login web`; see docs/DOCKER.md
-# for the ~/.sf volume mount that requires). jwt/password mode
+# Salesforce CLI -- installed so it's available for ad hoc use (e.g. `sf
+# project deploy start` for Hard Rule 8's field-security-bundled deploys)
+# via its own fresh `sf org login jwt`/`sf org login web` inside the
+# container. This framework's OWN SF_AUTH_MODE=jwt/password
 # (sf_client.py's connect_salesforce()) never shells out to this binary
-# at all, so it's fine to skip auth setup for this binary entirely on
-# those two modes.
+# at all -- only SF_AUTH_MODE=cli does, and that mode does NOT work here:
+# confirmed live, current `sf` CLI versions store org auth in the host
+# OS's own keychain (Windows Credential Manager / macOS Keychain /
+# libsecret), not a plaintext file under ~/.sf, so there's nothing a
+# Linux container can reach by reusing a HOST-authenticated session no
+# matter how that directory is mounted. See docs/DOCKER.md's auth-mode
+# section for the full finding.
 #
 # Deliberately uses NodeSource's own setup script for a current Node LTS,
 # NOT Debian's default `nodejs`/`npm` apt packages -- found in review:

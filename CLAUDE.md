@@ -1172,7 +1172,12 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   README.md's manual SQL Server/SSMS/ODBC-driver setup steps; the repo is
   bind-mounted into the `app` container, not copied in, so this is a
   packaging change, not a design change — every Hard Rule below applies
-  identically whether `cli.py` runs in a venv or in this container.
+  identically whether `cli.py` runs in a venv or in this container. One
+  real exception, not a Hard Rule but worth knowing: `SF_AUTH_MODE=cli`
+  itself does NOT work inside this container (Salesforce's May 2026 CLI
+  update moved org auth into the host OS's own keychain, unreachable from
+  a Linux container) — `jwt`/`password` only there. See `docs/DOCKER.md`'s
+  auth-mode section for the full finding.
 - `ROADMAP.md` — idea backlog and build status for planned tooling.
 - `metadata/*.json`, `mapping/*.xlsx` — generated, org-specific artifacts.
   Gitignored by default (every org's schema/mappings differ, so these

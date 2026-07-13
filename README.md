@@ -41,13 +41,9 @@ they differ. **Follow this order** — later steps depend on earlier ones
 **Using Docker instead?** `docker compose up -d` replaces steps 3–7 below
 (Python venv, SQL Server engine, SSMS, the ODBC driver, creating the
 database) with one command — same architecture, just containerized. See
-[`docs/DOCKER.md`](docs/DOCKER.md). One auth-mode caveat specific to the
-container: `cli` mode below does **not** work inside it — Salesforce's
-CLI now stores org auth in the host OS's own keychain, which a Linux
-container can't reach. Use `jwt` or `password` for anything running in
-Docker; `cli` is unaffected on a host-installed venv. See
-`docs/DOCKER.md`'s "Choosing a Salesforce auth mode inside the
-container" section for the full finding.
+[`docs/DOCKER.md`](docs/DOCKER.md) — including a container-specific
+auth-mode caveat (`cli` mode doesn't work there; see "Auth modes" below
+and `docs/DOCKER.md`'s own auth-mode section for the full finding).
 
 **Using SQLite instead (`SQL_BACKEND=sqlite`)?** Skip steps 4–7 entirely
 (SQL Server, SSMS, the ODBC driver, and creating a database) — SQLite needs

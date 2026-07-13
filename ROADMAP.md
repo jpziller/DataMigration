@@ -3902,14 +3902,17 @@ quietly patched**:
   `connect_salesforce()`) are pure Python and need the `sf` binary not at
   all, so they work with zero extra container config. `cli` mode needs a
   real browser for `sf org login web`, which doesn't work headlessly
-  inside a container — solved by authenticating on the **host** as usual,
-  then bind-mounting the host's `sf` CLI config directory (`~/.sf`) into
-  the container so the *already-authenticated* org is reusable from
-  inside it (a commented-out, OS-specific volume line in
-  `docker-compose.yml`, since the exact host path differs Windows vs.
-  Mac/Linux — see `docs/DOCKER.md`'s auth-mode section for the full
-  reasoning and the troubleshooting step if the mount path doesn't match
-  a given `sf` CLI version's actual storage location).
+  inside a container — the original idea here was a `~/.sf` bind mount to
+  reuse an already-authenticated host session, but **that turned out not
+  to work at all**: confirmed live (2026-07-13), current `sf` CLI
+  versions store org authorization in the host OS's own keychain
+  (Windows Credential Manager / macOS Keychain / `libsecret`), not a
+  plaintext file under `~/.sf` — nothing a Linux container can reach
+  through any bind mount, regardless of the exact host path. The
+  `docker-compose.yml` mount line was reverted to commented-out-for-
+  reference-only; use `jwt`/`password` for anything running in the
+  container. See `docs/DOCKER.md`'s auth-mode section for the full
+  finding.
 - *Whether to bundle `sqlcmd`*: yes — installed in the `app` image
   alongside the ODBC driver (both come from the same Microsoft
   `mssql-tools18` package), so the "look at SQL Server directly"
