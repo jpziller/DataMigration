@@ -101,6 +101,26 @@ venv may not be active in a fresh shell:
                 real transform scripts get built — it isn't forced into the Run Book's own
                 `ticket_url`/`ticket_label` header fields, which describe a whole ticket **system** link,
                 not one specific ticket number.)
+- Discovery question checklist: `.venv/Scripts/python.exe cli.py generate-discovery-checklist
+                Account Contact [--output discovery_checklist.md]`
+                (roadmap #60, the companion to `bootstrap-project` running the other direction:
+                instead of starting from a discovery output, generates the questions an architect
+                should be *asking* during discovery, derived from live org signals instead of a
+                generic template a human has to remember. `analyze-org-risk`'s own active validation
+                rules become real, specific questions (naming each rule's `ErrorDisplayField`/
+                `ErrorMessage`, not a generic "any validation rules?"); an object carrying
+                `RecordTypeId` becomes "does the client use Record Types here, get the exact
+                DeveloperName for each one in scope" (the RecordType Resolution Rule, #15/#36); a
+                reference field pointing at an object **not yet** in the candidate list becomes
+                "confirm that object is in scope too, or that target records already exist for it" —
+                deliberately the inverse of what `load_order.py`'s own dependency-edge builder tracks
+                (that one only records edges *within* scope), so this reads `describe()` directly
+                rather than reusing that function against its own grain. Purely read-only against
+                Salesforce (`describe()` + a live `analyze-org-risk`-style Tooling API scan per
+                object) — no engine/mirror-DB dependency at all, so this can run before the SQL
+                Server side of a project even exists, during discovery itself. Plain Markdown output
+                for v1, same "ship the simple version" discipline as `generate-run-book-flowchart`/
+                `generate-pass-summary`'s own v1 framing.)
 - Inspect org:  `.venv/Scripts/python.exe cli.py list-objects`
 -               `.venv/Scripts/python.exe cli.py describe Account`
 -               `.venv/Scripts/python.exe cli.py dump-describe Account`
@@ -653,7 +673,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
 `/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
-`/reconcile-load-counts`, `/assess-migration-readiness`, `/bootstrap-project`
+`/reconcile-load-counts`, `/assess-migration-readiness`, `/bootstrap-project`,
+`/generate-discovery-checklist`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -993,6 +1014,13 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   Migration Run Book — the mechanical first pass, closing the hand-off
   gap between upstream client discovery and this framework's own
   tooling. Never guesses mapping/field lists/transform logic.
+- `discovery_checklist.py` — discovery question checklist generator
+  (roadmap #60), the companion to `migration_brief.py` running the other
+  direction: generates the questions an architect should ask during
+  discovery from live org signals (active validation rules, RecordType
+  usage, out-of-scope lookup dependencies) rather than a generic
+  template. Read-only, no engine dependency — runs before the mirror DB
+  even needs to exist.
 - `parquet_import.py` — file → SQL movement (Parquet into a typed mirror-DB
   table), the flat-file counterpart to `replicate.py`'s org-sourced path.
   SQL-Server-only for now (see the "SQL backend" note above).

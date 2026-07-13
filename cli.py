@@ -66,6 +66,7 @@ import dev_cycle as devc
 import reconciliation as rc
 import readiness as rdy
 import migration_brief as mbf
+import discovery_checklist as dch
 
 
 def _ctx():
@@ -567,6 +568,30 @@ def bootstrap_project_cmd(brief_path, run_book_path, tab_name, schema):
                    "never guesses mapping, field lists, or transform logic.")
     else:
         click.echo("No valid objects -- nothing to analyze or scaffold. Fix the brief and try again.")
+
+
+@cli.command("generate-discovery-checklist")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--output", "output_path", default=None, help="Write the checklist to this .md file instead of only printing it.")
+def generate_discovery_checklist_cmd(object_names, output_path):
+    """Generate the discovery questions an architect should be asking
+    about each object (roadmap #60) -- derived from live org signals
+    (analyze-org-risk's active validation rules, whether the object
+    carries RecordTypeId, and any reference field pointing at an object
+    not yet in this candidate list), not a generic template. The
+    companion to bootstrap-project (#59), running the other direction.
+    Purely read-only against Salesforce -- no engine/mirror-DB dependency,
+    so this can run before the SQL Server side of a project even exists."""
+    _, sf, _e = _ctx()
+    checklist = dch.generate_discovery_checklist(sf, list(object_names))
+    markdown = dch.format_discovery_checklist_markdown(checklist)
+
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as fh:
+            fh.write(markdown)
+        click.echo(f"Wrote {output_path}")
+    else:
+        click.echo(markdown)
 
 
 @cli.command("enable-bulkops-logging")

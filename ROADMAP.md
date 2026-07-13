@@ -95,7 +95,7 @@ summarizes.
 | 57 | Data model ERD diagrams — source subject-area models + target model, SDMN-inspired | **Built** | `generate-target-data-model`, `generate-source-data-model` | Mermaid ERDs approximating Salesforce Data Model Notation (verified against the real SDMN guide — its per-entity color/border coding and diamond relationship symbol genuinely can't be reproduced in Mermaid; its solid-vs-dashed identifying/non-identifying line distinction can, and maps onto master-detail vs lookup). Target model relationships are real (`load_order.build_dependency_edges()`); source model relationships are a naming-convention guess only, always labeled and reported for review, never presented as confirmed. |
 | 58 | Bidirectional convert: Data Transform JSON ↔ Code Extension Python | Not built — depends on #45 | — | Idea: JSON→Python translates the canvas Data Transform's `nodes`/`ui` export into an `entrypoint.py` against the `datacustomcode` SDK, for the node types #45 already confirmed (`load`/`formula`/`outputD360`) — safe today, since it's known structure to known SDK calls. Python→JSON is the harder direction: it inherits #45's own generation blocker (8/11 node types still unconfirmed) and only ever recognizes a constrained, canvas-representable subset of Python, refusing whatever falls outside it rather than guessing. |
 | 59 | Migration brief intake / project bootstrap | **Built** | `bootstrap-project brief.yaml run_book.xlsx --tab Dev1` | A minimal YAML file (objects in scope, target org, ticket, per-object notes) that a discovery-AI session hands off, and one command that validates every named object against live `describe()`, runs `analyze-load-order`, and scaffolds the Migration Run Book — turning "discovery just finished" into a concrete first command sequence instead of a cold start. Never guesses mapping/field lists/transform logic. |
-| 60 | Discovery question checklist generator | Not built — new feature, explicitly requested | — | Idea: given a candidate object list, generate the per-object questions an architect should ask the client — driven by real signals this framework already computes (`analyze-org-risk` finds active validation rules → ask about that business rule; object carries RecordTypes → ask about the mapping), not a generic template. |
+| 60 | Discovery question checklist generator | **Built** | `generate-discovery-checklist <Objects> [--output path.md]` | Given a candidate object list, generates the per-object questions an architect should ask the client — driven by real signals this framework already computes (active validation rules' `ErrorDisplayField`, `RecordTypeId` presence, out-of-scope lookup dependencies), not a generic template. Read-only, no engine dependency. |
 | 61 | Bulk-load failure triage assistant | **Built** | `triage-failures <table> [--object] [--mapping-path]` | Groups a load's failures by normalized error signature (`_normalize_error_signature()`) and maps common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which existing command to run next — turning "N rows failed" into "1 root cause, here's where to look." `--object`/`--mapping-path` enable real cross-references (mapping-doc/`ObjectAutomationRisk`) instead of static text alone. |
 | 62 | Adversarial mock data generation | **Built** | `generate-adversarial-mock-data <Object> --count N --scenario scenario:field:rows` | A companion to `generate-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields, bad lookup references) so validation-rule collisions surface during Dev testing, not during a real client load. Writes to `<Object>_Mock_Adversarial`, tagged via a `REF_`-prefixed column so the same table can go straight into a real `bulkops` call. |
 | 63 | Reset-dev-cycle command | **Built** | `reset-dev-cycle --objects Account Contact [--purge-org-where Object:WHERE] [--dry-run]` | Codifies the manual reset ritual this project did by hand every dogfooding cycle: drops every `_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given objects and clears their profiling rows (mirror-DB-only, always safe); `--purge-org-where` optionally also purges matching org test data via the same `bulkops delete --where` mechanism (#32) — hard rule 2 applies in full. No skill wrapper, same as `bulkops` itself. |
@@ -3218,35 +3218,52 @@ against a real SQLite engine. Dogfooded live against this project's own
 org: confirmed a real object, caught a deliberately-typo'd one, and
 scaffolded a real Run Book tab with the correct script filename linked.
 
-## 60. Discovery question checklist generator (not built — new feature, explicitly requested)
+## 60. Discovery question checklist generator — BUILT (`discovery_checklist.py`)
 
 The companion to #59, running the other direction: instead of *starting*
-from a discovery output, generate the questions an architect should be
-*asking* during discovery, derived from what this framework already
-knows how to check rather than a generic template a human has to
-remember. Given a candidate object list (from a migration brief, or just
-typed in directly):
+from a discovery output, `generate_discovery_checklist()` (`cli.py
+generate-discovery-checklist <Objects> [--output path.md]`) generates
+the questions an architect should be *asking* during discovery, derived
+from what this framework already knows how to check rather than a
+generic template a human has to remember:
 
-- `analyze-org-risk` already finds active validation rules, Apex
-  triggers, workflow rules, and record-triggered Flows per object — turn
-  each one into a real question ("N active validation rule(s) found on
-  Account; confirm source data will satisfy `BillingCity` non-blank for
-  the rule that checks it" rather than a generic "any validation
-  rules?").
-- An object carrying `RecordTypeId` (the RecordType Resolution Rule, #15)
-  becomes "Does the client use Record Types on this object? Get the exact
-  DeveloperName for each one in scope."
-- `load_order.py`'s dependency graph surfaces an object with a
-  lookup/master-detail parent not yet in the candidate list — "This
-  object depends on `<Parent>`; confirm it's in scope too, or that target
-  records already exist for it."
+- `analyze_object_risk()` (`risk_analyzer.py`, #5) already finds active
+  validation rules per object — each one becomes a real question naming
+  its actual `ErrorDisplayField` and `ErrorMessage` ("confirm source data
+  will satisfy 'BillingCity' -- City is required" rather than a generic
+  "any validation rules?"). Apex triggers/workflow rules/flows are still
+  surfaced as summary counts for context, but don't generate individual
+  questions of their own — there's no natural client-facing question a
+  count alone implies the way a validation rule's own error message does.
+- An object carrying `RecordTypeId` (the RecordType Resolution Rule,
+  #15/#36) becomes "Does the client use Record Types on this object? Get
+  the exact DeveloperName for each one in scope."
+- A reference field pointing at an object **not yet** in the candidate
+  list becomes "This object depends on `<Parent>`; confirm it's in scope
+  too, or that target records already exist for it" — deliberately the
+  *inverse* of what `load_order.py`'s own `build_dependency_edges()`
+  tracks (that function only records edges *within* scope, by design),
+  so this reads `describe()` directly rather than repurposing that
+  function against its own grain.
 
-Mostly a new presentation layer over data `risk_analyzer.py`/`load_order.py`
+Mostly a new presentation layer over data `risk_analyzer.py`/`describe()`
 already fetch, not a new integration — the value is turning "what should
 I ask" into something derived from the org's actual complexity signals,
-not memory or a generic checklist template. Output could land as plain
-markdown, or as starter rows in a Migration Run Book's Pre-Migration
-phase (decide at build time which is more useful in practice).
+not memory or a generic checklist template. Purely read-only against
+Salesforce, with **no engine/mirror-DB dependency at all** — a
+deliberate design choice, not an oversight: this needs to run during
+discovery itself, potentially before the SQL Server side of a project
+exists yet, so it can't depend on `dbo.ObjectAutomationRisk` already
+being populated by a prior `analyze-org-risk` run — it calls the same
+live Tooling API scan directly instead. Plain Markdown output for v1,
+same "ship the simple version, decide on polish later" discipline as
+#52/#66's own v1 framing — landing questions as starter rows in a
+Migration Run Book's Pre-Migration phase instead (or in addition) remains
+a future enhancement, not built here. Dogfooded live against this
+project's own org: correctly flagged Account's real out-of-scope lookup
+dependencies (`DandBCompany`/`OperatingHours`/`User`) when run alone, and
+correctly suppressed the `Account` dependency once `Contact` was checked
+together with it.
 
 ## 61. Bulk-load failure triage assistant — BUILT (`failure_triage.py`)
 
