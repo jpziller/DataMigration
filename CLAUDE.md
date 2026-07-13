@@ -322,7 +322,15 @@ venv may not be active in a fresh shell:
                 `.venv/Scripts/python.exe cli.py check-load-table-duplicate-keys Account_Load Legacy_Id__c [--schema dbo]`
                 (`load_table_prep.py` — replaces the old `EXEC dbo.AddBulkLoadSortColumn`/
                 `EXEC dbo.CheckLoadTableDuplicateKeys` stored-procedure step. `check-load-table-
-                duplicate-keys` exits nonzero if anything is found, so it can gate a script.)
+                duplicate-keys` exits nonzero if anything is found, so it can gate a script. Both
+                commands validate the named column actually exists on the table before doing anything
+                else, raising a clear error if not — found in a ruthless-review pass: SQLite silently
+                treats an unmatched double-quoted identifier as a plain string literal rather than
+                erroring (a real, documented SQLite compatibility quirk), so a typo'd column name used
+                to produce a misleading, non-crashing wrong answer on that backend instead of a clear
+                failure. SQL Server never had this specific gap — an invalid bracket-quoted column name
+                already raised "Invalid column name" there — but the explicit check now makes both
+                backends fail the same clear way.)
 - Load (WRITES TO SALESFORCE — confirm the target org first):
                 `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c --email-deliverability system-email-only`
                 (insert/upsert require `--email-deliverability` — check Setup > Email Administration
