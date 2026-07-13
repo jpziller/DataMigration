@@ -1,4 +1,4 @@
-"""Backend-aware SQL dialect helpers (SQL Server + SQLite).
+"""Backend-aware SQL dialect helpers (SQL Server + SQLite + PostgreSQL).
 
 Every call site that used to build raw T-SQL by hand -- OBJECT_ID/
 COL_LENGTH existence checks, [schema].[table] bracket-quoted identifiers,
@@ -221,7 +221,128 @@ class SqliteDialect(SqlDialect):
         return df
 
 
-_DIALECTS = {"mssql": MssqlDialect(), "sqlite": SqliteDialect()}
+class PostgresDialect(SqlDialect):
+    """roadmap #69 -- the third real `sql_dialect.py` backend. Identifier
+    quoting/CTAS/LIMIT match SqliteDialect's own ANSI-ish conventions
+    (Postgres and SQLite happen to agree here); table/column introspection
+    uses information_schema (Postgres, unlike SQLite, genuinely implements
+    it) rather than SQLite's PRAGMA or SQL Server's OBJECT_ID/COL_LENGTH.
+    Not yet exercised against a live Postgres instance the way the mssql/
+    sqlite dialects were -- see ROADMAP.md #69 for what's verified vs.
+    reasoned-from-docs so far, and for the real, separate gap this alone
+    does NOT fix: bulkops.py/orchestrator.py/source_ingestion.py's own
+    opt-in log tables (BulkOpsLog/OrchestratorRunEvent/SourceIngestionLog)
+    pick their custom column types via a private mssql-or-sqlite-only
+    helper that bypasses this dialect seam entirely, not through
+    sf_type_to_sql() or anything else defined here."""
+
+    def qualify(self, schema, table):
+        return f'"{_escape_doublequote_ident(schema)}"."{_escape_doublequote_ident(table)}"'
+
+    def quote_ident(self, name):
+        return f'"{_escape_doublequote_ident(name)}"'
+
+    def raw_text_type(self):
+        return "TEXT"
+
+    def table_exists(self, engine, schema, table):
+        with engine.connect() as cx:
+            return cx.execute(
+                text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = :schema AND table_name = :table"
+                ),
+                {"schema": schema, "table": table},
+            ).fetchone() is not None
+
+    def column_exists(self, engine, schema, table, column):
+        with engine.connect() as cx:
+            return cx.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = :schema AND table_name = :table "
+                    "AND column_name = :column"
+                ),
+                {"schema": schema, "table": table, "column": column},
+            ).fetchone() is not None
+
+    def list_columns(self, engine, schema, table):
+        with engine.connect() as cx:
+            rows = cx.execute(
+                text(
+                    "SELECT column_name, data_type FROM information_schema.columns "
+                    "WHERE table_schema = :schema AND table_name = :table "
+                    "ORDER BY ordinal_position"
+                ),
+                {"schema": schema, "table": table},
+            ).all()
+        return [(r[0], r[1]) for r in rows]
+
+    def create_table_as_select_sql(self, schema, new_table, columns_sql, rest_sql):
+        # Same CTAS shape/limitation as SqliteDialect -- no guaranteed
+        # column-type carryover the way SQL Server's SELECT INTO gives;
+        # fine for the one real caller (build_retry_table), which only
+        # re-reads this table via pandas and re-serializes to CSV.
+        return f"CREATE TABLE {self.qualify(schema, new_table)} AS SELECT {columns_sql} {rest_sql}"
+
+    def select_top_n_sql(self, columns_sql, rest_sql, n):
+        return f"SELECT {columns_sql} {rest_sql} LIMIT {n}"
+
+    def autoincrement_pk_column_ddl(self, name):
+        # SQL-standard identity column syntax (Postgres 10+) -- Postgres's
+        # own docs recommend this over the legacy SERIAL pseudo-type.
+        return f"{name} INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
+
+    def sf_type_to_sql(self, field):
+        # Mirrors type_map.py's mssql granularity (real VARCHAR(n)/
+        # NUMERIC(p,s), not just SQLite's loose TEXT-for-everything
+        # affinity) but with Postgres-native type names -- no NVARCHAR
+        # (Postgres VARCHAR is already UTF-8, no separate N-prefixed type
+        # needed).
+        t = field["type"]
+        length = field.get("length") or 0
+        precision = field.get("precision") or 0
+        scale = field.get("scale") or 0
+
+        if t in ("id", "reference"):
+            return "VARCHAR(18)"
+        if t in ("string", "picklist", "combobox", "phone", "url",
+                 "email", "encryptedstring"):
+            n = length if 0 < length <= 4000 else 4000
+            return f"VARCHAR({n})"
+        if t in ("textarea", "multipicklist"):
+            return "TEXT"
+        if t == "boolean":
+            return "BOOLEAN"
+        if t == "int":
+            return "INTEGER"
+        if t in ("double", "currency", "percent"):
+            if precision > 0:
+                return f"NUMERIC({precision},{scale})"
+            return "DOUBLE PRECISION"
+        if t == "date":
+            return "DATE"
+        if t == "datetime":
+            return "TIMESTAMP"
+        if t == "time":
+            return "TIME"
+        if t == "base64":
+            return "BYTEA"
+        return "TEXT"
+
+    def normalize_datetime_columns(self, df):
+        # psycopg2 registers its own native adapters for Python
+        # datetime.datetime/date objects (long-established, documented
+        # psycopg2 behavior) -- same category of reasoning as pyodbc's for
+        # MssqlDialect above, so no string-formatting workaround should be
+        # needed. Unlike the mssql/sqlite dialects, this hasn't actually
+        # been exercised against a live Postgres instance yet -- treat as
+        # the first thing to check if a real Postgres-backed replicate/
+        # bulkops run hits a datetime write error.
+        return df
+
+
+_DIALECTS = {"mssql": MssqlDialect(), "sqlite": SqliteDialect(), "postgresql": PostgresDialect()}
 
 
 def for_engine(engine):

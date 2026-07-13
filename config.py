@@ -24,8 +24,8 @@ class Settings:
     sf_password: str = _get("SF_PASSWORD", "")
     sf_security_token: str = _get("SF_SECURITY_TOKEN", "")
 
-    # SQL backend -- "mssql" (default) or "sqlite". See sql_client.py/
-    # sql_dialect.py for what changes per backend.
+    # SQL backend -- "mssql" (default), "sqlite", or "postgresql" (roadmap
+    # #69). See sql_client.py/sql_dialect.py for what changes per backend.
     sql_backend: str = _get("SQL_BACKEND", "mssql")
 
     # SQL Server (sql_backend == "mssql")
@@ -37,6 +37,13 @@ class Settings:
     sql_pwd: str = _get("SQL_PWD", "")
     sql_encrypt: str = _get("SQL_ENCRYPT", "yes")
     sql_trust_cert: str = _get("SQL_TRUST_SERVER_CERT", "yes")
+
+    # PostgreSQL (sql_backend == "postgresql", roadmap #69) -- reuses
+    # sql_server/sql_database/sql_uid/sql_pwd above (already
+    # backend-generic names, not literally SQL-Server-specific); these two
+    # are the only genuinely Postgres-specific settings.
+    sql_port: str = _get("SQL_PORT", "5432")
+    sql_postgres_sslmode: str = _get("SQL_POSTGRES_SSLMODE", "prefer")
 
     # SQLite (sql_backend == "sqlite"): sql_sqlite_dir holds one <schema>.db
     # file per schema in sql_sqlite_schemas, each ATTACHed under its own

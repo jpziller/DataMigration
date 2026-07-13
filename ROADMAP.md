@@ -3941,21 +3941,58 @@ variant (SQLite needs no server at all, so there's nothing to
 containerize there) — `docs/DOCKER.md` notes both explicitly as
 deliberately out of scope for this pass.
 
-## 69. PostgreSQL as a third `sql_dialect.py` backend (not built — roadmap idea)
+## 69. PostgreSQL as a third `sql_dialect.py` backend (in progress — core dialect built 2026-07-13)
 
 The other technology worth a genuine "yes, eventually" out of the four
 raised. `sql_dialect.py` already proves the seam works — one `SqlDialect`
-ABC, `MssqlDialect`/`SqliteDialect` as the two real implementations,
-every other module (`replicate.py`, `bulkops.py`, `load_table_prep.py`,
-`risk_analyzer.py`, `migration_run_book.py`, `mapping_doc.py`,
-`snowfakery_data.py`, `mock_data.py`'s DDL step, `load_order.py`'s
-`write_to_sql()`) routes through it instead of hand-rolling T-SQL. A
-`PostgresDialect` implementing the same abstract methods
-(`qualify`/`quote_ident`/`table_exists`/`column_exists`/`list_columns`/
-`create_table_as_select_sql`/`select_top_n_sql`/
-`autoincrement_pk_column_ddl`/`sf_type_to_sql`/`normalize_datetime_columns`)
-is the same shape of work the SQLite port already was — a known
-quantity, not a research project.
+ABC, `MssqlDialect`/`SqliteDialect` as the two real implementations. A
+third, `PostgresDialect`, is now built too, implementing the same
+abstract methods (`qualify`/`quote_ident`/`table_exists`/`column_exists`/
+`list_columns`/`create_table_as_select_sql`/`select_top_n_sql`/
+`autoincrement_pk_column_ddl`/`sf_type_to_sql`/`normalize_datetime_columns`),
+registered under `_DIALECTS["postgresql"]` to match `engine.dialect.name`
+for a `postgresql+psycopg2://` engine (`sql_client.py`'s
+`_make_postgres_engine()`, using `sqlalchemy.engine.URL.create()` rather
+than a hand-rolled connection string — its password field is redacted
+by SQLAlchemy's own `repr()`/`str()` by default, confirmed live, unlike
+`_make_mssql_engine()`'s `odbc_connect` blob which that function's own
+comment already flags as unmaskable). `SQL_BACKEND=postgresql` plus
+`SQL_PORT`/`SQL_POSTGRES_SSLMODE` (reusing `SQL_SERVER`/`SQL_DATABASE`/
+`SQL_UID`/`SQL_PWD` for the rest) is wired through `config.py`, with
+`psycopg2-binary` added to `requirements.txt`. 10 new/updated unit tests
+in `tests/test_sql_dialect.py` cover identifier quoting, CTAS/`LIMIT`
+SQL, the identity-column DDL, `sf_type_to_sql`'s full type mapping, and
+`for_engine()` resolution — confirmed passing, plus a live (no server
+needed) end-to-end check that `config.py` → `sql_client.make_engine()`
+→ `sql_dialect.for_engine()` resolves to a real `PostgresDialect`
+instance with a correctly-redacted engine URL.
+
+**What this does NOT yet cover — found during this same build, not
+glossed over**: every module already claimed to route purely through
+`sql_dialect.py` (`replicate.py`, `load_table_prep.py`, `risk_analyzer.py`,
+`migration_run_book.py`, `mapping_doc.py`, `snowfakery_data.py`,
+`mock_data.py`'s DDL step, `load_order.py`'s `write_to_sql()`) genuinely
+does, and is Postgres-capable now that `PostgresDialect` exists.
+`source_ingestion.py`'s SQL-Server-BULK-INSERT-vs-generic-load branch
+(`isinstance(d, MssqlDialect)`) also already generalizes correctly —
+its "else" path is a genuinely backend-agnostic chunked
+`pandas.read_csv`/`to_sql()`, not actually SQLite-specific despite the
+comments saying "SQLite." The one real exception found: `bulkops.py`'s
+and `orchestrator.py`'s own `_col_type()` helper (and the same pattern
+inlined in `source_ingestion.py`'s `enable_source_ingestion_logging()`)
+picks each opt-in log table's (`BulkOpsLog`/`OrchestratorRunEvent`/
+`SourceIngestionLog`) custom column types from a private
+`(mssql_type, sqlite_type)` tuple + `isinstance(d, MssqlDialect)`
+ternary that never calls into `sql_dialect.py` at all — for
+`SQL_BACKEND=postgresql`, this silently falls into the *sqlite* branch
+(e.g. a `DATETIME2` column becomes plain `TEXT` instead of a real
+`TIMESTAMP`). Not fixed in this pass — needs a shared, three-way-aware
+replacement for that private helper (ideally one, in `sql_dialect.py`
+itself, that all three call sites share instead of three independent
+copies) before those three specific opt-in logging tables are trusted
+against a real Postgres backend. Everything else in the core load
+engine (`replicate`/`bulkops`'s own writeback/`retry`, hard rules 6/7's
+`load_table_prep.py`) does not have this gap.
 
 **Why this, specifically, over other possible third backends**: Postgres
 is free, genuinely production-grade (unlike SQLite, which this project

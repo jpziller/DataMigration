@@ -10,7 +10,7 @@ import datetime
 import pandas as pd
 
 import sql_dialect
-from sql_dialect import MssqlDialect, SqliteDialect
+from sql_dialect import MssqlDialect, PostgresDialect, SqliteDialect
 
 
 def test_sqlite_normalize_datetime_columns_uses_t_separator_no_fraction():
@@ -37,17 +37,67 @@ def test_mssql_normalize_datetime_columns_is_a_no_op():
     assert pd.api.types.is_datetime64_any_dtype(out["CreatedAt"])
 
 
+def test_postgres_normalize_datetime_columns_is_a_no_op():
+    df = pd.DataFrame({"CreatedAt": pd.to_datetime(["2025-08-03 17:16:48"])})
+    out = PostgresDialect().normalize_datetime_columns(df)
+    assert out["CreatedAt"].iloc[0] == df["CreatedAt"].iloc[0]
+    assert pd.api.types.is_datetime64_any_dtype(out["CreatedAt"])
+
+
 def test_qualify_and_quote_ident_match_each_backend_convention():
     assert MssqlDialect().qualify("dbo", "Account") == "[dbo].[Account]"
     assert MssqlDialect().quote_ident("Sort") == "[Sort]"
     assert SqliteDialect().qualify("dbo", "Account") == '"dbo"."Account"'
     assert SqliteDialect().quote_ident("Sort") == '"Sort"'
+    assert PostgresDialect().qualify("dbo", "Account") == '"dbo"."Account"'
+    assert PostgresDialect().quote_ident("Sort") == '"Sort"'
+
+
+def test_postgres_create_table_as_select_and_select_top_n():
+    d = PostgresDialect()
+    assert (
+        d.create_table_as_select_sql("dbo", "Account_Retry", "*", "FROM \"dbo\".\"Account_Load\"")
+        == 'CREATE TABLE "dbo"."Account_Retry" AS SELECT * FROM "dbo"."Account_Load"'
+    )
+    assert d.select_top_n_sql("*", 'FROM "dbo"."Account"', 10) == 'SELECT * FROM "dbo"."Account" LIMIT 10'
+
+
+def test_postgres_autoincrement_pk_column_ddl_uses_identity_syntax():
+    assert (
+        PostgresDialect().autoincrement_pk_column_ddl("LogId")
+        == "LogId INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
+    )
+
+
+def test_postgres_sf_type_to_sql_matches_mssql_granularity_with_postgres_names():
+    d = PostgresDialect()
+    assert d.sf_type_to_sql({"type": "id"}) == "VARCHAR(18)"
+    assert d.sf_type_to_sql({"type": "string", "length": 80}) == "VARCHAR(80)"
+    assert d.sf_type_to_sql({"type": "string", "length": 0}) == "VARCHAR(4000)"
+    assert d.sf_type_to_sql({"type": "textarea"}) == "TEXT"
+    assert d.sf_type_to_sql({"type": "boolean"}) == "BOOLEAN"
+    assert d.sf_type_to_sql({"type": "int"}) == "INTEGER"
+    assert d.sf_type_to_sql({"type": "currency", "precision": 18, "scale": 2}) == "NUMERIC(18,2)"
+    assert d.sf_type_to_sql({"type": "double", "precision": 0, "scale": 0}) == "DOUBLE PRECISION"
+    assert d.sf_type_to_sql({"type": "date"}) == "DATE"
+    assert d.sf_type_to_sql({"type": "datetime"}) == "TIMESTAMP"
+    assert d.sf_type_to_sql({"type": "time"}) == "TIME"
+    assert d.sf_type_to_sql({"type": "base64"}) == "BYTEA"
+    assert d.sf_type_to_sql({"type": "reference"}) == "VARCHAR(18)"
+
+
+def test_for_engine_resolves_postgresql_to_postgres_dialect():
+    class _FakeDialectEngine:
+        class dialect:
+            name = "postgresql"
+
+    assert isinstance(sql_dialect.for_engine(_FakeDialectEngine()), PostgresDialect)
 
 
 def test_for_engine_rejects_unsupported_dialect_name():
     class _FakeDialectEngine:
         class dialect:
-            name = "postgresql"
+            name = "oracle"
 
     try:
         sql_dialect.for_engine(_FakeDialectEngine())

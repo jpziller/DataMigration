@@ -1,6 +1,7 @@
 simple-salesforce>=1.12.9
 SQLAlchemy>=2.0
 pyodbc>=5.1
+psycopg2-binary>=2.9
 pandas>=2.2
 python-dotenv>=1.0
 click>=8.1

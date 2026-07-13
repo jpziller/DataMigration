@@ -642,17 +642,22 @@ venv may not be active in a fresh shell:
   any SQLite browser) against the relevant `<schema>.db` file under
   `SQL_SQLITE_DIR` instead — there's no `sqlcmd` equivalent needed.
 
-**SQL backend**: `SQL_BACKEND` in `.env` is `mssql` (default) or `sqlite`,
-per project — see `sql_client.py`/`sql_dialect.py`. SQLite mode uses
+**SQL backend**: `SQL_BACKEND` in `.env` is `mssql` (default), `sqlite`,
+or `postgresql` (roadmap #69, in progress — see below), per project —
+see `sql_client.py`/`sql_dialect.py`. SQLite mode uses
 `SQL_SQLITE_DIR` (a directory, one `<schema>.db` file per schema) and
 `SQL_SQLITE_SCHEMAS` (comma-separated, e.g. `dbo,source,staging`) instead
 of `SQL_SERVER`/`SQL_DATABASE`/the ODBC settings — every declared schema
 is `ATTACH DATABASE`'d under its own name on each connection, so an
 existing `schema=` argument anywhere in this codebase already means the
-right thing on either backend, no per-call-site changes needed. The
-actual load engine — `replicate`, `bulkops` (writeback, activity logging,
-retry), hard rules 6/7's tooling, and `import-csv-directory`'s CSV
-staging — works on both backends. `risk_analyzer.py`, `migration_run_book.py`,
+right thing on either backend, no per-call-site changes needed.
+PostgreSQL mode (SQLAlchemy + `psycopg2-binary`) reuses `SQL_SERVER`/
+`SQL_DATABASE`/`SQL_UID`/`SQL_PWD` directly (already backend-generic
+names) plus two Postgres-only settings, `SQL_PORT` (default `5432`) and
+`SQL_POSTGRES_SSLMODE` (default `prefer`). The actual load engine —
+`replicate`, `bulkops` (writeback, activity logging, retry), hard rules
+6/7's tooling, and `import-csv-directory`'s CSV staging — works on all
+three backends. `risk_analyzer.py`, `migration_run_book.py`,
 `mapping_doc.py`, and `snowfakery_data.py` have also been ported to
 `sql_dialect.py` (orchestrator Phase 1 needed the first of those; the
 others followed the same pattern). `mock_data.py`'s own table-DDL step
@@ -667,8 +672,16 @@ and the remaining data-architect tools (`profiling.py`, `auto_mapper.py`,
 `solution_doc.py`, `parquet_import.py`, `record_types.py`,
 `reference_record.py`) are **SQL-Server-only for now** — a deliberate
 scope boundary, not an oversight; port one incrementally via the same
-`sql_dialect.py` helpers whenever a real SQLite project
-actually needs it.
+`sql_dialect.py` helpers whenever a real SQLite or PostgreSQL project
+actually needs it. **One known gap `PostgresDialect` alone doesn't
+close**: `bulkops.py`/`orchestrator.py`/`source_ingestion.py`'s own
+opt-in log tables (`BulkOpsLog`/`OrchestratorRunEvent`/
+`SourceIngestionLog`) pick their custom column types via a private
+`isinstance(d, MssqlDialect)`-or-`sqlite_type` helper that bypasses
+`sql_dialect.py` entirely — real, silent mistyping risk for Postgres
+(e.g. a `DATETIME2` column would fall through to the `sqlite_type`
+branch, `TEXT`, rather than a real `TIMESTAMP`) until that helper is
+made properly three-way-aware. See `ROADMAP.md` #69 for the full status.
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,

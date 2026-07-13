@@ -1,13 +1,14 @@
-"""SQL connectivity -- SQL Server (SQLAlchemy + pyodbc) or SQLite, per
-Settings.sql_backend. See sql_dialect.py for the backend-aware helpers
-that use whichever engine this returns."""
+"""SQL connectivity -- SQL Server (SQLAlchemy + pyodbc), SQLite, or
+PostgreSQL (SQLAlchemy + psycopg2), per Settings.sql_backend. See
+sql_dialect.py for the backend-aware helpers that use whichever engine
+this returns."""
 import datetime
 import os
 import sqlite3
 import urllib.parse
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, URL
 
 from config import Settings
 
@@ -121,9 +122,36 @@ def _make_sqlite_engine(s: Settings) -> Engine:
     return engine
 
 
+def _make_postgres_engine(s: Settings) -> Engine:
+    # Built via sqlalchemy.engine.URL.create() rather than a hand-rolled
+    # f-string -- unlike _make_mssql_engine's odbc_connect blob (which
+    # SQLAlchemy's own password redaction can't see into, per that
+    # function's own comment), a URL object stores the password as its own
+    # distinct field, which SQLAlchemy already knows how to redact in any
+    # repr/str of the engine or its .url -- one fewer way to accidentally
+    # leak SQL_PWD if this is ever debug-printed later, not just "don't
+    # add echo=True" discipline.
+    port = int(s.sql_port) if s.sql_port else None
+    query = {"sslmode": s.sql_postgres_sslmode} if s.sql_postgres_sslmode else {}
+    url = URL.create(
+        "postgresql+psycopg2",
+        username=s.sql_uid or None,
+        password=s.sql_pwd or None,
+        host=s.sql_server,
+        port=port,
+        database=s.sql_database,
+        query=query,
+    )
+    return create_engine(url)
+
+
 def make_engine(s: Settings) -> Engine:
     if s.sql_backend == "sqlite":
         return _make_sqlite_engine(s)
     if s.sql_backend == "mssql":
         return _make_mssql_engine(s)
-    raise ValueError(f"Unsupported SQL_BACKEND: {s.sql_backend!r} (expected 'mssql' or 'sqlite')")
+    if s.sql_backend == "postgresql":
+        return _make_postgres_engine(s)
+    raise ValueError(
+        f"Unsupported SQL_BACKEND: {s.sql_backend!r} (expected 'mssql', 'sqlite', or 'postgresql')"
+    )
