@@ -3823,3 +3823,171 @@ deck/PDF pulling from the same source-of-truth files (`CLAUDE.md`,
 `ROADMAP.md`, `docs/SECURITY_OVERVIEW.md`) is the more consistent direction,
 but that's a real design decision for whoever scopes the actual build, not
 decided here.
+
+## 68. Docker-based local dev environment (not built — roadmap idea)
+
+Raised directly, alongside PostgreSQL/Fivetran/Apache Hop, as a technology
+worth an opinion on. Verdict here is the opposite of the two FAQ entries
+below (#70) — this one is a genuine fit, not a "why not."
+
+**The actual friction today**: every setup instruction in this repo
+(`CLAUDE.md`'s own canonical commands, `sqlcmd -S localhost -E`) assumes a
+Windows box with a local SQL Server instance and the ODBC driver already
+installed — real friction for a new contributor or a fresh project
+machine, and a genuine barrier on non-Windows hardware. The test suite
+already sidesteps this for CI (`SQL_BACKEND=sqlite`, no server needed at
+all — see `sql_client.py`'s `_make_sqlite_engine`), but that's a
+CI-only escape hatch, not a real local dev story for anyone who actually
+needs to run against `mssql` (most of the SQL-Server-only tooling listed
+in CLAUDE.md's "SQL backend" section — `sql/functions/`, `profiling.py`,
+`auto_mapper.py`, etc. — only exercises for real against `mssql`).
+
+**What this would look like**: a `docker-compose.yml` bundling a Python
+app container (this repo + `requirements.txt` + the SQL Server ODBC
+driver preinstalled) alongside a `mcr.microsoft.com/mssql/server`
+container (or a PostgreSQL container, if #69 below ever lands) — `docker
+compose up`, then the exact same `cli.py` commands this repo already
+documents, no manual driver/instance setup at all. Doesn't change
+anything about Hard Rule 1 (mirror-DB-only writes) or any other Hard
+Rule — purely a packaging change for the same architecture, not a design
+change.
+
+**Real open questions before this is scoped for real**: whether SQL
+Server's own Linux container image is licensed acceptably for this use
+(Developer edition is free for non-production use, which fits this
+project's own dev/practice framing); whether `sf` CLI auth (this
+framework's whole Salesforce connection story, per `sf_client.py`) works
+cleanly from inside a container without fighting browser-based OAuth
+flows; and whether the container should also bundle `sqlcmd`/`mssql-tools18`
+for the "look at SQL Server directly" read-only workflow CLAUDE.md
+documents, or leave that to the host machine. None of these are blockers,
+just real decisions for whoever picks this up.
+
+## 69. PostgreSQL as a third `sql_dialect.py` backend (not built — roadmap idea)
+
+The other technology worth a genuine "yes, eventually" out of the four
+raised. `sql_dialect.py` already proves the seam works — one `SqlDialect`
+ABC, `MssqlDialect`/`SqliteDialect` as the two real implementations,
+every other module (`replicate.py`, `bulkops.py`, `load_table_prep.py`,
+`risk_analyzer.py`, `migration_run_book.py`, `mapping_doc.py`,
+`snowfakery_data.py`, `mock_data.py`'s DDL step, `load_order.py`'s
+`write_to_sql()`) routes through it instead of hand-rolling T-SQL. A
+`PostgresDialect` implementing the same abstract methods
+(`qualify`/`quote_ident`/`table_exists`/`column_exists`/`list_columns`/
+`create_table_as_select_sql`/`select_top_n_sql`/
+`autoincrement_pk_column_ddl`/`sf_type_to_sql`/`normalize_datetime_columns`)
+is the same shape of work the SQLite port already was — a known
+quantity, not a research project.
+
+**Why this, specifically, over other possible third backends**: Postgres
+is free, genuinely production-grade (unlike SQLite, which this project
+already treats as CI/dev-only, never a real migration project's actual
+mirror DB), and the obvious choice for a client environment that doesn't
+already run SQL Server — a self-hosted Postgres instance or a managed
+one (RDS, Supabase, Cloud SQL) removes the SQL Server licensing question
+entirely for a project that has no other reason to run Windows/SQL
+Server infrastructure.
+
+**The real scope, stated plainly rather than undersold**: CLAUDE.md's own
+"SQL backend" section already lists what's SQL-Server-only *today* as a
+"deliberate scope boundary, not an oversight" — `sql/functions/`
+(cleansing/matching/lookups, real T-SQL function bodies), plus
+`profiling.py`, `auto_mapper.py`, `solution_doc.py`, `parquet_import.py`,
+`record_types.py`, `reference_record.py`. Postgres becoming a genuinely
+first-class backend (not just "table DDL and basic reads/writes work,"
+which is roughly where SQLite already sits) means porting all of those
+too, the same one-at-a-time, "port it when a real project needs it"
+discipline CLAUDE.md already states for SQLite. Not a reason to avoid
+this — just a reason not to promise more than `sql_dialect.py`'s own
+seam actually delivers on day one.
+
+## 70. FAQ: Fivetran / Apache Hop — why they're not part of this framework (researched — not pursued, out of scope)
+
+Two more technologies raised directly, alongside Docker/PostgreSQL above
+— but these two are a genuine "no," not a future roadmap item, so this
+entry is written as an FAQ rather than a build plan: the recurring
+question ("why doesn't this framework just use X") answered once, in
+enough technical depth that it doesn't need re-litigating next time
+someone (human or AI session) proposes the same substitution. Same
+"Researched — not pursued" convention as #43 (Salesforce GraphQL API) —
+measured against the "Scope" section at the top of this file, not
+against "is the tool good" in the abstract. Both tools are genuinely
+good at what they're built for; neither is built for what this framework
+actually does.
+
+**Q: Why not replace `replicate.py`/`bulkops.py` with Fivetran?**
+
+Fivetran is a managed ELT platform: continuous, incremental sync from a
+Salesforce connector into a warehouse, with schema-drift handling and
+near-real-time refresh. That's a fundamentally different job from what
+`replicate.py`/`bulkops.py` do here — a bounded, human-confirmed,
+one-time-per-environment migration cutover (Dev → UAT → PROD, per this
+framework's own pass model), not an ongoing pipeline that runs forever.
+Three concrete mismatches, not just a vibe:
+
+- **Auditability collides with Hard Rule 1 and Hard Rule 10.** Every
+  write this framework makes is either a plain Python CLI verb or a
+  git-versioned `.sql` file under `sql/transformations/`, with a ticket
+  reference required on the file itself — anyone can `git diff`/PR-review
+  exactly what a load did and why. Fivetran's own sync/transform logic
+  lives inside its managed service, not as exportable, reviewable code —
+  adopting it for the *replicate* step would mean the single most
+  safety-critical operation (getting live org data into the mirror DB)
+  happens inside a black box this repo can't version, diff, or code-review
+  at all.
+- **The pricing model is built for the wrong shape of workload.**
+  Fivetran bills by monthly active rows — steady-state, ongoing
+  ingestion. A migration project's actual load pattern is bursty (a
+  handful of full-object extracts across Dev/UAT/PROD passes, not a
+  continuously-running sync) — paying for a continuous-sync pricing model
+  to do a few one-time extracts is the wrong tool's cost curve, not
+  just a preference.
+- **Where it genuinely *would* make sense**: a client's own separate,
+  ongoing BI/analytics warehouse sync is a real and legitimate use of
+  Fivetran — just not this framework's job. `replicate.py` and a client's
+  existing Fivetran pipeline can coexist without conflict; there's no
+  reason to route migration-specific extraction through it instead of the
+  direct Salesforce API calls this framework already makes.
+
+**Q: Why not replace hand-written `sql/transformations/*.sql` scripts
+with Apache Hop (or Pentaho/Talend-style visual ETL)?**
+
+Apache Hop's core value proposition is a visual pipeline/workflow
+designer — pipelines are saved as `.hpl`/`.hwf` XML files carrying
+canvas-position metadata, authored and edited through its own Java
+desktop app. That's the direct opposite of this framework's foundational
+design choice: every transform is a plain, numbered `.sql` file, ticketed
+(Hard Rule 10) and reviewed like any other code change, not a GUI
+designer's saved canvas state. Concretely:
+
+- **Not meaningfully code-reviewable.** A data architect reviewing a Hop
+  pipeline file in a PR is reviewing XML positional/canvas metadata, not
+  the actual transformation logic in a form a human reads the way they'd
+  read T-SQL — this framework's whole audit trail (Hard Rule 10's ticket
+  traceability, `check-mapping-balance`'s diff between a mapping doc and
+  the real implemented columns) depends on the transform itself being
+  plain, parseable text, which a visual designer's save format isn't.
+- **A second runtime and trust boundary for no capability gap.** Hop
+  needs its own JVM runtime and project/metadata config alongside the
+  Python + SQL Server (or SQLite) this framework already needs — widening
+  `docs/SECURITY_OVERVIEW.md`'s trust boundary and adding a whole second
+  stack to secure and maintain, without closing any gap in what this
+  framework's actual job (SQL Server as the single integration hub, one
+  direction in via `replicate`, one direction out via `bulkops`) doesn't
+  already do.
+- **Where it genuinely *would* make sense**: a client's own pre-existing,
+  heterogeneous, multi-source warehouse ETL (flat files, several
+  different databases, multiple SaaS APIs chained together) is a real
+  problem Hop is built to solve — but that's a different, ongoing
+  warehouse-ETL problem than migration cutover remediation, and nothing
+  here argues against a client using Hop for that separately, upstream of
+  anything this framework touches.
+
+**Conclusion, for both**: neither tool closes a gap in what this
+framework's actual scope requires — an audited, git-versioned, one-time-
+per-environment Salesforce migration cutover (see "Scope" at the top of
+this file) — and adopting either would trade away the core trust model
+(everything reviewable in plain git-tracked code) for capabilities aimed
+at a genuinely different job (ongoing SaaS sync, general-purpose
+heterogeneous visual ETL). Recorded here so this substitution doesn't get
+re-proposed without this reasoning being visible first, same as #43.
