@@ -119,7 +119,15 @@ def _mapping_balance_gate(sf, mapping_path, object_name, load_table):
     script_path = os.path.join(_TRANSFORMS_DIR, script_filename)
     try:
         balance = mapping_doc.check_mapping_balance(sf, mapping_path, object_name, script_path, load_table_name=load_table)
-    except ValueError as e:
+    except (ValueError, FileNotFoundError) as e:
+        # openpyxl.load_workbook() raises FileNotFoundError for a bad
+        # --mapping-path, not ValueError -- found in review: this used to
+        # crash the whole multi-object assess_migration_readiness() call
+        # over one bad path, the exact same bug class as pass_summary.py's
+        # already-fixed crash, and the fix pattern (catch the file-missing
+        # case, report "not checked" instead of a raw traceback) already
+        # existed right next door in reconciliation.py's own
+        # _source_table_from_mapping().
         return {"ok": None, "detail": str(e)}
 
     ok = not any(balance.values())

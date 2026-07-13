@@ -166,6 +166,28 @@ def test_org_risk_gate_passes_when_scanned(sqlite_engine):
     assert result["ok"] is True
 
 
+# --- check-mapping-balance gate ---
+
+def test_mapping_balance_gate_not_checked_without_mapping_path():
+    sf = _StubSF("Account", _ACCOUNT_FIELDS)
+    result = rd._mapping_balance_gate(sf, None, "Account", "Account_Load")
+    assert result["ok"] is None
+
+
+def test_mapping_balance_gate_reports_bad_mapping_path_cleanly_not_a_crash():
+    """Found in review: openpyxl.load_workbook() raises FileNotFoundError
+    for a bad --mapping-path, not ValueError -- this used to crash the
+    whole multi-object assess_migration_readiness() call over one bad
+    path, the same bug class already fixed in pass_summary.py. Uses the
+    real Account transform script this repo already has under
+    sql/transformations/, so script_numbering.script_filename_for()
+    actually finds one and the code reaches the mapping-path open."""
+    sf = _StubSF("Account", _ACCOUNT_FIELDS)
+    result = rd._mapping_balance_gate(sf, "/does/not/exist.xlsx", "Account", "Account_Load")
+    assert result["ok"] is None
+    assert "No such file" in result["detail"] or "cannot find" in result["detail"].lower()
+
+
 # --- Email Deliverability attestation gate ---
 
 def test_email_gate_not_checked_without_bulkopslog(sqlite_engine):

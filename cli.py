@@ -74,6 +74,25 @@ def _ctx():
     return s, connect_salesforce(s), make_engine(s)
 
 
+def _parse_object_value_pairs(items, option_name):
+    """Parse a repeatable Object=Value CLI option (--load-table,
+    --migration-key) into a dict, rejecting malformed syntax AND a
+    repeated Object with a clear error -- found in review: the identical
+    dict-keyed-by-name silent-overwrite bug already fixed once for
+    --scenario existed independently at all four of this pattern's other
+    call sites, silently keeping only the last value for a repeated key
+    with no warning at all."""
+    result = {}
+    for item in items:
+        if "=" not in item:
+            raise click.BadParameter(f"{option_name} must be Object=Value, got: {item!r}")
+        obj, _, value = item.partition("=")
+        if obj in result:
+            raise click.BadParameter(f"{option_name} '{obj}' was given more than once.")
+        result[obj] = value
+    return result
+
+
 def _print_table(df, max_rows=50):
     """Render a DataFrame as a rich console table, truncated to max_rows."""
     if df.empty:
@@ -457,12 +476,7 @@ def reconcile_load_counts_cmd(object_names, schema, mapping_path, load_tables):
     they're supposed to. Read-only, aggregates data every one of these
     tools already produces."""
     _, _, engine = _ctx()
-    load_table_map = {}
-    for item in load_tables:
-        if "=" not in item:
-            raise click.BadParameter(f"--load-table must be Object=TableName, got: {item!r}")
-        obj, _, table = item.partition("=")
-        load_table_map[obj] = table
+    load_table_map = _parse_object_value_pairs(load_tables, "--load-table")
 
     results = rc.reconcile_load_counts(
         engine, list(object_names), schema=schema, mapping_path=mapping_path, load_tables=load_table_map,
@@ -499,20 +513,8 @@ def assess_migration_readiness_cmd(object_names, schema, mapping_path, migration
     reported but never blocks the overall verdict by itself; only an
     explicit failure does."""
     _, sf, engine = _ctx()
-
-    key_map = {}
-    for item in migration_keys:
-        if "=" not in item:
-            raise click.BadParameter(f"--migration-key must be Object=Field, got: {item!r}")
-        obj, _, field = item.partition("=")
-        key_map[obj] = field
-
-    load_table_map = {}
-    for item in load_tables:
-        if "=" not in item:
-            raise click.BadParameter(f"--load-table must be Object=TableName, got: {item!r}")
-        obj, _, table = item.partition("=")
-        load_table_map[obj] = table
+    key_map = _parse_object_value_pairs(migration_keys, "--migration-key")
+    load_table_map = _parse_object_value_pairs(load_tables, "--load-table")
 
     results = rdy.assess_migration_readiness(
         sf, engine, list(object_names), schema=schema,
@@ -1409,12 +1411,7 @@ def generate_pass_summary_cmd(path, tab_name, output_path, schema, load_tables):
     plain-language root cause per failure signature via triage-failures
     (#61). Plain Markdown for v1."""
     _, _, engine = _ctx()
-    load_table_map = {}
-    for item in load_tables:
-        if "=" not in item:
-            raise click.BadParameter(f"--load-table must be Object=TableName, got: {item!r}")
-        obj, _, table = item.partition("=")
-        load_table_map[obj] = table
+    load_table_map = _parse_object_value_pairs(load_tables, "--load-table")
 
     summary_text = ps.generate_pass_summary(path, tab_name, engine=engine, schema=schema, load_tables=load_table_map)
     out_dir = os.path.dirname(output_path)
