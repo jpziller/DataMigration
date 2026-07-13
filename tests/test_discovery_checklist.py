@@ -125,6 +125,35 @@ def test_self_reference_generates_no_dependency_question():
     assert not any("depends on" in q for q in result[0]["questions"])
 
 
+def test_polymorphic_reference_collapses_into_one_question_not_one_per_target():
+    """Found in review (real dogfooding, not a hypothetical): Task.WhatId
+    has ~90 referenceTo targets -- the original flat-target design
+    generated one "confirm X is in scope" line per target, producing ~90
+    near-identical lines for a single field and drowning out every other
+    genuinely actionable question for that object. A polymorphic field
+    (more than one referenceTo target) must collapse into exactly one
+    question naming the field, not one per possible target."""
+    many_targets = [f"Target{i}" for i in range(10)]
+    fields = _BASE_FIELDS + [
+        {"name": "WhatId", "type": "reference", "referenceTo": many_targets},
+    ]
+    sf = _StubSF({"Task": fields})
+    result = dc.generate_discovery_checklist(sf, ["Task"])
+    dependency_questions = [q for q in result[0]["questions"] if "WhatId" in q]
+    assert len(dependency_questions) == 1
+    assert "polymorphic" in dependency_questions[0]
+    assert "and 5 more" in dependency_questions[0]  # 10 targets, first 5 shown
+
+
+def test_single_target_reference_still_names_the_field():
+    fields = _BASE_FIELDS + [
+        {"name": "AccountId", "type": "reference", "referenceTo": ["Account"]},
+    ]
+    sf = _StubSF({"Contact": fields, "Account": _BASE_FIELDS})
+    result = dc.generate_discovery_checklist(sf, ["Contact"])
+    assert any("Contact depends on Account (via AccountId)" in q for q in result[0]["questions"])
+
+
 def test_format_discovery_checklist_markdown_structure():
     fields = _BASE_FIELDS + [{"name": "RecordTypeId", "type": "reference"}]
     sf = _StubSF({"Account": fields})

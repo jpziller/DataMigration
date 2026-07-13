@@ -43,16 +43,35 @@ import risk_analyzer
 def _out_of_scope_dependencies(sf, object_name, in_scope_names):
     """Reference field targets on object_name that aren't in
     in_scope_names and aren't a self-reference -- the deliberately
-    inverted scoping load_order.build_dependency_edges() doesn't do."""
+    inverted scoping load_order.build_dependency_edges() doesn't do.
+
+    Returns [{"field", "targets", "polymorphic"}, ...] grouped by field,
+    not a flat target set -- a polymorphic field (more than one
+    referenceTo target -- e.g. Task.WhatId's ~90 possible types, a real,
+    already-documented complexity source, see validators/Task.md) is a
+    fundamentally different kind of dependency than a single-target
+    lookup: one row points at exactly ONE of its targets, never all of
+    them, so the real question is "which of these does the client's data
+    actually use," not "confirm every possible type is in scope" repeated
+    once per target (found in review: the original flat-set design did
+    exactly that -- dogfooding this against a real Task object produced
+    ~90 near-identical lines, drowning out every other, genuinely
+    actionable question for that object)."""
     desc = getattr(sf, object_name).describe()
-    out_of_scope = set()
+    results = []
     for field in desc["fields"]:
         if field["type"] != "reference":
             continue
-        for target in field.get("referenceTo") or []:
-            if target != object_name and target not in in_scope_names:
-                out_of_scope.add(target)
-    return sorted(out_of_scope)
+        targets = sorted({
+            t for t in (field.get("referenceTo") or [])
+            if t != object_name and t not in in_scope_names
+        })
+        if targets:
+            results.append({
+                "field": field["name"], "targets": targets,
+                "polymorphic": len(field.get("referenceTo") or []) > 1,
+            })
+    return results
 
 
 def _has_record_type_id(sf, object_name):
@@ -116,12 +135,24 @@ def generate_discovery_checklist(sf, object_names):
                 "for each one in scope (the RecordType Resolution Rule, #15/#36)."
             )
 
-        for parent in _out_of_scope_dependencies(sf, object_name, in_scope):
-            questions.append(
-                f"{object_name} depends on {parent}, which isn't in this candidate list yet -- "
-                f"confirm {parent} is in scope too, or that target {parent} records already exist "
-                "in the org for this migration to reference."
-            )
+        for dep in _out_of_scope_dependencies(sf, object_name, in_scope):
+            if dep["polymorphic"]:
+                shown = dep["targets"][:5]
+                targets_text = ", ".join(shown)
+                if len(dep["targets"]) > 5:
+                    targets_text += f", and {len(dep['targets']) - 5} more"
+                questions.append(
+                    f"{object_name}.{dep['field']} is polymorphic and can reference: {targets_text} -- "
+                    "confirm with the client which of these the real data actually uses before "
+                    "assuming any are in scope (one row points at exactly one target, never all)."
+                )
+            else:
+                parent = dep["targets"][0]
+                questions.append(
+                    f"{object_name} depends on {parent} (via {dep['field']}), which isn't in this "
+                    f"candidate list yet -- confirm {parent} is in scope too, or that target {parent} "
+                    "records already exist in the org for this migration to reference."
+                )
 
         checklist.append({
             "object": object_name,

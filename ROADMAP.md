@@ -3254,7 +3254,14 @@ generic template a human has to remember:
   *inverse* of what `load_order.py`'s own `build_dependency_edges()`
   tracks (that function only records edges *within* scope, by design),
   so this reads `describe()` directly rather than repurposing that
-  function against its own grain.
+  function against its own grain. A **polymorphic** field (more than one
+  `referenceTo` target — e.g. `Task.WhatId`'s ~90 possible types, see
+  `validators/Task.md`) collapses into a single question naming the
+  field and a truncated target list, rather than one question per
+  target — found via a real full-pipeline dogfood run, not a synthetic
+  test: the original flat-target design produced ~90 near-identical
+  lines for `WhatId` alone, drowning out every other, genuinely
+  actionable question for that object.
 
 Mostly a new presentation layer over data `risk_analyzer.py`/`describe()`
 already fetch, not a new integration — the value is turning "what should

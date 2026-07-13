@@ -45,6 +45,20 @@ runtime QA check) — worth revisiting if a future project needs to verify
 every polymorphic-field row actually resolved (e.g.
 `SELECT COUNT(*) FROM <LoadTable> WHERE WhatId IS NULL`).
 
+**Also relevant to discovery, not just mock/transform generation:** `Task`
+is the object that first exposed a real bug in
+`discovery_checklist.py`'s (roadmap #60) own out-of-scope-dependency
+check — its original design generated one "confirm X is in scope"
+question per `referenceTo` target, which produced ~90 near-identical
+lines for `WhatId` alone (drowning out every other, genuinely actionable
+question for the object). Fixed to collapse any field with more than one
+target into a single question naming the field and a truncated target
+list, since a polymorphic field's real dependency question is "which of
+these does the client's data actually use," not "confirm every possible
+type is in scope." Also surfaced `OwnerId` as polymorphic
+(`Group`/`User`) on `Task` — a generic, not Task-specific, Salesforce
+pattern, so not written up as its own finding above.
+
 ## IsRecurrence / Recurrence* fields are one interdependent cluster
 **Found:** 2026-07-11, D360_PLAYGROUND — first live Task insert failed
 530/530 (100%).
