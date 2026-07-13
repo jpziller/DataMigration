@@ -107,6 +107,27 @@ def test_bootstrap_project_confirms_objects_and_flags_typo(sqlite_engine, tmp_pa
     assert "Dev1" in wb.sheetnames
 
 
+def test_confirm_objects_exist_reports_dunder_style_name_as_a_problem_not_a_crash():
+    """Found in review: getattr() on a name colliding with a real Python
+    attribute (e.g. "__class__") never even reaches
+    SalesforceResourceNotFound -- simple_salesforce's own __getattr__ is
+    only a fallback after normal attribute lookup succeeds, so the
+    result has no .describe() and raises AttributeError instead. Must be
+    reported as an ordinary problem, not crash the whole bootstrap."""
+    sf = _StubSF({"Account": _MINIMAL_FIELDS})
+    valid, problems = mb._confirm_objects_exist(sf, ["Account", "__class__"])
+    assert valid == ["Account"]
+    assert len(problems) == 1
+    assert "__class__" in problems[0]
+
+
+def test_confirm_objects_exist_reports_non_string_name_as_a_problem_not_a_crash():
+    sf = _StubSF({"Account": _MINIMAL_FIELDS})
+    valid, problems = mb._confirm_objects_exist(sf, ["Account", 123])
+    assert valid == ["Account"]
+    assert len(problems) == 1
+
+
 def test_bootstrap_project_runs_load_order_and_scaffolds_run_book(sqlite_engine, tmp_path):
     path = _write_brief(tmp_path, "project: Acme Migration\nobjects:\n  - Account\n  - Contact\n")
     sf = _StubSF({"Account": _MINIMAL_FIELDS, "Contact": _MINIMAL_FIELDS})

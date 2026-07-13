@@ -6,6 +6,9 @@ analyze_object_risk() itself).
 """
 import urllib.parse
 
+import pytest
+from simple_salesforce.exceptions import SalesforceResourceNotFound
+
 import discovery_checklist as dc
 
 
@@ -24,7 +27,9 @@ class _StubSF:
         self._query_by_type = query_by_type or {}
 
     def __getattr__(self, name):
-        return _StubObjectDescribe(self._fields_by_object.get(name, []))
+        if name not in self._fields_by_object:
+            raise SalesforceResourceNotFound("404", {}, name, {})
+        return _StubObjectDescribe(self._fields_by_object[name])
 
     def toolingexecute(self, path):
         soql = urllib.parse.unquote(path.split("query/?q=", 1)[1])
@@ -135,3 +140,26 @@ def test_format_discovery_checklist_markdown_no_questions_message():
     checklist = dc.generate_discovery_checklist(sf, ["Account"])
     md = dc.format_discovery_checklist_markdown(checklist)
     assert "No specific questions surfaced" in md
+
+
+def test_nonexistent_object_reports_a_problem_not_a_crash():
+    """Found in review: analyze_object_risk() alone can't detect a
+    nonexistent object (each of its own Tooling/Query calls is
+    independently wrapped in try/except, so a bad object name just comes
+    back as empty results, not an error) -- a real describe() call is
+    the actual existence check."""
+    sf = _StubSF({"Account": _BASE_FIELDS})
+    result = dc.generate_discovery_checklist(sf, ["Account", "NotReal"])
+    assert result[0]["object"] == "Account"
+    assert result[1]["object"] == "NotReal"
+    assert result[1]["risk_summary"] is None
+    assert len(result[1]["questions"]) == 1
+    assert "NotReal" in result[1]["questions"][0]
+
+
+def test_format_discovery_checklist_markdown_handles_nonexistent_object():
+    sf = _StubSF({})
+    checklist = dc.generate_discovery_checklist(sf, ["NotReal"])
+    md = dc.format_discovery_checklist_markdown(checklist)
+    assert "## NotReal" in md
+    assert "not a valid object name" in md

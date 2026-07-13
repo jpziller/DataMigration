@@ -589,7 +589,11 @@ venv may not be active in a fresh shell:
                 cell is often a script filename ("010_account_load.sql"), not the bare name a
                 Dependency cell names ("After: Account"). An unresolved dependency mention (no
                 matching row in this tab) is dropped, not guessed at, and reported back rather than
-                silently vanishing. Node color reuses the workbook's own Status conditional-formatting
+                silently vanishing — kept distinct from a separate signal, `unparsed_dependency_notes`:
+                a non-blank Dependency cell that doesn't match the "After: X" shape at all (a plausible
+                hand-filled free-text note on a Pre-/Post-Migration row) is *also* reported back rather
+                than being silently indistinguishable from a genuine "no dependency" row. Node color
+                reuses the workbook's own Status conditional-formatting
                 palette, so the diagram agrees visually with the spreadsheet. Read-only, no Salesforce/
                 SQL connection needed — just the local `.xlsx` file. GitHub/most Markdown renderers
                 already render the fenced ` ```mermaid ` block natively; Lucid supports paste-to-import.

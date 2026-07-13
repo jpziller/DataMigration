@@ -35,6 +35,8 @@ polish later" discipline as #52/#66's own v1 framing -- landing
 questions as starter rows in a Migration Run Book's Pre-Migration phase
 instead (or in addition) remains a future enhancement, not built here.
 """
+from simple_salesforce.exceptions import SalesforceResourceNotFound
+
 import risk_analyzer
 
 
@@ -59,14 +61,36 @@ def _has_record_type_id(sf, object_name):
 
 
 def generate_discovery_checklist(sf, object_names):
-    """Return [{"object", "questions": [...], "risk_summary": {...}},
-    ...] in the order given. "questions" is a plain-English list derived
-    from real, live org signals -- empty for an object with none of the
-    three signals below, not padded with generic filler."""
+    """Return [{"object", "questions": [...], "risk_summary": {...} or
+    None}, ...] in the order given. "questions" is a plain-English list
+    derived from real, live org signals -- empty for an object with none
+    of the three signals below, not padded with generic filler.
+
+    An object that isn't real (typo, not deployed, removed) gets
+    "risk_summary": None and a single problem-report question instead of
+    crashing the whole checklist -- found in review: analyze_object_risk()
+    alone can't detect this (its own Tooling/Query API calls for a
+    nonexistent object just come back empty, not an error, since each is
+    independently wrapped in its own try/except), so a real describe()
+    call is the actual existence check here, same as
+    migration_brief.py's own _confirm_objects_exist()."""
     in_scope = set(object_names)
     checklist = []
 
     for object_name in object_names:
+        try:
+            getattr(sf, object_name).describe()
+        except (SalesforceResourceNotFound, AttributeError, TypeError):
+            checklist.append({
+                "object": object_name,
+                "questions": [
+                    f"'{object_name}' is not a valid object name in this org (typo, not deployed, "
+                    "removed, or not a real object name at all) -- fix it and re-run."
+                ],
+                "risk_summary": None,
+            })
+            continue
+
         risk = risk_analyzer.analyze_object_risk(sf, object_name)
         active_rules = [r for r in risk["validation_rules"] if r.get("Active")]
 
@@ -122,12 +146,13 @@ def format_discovery_checklist_markdown(checklist):
         lines.append(f"## {entry['object']}")
         lines.append("")
         s = entry["risk_summary"]
-        lines.append(
-            f"*{s['active_validation_rules']} active validation rule(s), {s['apex_triggers']} Apex "
-            f"trigger(s), {s['active_flows']} active record-triggered flow(s), {s['workflow_rules']} "
-            f"legacy workflow rule(s), {s['approval_processes']} approval process(es).*"
-        )
-        lines.append("")
+        if s is not None:
+            lines.append(
+                f"*{s['active_validation_rules']} active validation rule(s), {s['apex_triggers']} Apex "
+                f"trigger(s), {s['active_flows']} active record-triggered flow(s), {s['workflow_rules']} "
+                f"legacy workflow rule(s), {s['approval_processes']} approval process(es).*"
+            )
+            lines.append("")
         if entry["questions"]:
             for q in entry["questions"]:
                 lines.append(f"- {q}" if not q.startswith("  ") else q)

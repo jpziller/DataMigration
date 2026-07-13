@@ -80,14 +80,26 @@ def _confirm_objects_exist(sf, object_names):
     """Confirm every name in object_names is a real object via live
     describe(). Returns (valid_names, problems) -- problems is a list of
     plain-English strings for anything that isn't real (typo, removed,
-    not deployed)."""
+    not deployed).
+
+    Also catches AttributeError/TypeError, not just
+    SalesforceResourceNotFound (found in review): a brief object name
+    that happens to collide with a real Python attribute (e.g. a name
+    typo'd as "__class__") passes getattr() without raising at all --
+    simple_salesforce's own __getattr__ is only ever consulted as a
+    fallback, after normal attribute lookup already succeeds -- so the
+    resulting object has no .describe() method and raises AttributeError
+    instead. A non-string name (a YAML value like `name: 123` parsing to
+    an int) raises TypeError from getattr() itself. Both are reported as
+    the same "not a real object" problem, never left to crash the whole
+    bootstrap over one malformed brief entry."""
     valid, problems = [], []
     for name in object_names:
         try:
             getattr(sf, name).describe()
             valid.append(name)
-        except SalesforceResourceNotFound:
-            problems.append(f"'{name}' is not an object in this org (typo, not deployed, or removed).")
+        except (SalesforceResourceNotFound, AttributeError, TypeError):
+            problems.append(f"'{name}' is not a valid object name in this org (typo, not deployed, removed, or not a real object name at all).")
     return valid, problems
 
 

@@ -106,6 +106,20 @@ def test_duplicate_key_gate_passes_when_clean(sqlite_engine):
     assert result["ok"] is True
 
 
+def test_duplicate_key_gate_fails_cleanly_on_nonexistent_column_not_a_crash(sqlite_engine):
+    """Found in review: check_load_table_duplicate_keys() now raises for
+    a migration-key column that doesn't exist -- this gate must report
+    that as an explicit failure, not let it crash the whole multi-object
+    readiness assessment."""
+    pd.DataFrame({"LoadId": [1, 2], "RealField": ["A1", "A2"]}).to_sql(
+        "Account_Load", sqlite_engine, schema="dbo", index=False
+    )
+    d = sql_dialect.for_engine(sqlite_engine)
+    result = rd._duplicate_key_gate(sqlite_engine, d, "dbo", "Account_Load", "NonexistentField__c")
+    assert result["ok"] is False
+    assert "not a column" in result["detail"]
+
+
 # --- Live Migration Key Validation gate ---
 
 def test_external_id_gate_not_checked_without_migration_key():
@@ -206,6 +220,26 @@ def test_assess_migration_readiness_ready_true_when_org_risk_scanned(sqlite_engi
     )
     sf = _StubSF("Account", _ACCOUNT_FIELDS)
     result = rd.assess_migration_readiness(sf, sqlite_engine, ["Account"], schema="dbo")[0]
+    assert result["ready"] is True
+    assert result["blocking"] == []
+
+
+def test_assess_migration_readiness_ready_true_for_a_clean_first_ever_load(sqlite_engine):
+    """Found in review: a Load table that exists but has never been
+    through bulkops (the normal, expected state right before a first
+    pass -- exactly when this command is meant to be run) used to
+    report NOT READY purely because of that, via the row-count-
+    reconciliation gate blindly treating every reconciliation flag as
+    blocking. "Never loaded yet" must not itself block readiness."""
+    pd.DataFrame([{"ObjectName": "Account", "CheckType": "ScanCompleted", "ItemName": "x"}]).to_sql(
+        "ObjectAutomationRisk", sqlite_engine, schema="dbo", index=False
+    )
+    pd.DataFrame({"LoadId": [1, 2], "MigrationID__c": ["A1", "A2"]}).to_sql(
+        "Account_Load", sqlite_engine, schema="dbo", index=False
+    )
+    sf = _StubSF("Account", _ACCOUNT_FIELDS)
+    result = rd.assess_migration_readiness(sf, sqlite_engine, ["Account"], schema="dbo")[0]
+    assert result["gates"]["row_count_reconciliation"]["ok"] is True
     assert result["ready"] is True
     assert result["blocking"] == []
 

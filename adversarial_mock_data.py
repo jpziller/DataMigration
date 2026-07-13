@@ -62,8 +62,13 @@ def _fake_salesforce_id(seq):
     """An 18-char, alphanumeric-with-digits value shaped like a real
     Salesforce Id (matches bulkops.py's own _SF_ID_TOKEN_RE), but never a
     real record's Id -- for deliberately provoking
-    INVALID_CROSS_REFERENCE_KEY on a reference field."""
-    return f"000000000000{seq:03d}AAA"
+    INVALID_CROSS_REFERENCE_KEY on a reference field. seq % 10**15 keeps
+    the numeric part at a fixed 15 digits no matter how large seq gets
+    (found in review: the original f"...{seq:03d}..." format silently
+    grew past 18 total characters once seq reached 1000, breaking the
+    real-Id-shape invariant for any bad_reference scenario corrupting
+    1000+ rows)."""
+    return f"{seq % 10**15:015d}AAA"
 
 
 def _corrupt_duplicate_key(df, row_indices, field):
@@ -136,6 +141,13 @@ def generate_adversarial_mock_data(sf, engine, object_name, count, api_key, scen
             raise ValueError(f"'{spec['field']}' isn't a picklist/combobox field on {object_name}.")
         if scenario_name == "bad_reference" and field_def["type"] != "reference":
             raise ValueError(f"'{spec['field']}' isn't a reference field on {object_name}.")
+        if scenario_name == "duplicate_key" and spec["rows"] < 2:
+            # Same "validate before the real Mockaroo API call" discipline
+            # as every other scenario check above -- found in review: this
+            # specific check used to live inside _corrupt_duplicate_key(),
+            # which only runs after generate_mock_data() already burned a
+            # real, rate-limited (200/day) Mockaroo request.
+            raise ValueError("duplicate_key needs at least 2 rows to create a real duplicate.")
 
     # bad_reference targets a field mock_data.py deliberately never
     # includes in a normal happy-path schema (no target Ids exist yet to

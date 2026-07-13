@@ -184,6 +184,13 @@ operator at a terminal" and would need to change if that assumption changes
   colliding record) -- worth knowing before treating this table's contents
   as low-sensitivity by default, same reasoning as `BulkOpsLog`'s own
   `RunBy`/error text already gets in this section.
+- **`generate-discovery-checklist` output** (roadmap #60) echoes a live
+  org's active validation rules' `ErrorMessage` text verbatim into the
+  generated Markdown checklist. Same class of caveat as the two entries
+  above: a client org's own validation-rule error text is outside this
+  framework's control, so treat a generated discovery checklist the same
+  as any other generated artifact above -- not something to commit
+  without reviewing first.
 
 ## 6. AI-operator considerations (specific to this being Claude-Code-driven)
 
@@ -272,13 +279,22 @@ adoption.
 
 ---
 
-*Last reviewed against the codebase during the 2026-07-11 ruthless-review
-pass (covering Orchestrator Phase 1's `OrchestratorRunEvent` table, the
-`sql_dialect.py` identifier-escaping fix, and the `source_ingestion.py`
-BULK INSERT string-literal-escaping fix) -- previously reviewed during the
-2026-07-09 ruthless-review pass (covering `validate-external-id`/pytest+CI
-additions, the `sf_client.py` shell-argument hardening, and the ODBC
-password-masking caveat in `sql_client.py`) and, before that, the 2026-07-09
-full repo review (Migration Run Book, `record-counts`, `SECURITY.md`/
-`CONTRIBUTING.md` additions). Update alongside any change that adds a
-credential type, a network listener, or an authentication boundary.*
+*Last reviewed against the codebase during the 2026-07-12 ruthless-review
+pass (covering the 8 new roadmap #52/#59-66 features -- `generate-run-book-
+flowchart`, `triage-failures`, `generate-adversarial-mock-data`,
+`generate-pass-summary`, `reset-dev-cycle`, `reconcile-load-counts`,
+`assess-migration-readiness`, `bootstrap-project`,
+`generate-discovery-checklist` -- confirmed no SQL injection/unsafe-
+deserialization/command-injection/credential-exposure issues, and that none
+of the new live-Salesforce-write-capable commands bypass the Live-Org
+Write Confirmation Rule via `.claude/settings.json`'s allow-list) --
+previously reviewed during the 2026-07-11 ruthless-review pass (covering
+Orchestrator Phase 1's `OrchestratorRunEvent` table, the `sql_dialect.py`
+identifier-escaping fix, and the `source_ingestion.py` BULK INSERT
+string-literal-escaping fix), the 2026-07-09 ruthless-review pass
+(covering `validate-external-id`/pytest+CI additions, the `sf_client.py`
+shell-argument hardening, and the ODBC password-masking caveat in
+`sql_client.py`), and, before that, the 2026-07-09 full repo review
+(Migration Run Book, `record-counts`, `SECURITY.md`/`CONTRIBUTING.md`
+additions). Update alongside any change that adds a credential type, a
+network listener, or an authentication boundary.*

@@ -1034,6 +1034,14 @@ def generate_adversarial_mock_data_cmd(object_name, count, scenarios, schema):
         if len(parts) != 3 or not parts[2].isdigit():
             raise click.BadParameter(f"--scenario must be scenario:field:rows, got: {item!r}")
         name, field, rows = parts
+        if name in scenario_map:
+            # Found in review: a repeated scenario name used to silently
+            # overwrite the earlier one (dict-keyed-by-name), dropping a
+            # --scenario flag the user explicitly passed with no warning
+            # at all -- each of the 5 scenario types only ever targets one
+            # field/row-count today, so a repeat is always a mistake, not
+            # a way to apply the same scenario to two fields.
+            raise click.BadParameter(f"--scenario '{name}' was given more than once -- each scenario can only be used once per run.")
         scenario_map[name] = {"field": field, "rows": int(rows)}
 
     rows_written, applied, skipped = amd.generate_adversarial_mock_data(
@@ -1379,6 +1387,10 @@ def generate_run_book_flowchart_cmd(path, tab_name, output_path):
     click.echo(f"Wrote {output_path} ({summary['phases']} phase(s), {summary['nodes']} step(s), {summary['edges']} dependency edge(s))")
     if summary["unresolved_dependencies"]:
         click.echo(f"Unresolved dependency mention(s), dropped rather than guessed: {summary['unresolved_dependencies']}")
+    if summary["unparsed_dependency_notes"]:
+        click.echo("Dependency note(s) that didn't match the 'After: X' format -- not drawn as an edge, may be a real dependency stated in free text:")
+        for note in summary["unparsed_dependency_notes"]:
+            click.echo(f"  {note}")
 
 
 @cli.command("generate-pass-summary")

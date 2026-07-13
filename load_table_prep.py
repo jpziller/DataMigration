@@ -23,6 +23,19 @@ def add_bulk_load_sort_column(engine, table, parent_key_column, schema="dbo"):
     every parent key whose rows ended up in a non-contiguous Sort range --
     empty means a clean sort."""
     d = sql_dialect.for_engine(engine)
+    if not d.column_exists(engine, schema, table, parent_key_column):
+        # Found in review: SQLite silently treats a double-quoted
+        # identifier with no matching column as a plain string literal
+        # instead of raising (a real, documented SQLite compatibility
+        # quirk) -- ORDER BY/GROUP BY a constant then silently produces a
+        # nonsensical but non-crashing Sort column instead of a clear
+        # error. SQL Server's own bracket-quoting doesn't have this
+        # failure mode (it raises "Invalid column name"), but checking
+        # explicitly here means both backends fail the same clear way.
+        raise ValueError(
+            f"'{parent_key_column}' is not a column on {schema}.{table} -- check the parent key "
+            "column name (typo, or the load table doesn't have this field yet)."
+        )
     qualified = d.qualify(schema, table)
     sort_col = d.quote_ident("Sort")
     parent_col = d.quote_ident(parent_key_column)
@@ -85,6 +98,16 @@ def check_load_table_duplicate_keys(engine, table, key_column, schema="dbo"):
     {DuplicateKey, Occurrences}; duplicates == [] and missing_key_count == 0
     together mean clean to load."""
     d = sql_dialect.for_engine(engine)
+    if not d.column_exists(engine, schema, table, key_column):
+        # Same SQLite quoted-identifier-as-string-literal quirk as
+        # add_bulk_load_sort_column() above -- without this check, a
+        # typo'd/wrong key_column on SQLite silently reports a fake
+        # "duplicate" (every row groups into the same constant) instead
+        # of a clear error.
+        raise ValueError(
+            f"'{key_column}' is not a column on {schema}.{table} -- check the migration key "
+            "column name (typo, or the load table doesn't have this field yet)."
+        )
     qualified = d.qualify(schema, table)
     key_col = d.quote_ident(key_column)
 

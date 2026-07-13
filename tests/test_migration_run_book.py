@@ -3,6 +3,7 @@ import pytest
 from migration_run_book import (
     _COLUMNS,
     _is_separator_row,
+    _is_unparseable_dependency_note,
     _mermaid_escape_label,
     _object_matches,
     _parse_dependency_parents,
@@ -104,3 +105,22 @@ def test_parse_dependency_parents_ignores_parallel_with_suffix():
 
 def test_mermaid_escape_label_escapes_quotes_and_brackets():
     assert _mermaid_escape_label('Say "hi" [now]') == "Say #quot;hi#quot; (now)"
+
+
+def test_is_unparseable_dependency_note_false_for_none_and_blank():
+    assert _is_unparseable_dependency_note("None") is False
+    assert _is_unparseable_dependency_note(None) is False
+    assert _is_unparseable_dependency_note("") is False
+
+
+def test_is_unparseable_dependency_note_false_for_real_after_text():
+    assert _is_unparseable_dependency_note("After: Account") is False
+
+
+def test_is_unparseable_dependency_note_true_for_free_text_note():
+    """Found in review: a human-written Dependency note that isn't
+    "None" and doesn't match the "After: X" convention used to be
+    silently indistinguishable from "no dependency" -- both produced an
+    empty parent list from _parse_dependency_parents() with no signal
+    that a real dependency might have been dropped."""
+    assert _is_unparseable_dependency_note("Depends on Account for billing info") is True

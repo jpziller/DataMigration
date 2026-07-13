@@ -94,6 +94,23 @@ def test_generate_adversarial_mock_data_rejects_too_many_corrupt_rows(sqlite_eng
         )
 
 
+def test_generate_adversarial_mock_data_rejects_duplicate_key_with_fewer_than_2_rows_before_mockaroo_call(sqlite_engine, monkeypatch):
+    """Found in review: this check used to live inside _corrupt_duplicate_key(),
+    which only runs after generate_mock_data() already burned a real,
+    rate-limited (200/day) Mockaroo request -- it must fail before that
+    call, same as every other scenario's field-shape validation."""
+    def _fail_if_called(schema, count, api_key):
+        raise AssertionError("generate_mock_data() must not be called when duplicate_key's row count is invalid.")
+    monkeypatch.setattr(mock_data, "generate_mock_data", _fail_if_called)
+
+    sf = _StubSF("Account", _ACCOUNT_FIELDS)
+    with pytest.raises(ValueError, match="duplicate_key needs at least 2 rows"):
+        amd.generate_adversarial_mock_data(
+            sf, sqlite_engine, "Account", 5, "fake-key",
+            {"duplicate_key": {"field": "LegacyId__c", "rows": 1}},
+        )
+
+
 def test_generate_adversarial_mock_data_rejects_non_required_field_for_missing_required(sqlite_engine):
     sf = _StubSF("Account", _ACCOUNT_FIELDS)
     with pytest.raises(ValueError, match="isn't actually required"):
@@ -209,3 +226,13 @@ def test_generate_adversarial_mock_data_multiple_disjoint_scenarios(sqlite_engin
     # Rows are disjoint -- a duplicate_key row must not also be missing Name.
     dup_rows = df[df["REF_AdversarialScenario"] == "duplicate_key"]
     assert dup_rows["Name"].notna().all()
+
+
+def test_fake_salesforce_id_stays_18_chars_past_1000_rows():
+    """Found in review: the original format silently grew past 18 total
+    characters once seq reached 1000, breaking the real-Id-shape
+    invariant bulkops.py's own _SF_ID_TOKEN_RE (and any downstream
+    consumer expecting a genuine 15/18-char Id) relies on."""
+    assert len(amd._fake_salesforce_id(999)) == 18
+    assert len(amd._fake_salesforce_id(1000)) == 18
+    assert len(amd._fake_salesforce_id(999999)) == 18

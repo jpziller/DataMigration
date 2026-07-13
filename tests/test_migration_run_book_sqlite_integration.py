@@ -251,6 +251,38 @@ def test_generate_run_book_flowchart_reports_unresolved_dependency(sqlite_engine
     assert "Account" in summary["unresolved_dependencies"]
 
 
+def test_generate_run_book_flowchart_reports_unparseable_dependency_note(sqlite_engine, tmp_path):
+    """Found in review: a free-text Dependency note (plausible for a
+    hand-filled Pre-/Post-Migration row) that doesn't match the "After:
+    X" convention used to be silently dropped, indistinguishable from a
+    genuine "no dependency" row -- must now surface separately from
+    unresolved_dependencies (which means "found an After: mention, no
+    matching row"), not conflated with it."""
+    engine, _ = sqlite_engine
+    _seed_load_order(engine, rows=[("Contact", 0, 1)])
+    output_path = str(tmp_path / "run_book.xlsx")
+    mrb.generate_migration_run_book(
+        output_path, "Dev1", engine=engine, object_names=["Contact"], schema="dbo",
+    )
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["Dev1"]
+    dependency_col = mrb._COLUMNS.index("Dependency") + 1
+    object_col = mrb._COLUMNS.index("Object") + 1
+    contact_row = next(
+        row[0].row for row in ws.iter_rows(min_row=mrb._FIRST_DATA_ROW)
+        if row[object_col - 1].value and "contact" in str(row[object_col - 1].value).lower()
+    )
+    ws.cell(row=contact_row, column=dependency_col, value="Depends on Account for billing info")
+    wb.save(output_path)
+
+    mermaid_text, summary = mrb.generate_run_book_flowchart(output_path, "Dev1")
+    assert summary["edges"] == 0
+    assert summary["unresolved_dependencies"] == []
+    assert len(summary["unparsed_dependency_notes"]) == 1
+    assert "Depends on Account for billing info" in summary["unparsed_dependency_notes"][0]
+
+
 def test_generate_run_book_flowchart_raises_when_tab_missing(sqlite_engine, tmp_path):
     engine, _ = sqlite_engine
     _seed_load_order(engine, rows=[("Account", 0, 1)])

@@ -22,6 +22,12 @@ Generate a Run Book flowchart for `$ARGUMENTS` (workbook path, plus
    "unresolved dependency mention(s)" -- surface this if it's non-empty,
    the same "visible gap, not a silent guess" philosophy as
    `resolve-record-types`' unmatched-`DeveloperName` NULL.
+5. Separately, a non-blank Dependency cell that doesn't match the
+   "After: X" format at all (a plausible hand-filled free-text note) is
+   reported as an "unparsed dependency note" -- distinct from an
+   unresolved mention, since this one was never matched to the "After:"
+   shape in the first place and may be a real dependency stated in
+   prose. Surface this too if it's non-empty.
 
 Read-only, no Salesforce/SQL connection needed — just this local `.xlsx`
 file. Safe to run without confirmation. GitHub and most modern Markdown

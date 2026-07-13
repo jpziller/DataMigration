@@ -74,9 +74,18 @@ def _duplicate_key_gate(engine, d, schema, load_table, migration_key_field):
         return {"ok": None, "detail": "Not checked -- no --migration-key given for this object."}
     if not d.table_exists(engine, schema, load_table):
         return {"ok": None, "detail": f"Load table {load_table} doesn't exist yet."}
-    duplicates, missing = load_table_prep.check_load_table_duplicate_keys(
-        engine, load_table, migration_key_field, schema=schema
-    )
+    try:
+        duplicates, missing = load_table_prep.check_load_table_duplicate_keys(
+            engine, load_table, migration_key_field, schema=schema
+        )
+    except ValueError as e:
+        # check_load_table_duplicate_keys() now raises a clear error for a
+        # migration-key column that doesn't actually exist on the Load
+        # table (found in review: without that check, SQLite silently
+        # reported a fake "duplicate" instead of failing loudly) -- an
+        # explicit failure here, not a crash of the whole multi-object,
+        # multi-gate readiness assessment over one bad --migration-key.
+        return {"ok": False, "detail": str(e)}
     ok = not duplicates and not missing
     detail = "Clean." if ok else f"{len(duplicates)} duplicate value(s), {missing} missing key value(s)."
     return {"ok": ok, "detail": detail}
@@ -163,8 +172,16 @@ def _reconciliation_gate(engine, object_name, schema, mapping_path, load_table):
         # as an explicit failure, inconsistent with every other gate here
         # reporting that exact state as ok=None instead).
         return {"ok": None, "detail": f"Load table {load_table} doesn't exist yet."}
-    ok = not result["flags"]
-    detail = "Clean." if ok else "; ".join(result["flags"])
+    # "Never loaded via bulkops yet" is the normal, expected state for an
+    # object about to have its FIRST pass -- exactly when a readiness
+    # check is meant to run -- so it never blocks readiness on its own
+    # (found in review: every object's first-ever load was incorrectly
+    # reported NOT READY before this fix). Still shown in the detail text
+    # for context; every OTHER reconciliation flag (dropped rows, a stale
+    # prior run) still blocks readiness as before.
+    blocking_flags = [f for f in result["flags"] if "Never loaded via bulkops" not in f]
+    ok = not blocking_flags
+    detail = "Clean." if not result["flags"] else "; ".join(result["flags"])
     return {"ok": ok, "detail": detail}
 
 

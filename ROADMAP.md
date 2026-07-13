@@ -2863,6 +2863,16 @@ agrees visually with the spreadsheet instead of inventing a second
 meaning for color. Read-only, no Salesforce/SQL connection needed — just
 the local `.xlsx` file — so it's safe to run without confirmation.
 
+Found in a later ruthless-review pass: a non-blank Dependency cell that
+doesn't match the "After: X" shape at all (a plausible hand-filled
+free-text note on a Pre-/Post-Migration row) used to be silently
+indistinguishable from a genuine "no dependency" row — both produced an
+empty parent list with no signal either way. `_is_unparseable_dependency_note()`
+now catches this case specifically, surfaced in the summary dict as
+`unparsed_dependency_notes` — kept distinct from `unresolved_dependencies`
+(which means "found a real 'After:' mention, just no matching row"),
+since these two represent genuinely different gaps.
+
 ## 53. Supervised end-to-end load orchestrator — Phase 1 built, Phase 2 gated on a real UAT pass
 
 Full design lives in `docs/ORCHESTRATOR_DESIGN.md` (built collaboratively,

@@ -887,6 +887,23 @@ def _parse_dependency_parents(dependency_text):
     return [p.strip() for p in m.group(1).split(",") if p.strip()]
 
 
+def _is_unparseable_dependency_note(dependency_text):
+    """True when dependency_text has real content but doesn't match the
+    "After: X" shape _parse_dependency_parents() understands -- e.g. a
+    human typed a free-text note directly into the Dependency cell
+    instead of using that convention (plausible: a Pre-/Post-Migration
+    row's Dependency column is hand-filled, not auto-generated). Distinct
+    from blank/"None" (which genuinely means no dependency) -- found in
+    review: both cases previously looked identical to
+    generate_run_book_flowchart() (an empty parent list from
+    _parse_dependency_parents() either way), so a real dependency note a
+    human wrote in free text was silently dropped from the diagram with
+    no signal at all that anything was skipped."""
+    if not dependency_text or str(dependency_text).strip().lower() == "none":
+        return False
+    return _DEPENDENCY_AFTER_RE.match(str(dependency_text).strip()) is None
+
+
 def _mermaid_escape_label(text):
     """Escape a label for Mermaid's ["..."] node/subgraph syntax -- an
     embedded double-quote or bracket would otherwise break out of the
@@ -957,6 +974,7 @@ def generate_run_book_flowchart(path, tab_name):
     lines = ["```mermaid", "flowchart TD"]
     edges = []
     unresolved = []
+    unparsed_notes = []
     for phase_name in phase_order:
         phase_nodes = nodes_by_phase.get(phase_name) or []
         if not phase_nodes:
@@ -969,6 +987,8 @@ def generate_run_book_flowchart(path, tab_name):
         lines.append("    end")
 
         for n in phase_nodes:
+            if _is_unparseable_dependency_note(n["dependency_text"]):
+                unparsed_notes.append(f'{n["label"]}: "{n["dependency_text"]}"')
             for parent_name in _parse_dependency_parents(n["dependency_text"]):
                 match = next(
                     (other for other in all_nodes
@@ -992,5 +1012,6 @@ def generate_run_book_flowchart(path, tab_name):
         "nodes": len(all_nodes),
         "edges": len(edges),
         "unresolved_dependencies": unresolved,
+        "unparsed_dependency_notes": unparsed_notes,
     }
     return mermaid_text, summary

@@ -102,7 +102,16 @@ def generate_pass_summary(run_book_path, tab_name, engine=None, schema="dbo", lo
             lines.append(f"{r['failed']} of {r['total'] or 0} record(s) had an exception.")
             table_name = load_tables.get(r["object"])
             if table_name and engine is not None:
-                triage = ft.triage_failures(engine, table_name, schema=schema)
+                try:
+                    triage = ft.triage_failures(engine, table_name, schema=schema)
+                except ValueError:
+                    # triage_failures() raises when table_name has no Error
+                    # column at all -- including when the table doesn't
+                    # exist anymore (found in review: this is exactly the
+                    # "cleaned up since this pass ran" scenario the
+                    # fallback message below was meant to cover, but an
+                    # uncaught raise never reached it).
+                    triage = None
                 if triage:
                     for t in triage:
                         lines.append(f"- **{t['code']}** ({t['count']}x): {t['cause']}")
