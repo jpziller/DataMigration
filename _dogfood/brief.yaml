@@ -1,0 +1,12 @@
+project: Full Pipeline Dogfood Run
+ticket: none (mock/practice exercise, no ticket system in use)
+target_org_alias: D360_PLAYGROUND
+objects:
+  - name: Account
+    notes: Primary account records for this practice cycle.
+  - name: Contact
+    notes: Linked to Account via AccountId.
+  - name: Opportunity
+    notes: Linked to Account via AccountId.
+  - name: Task
+    notes: Linked to Contact/Opportunity via WhoId/WhatId (polymorphic) -- see validators/Task.md.
