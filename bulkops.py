@@ -119,33 +119,29 @@ import sql_dialect
 # (name, mssql_type, sqlite_type) for the 3 added later (ROADMAP #15) --
 # always nullable, added idempotently to an existing table via ALTER TABLE.
 _BULKOPS_LOG_BASE_COLUMNS = [
-    ("Operation", "NVARCHAR(20)", "TEXT", False),
-    ("ObjectName", "NVARCHAR(255)", "TEXT", False),
-    ("SourceTable", "NVARCHAR(255)", "TEXT", False),
-    ("TargetSchema", "NVARCHAR(128)", "TEXT", False),
-    ("RecordsSubmitted", "INT", "INTEGER", False),
-    ("RecordsSucceeded", "INT", "INTEGER", False),
-    ("RecordsFailed", "INT", "INTEGER", False),
-    ("RecordsAmbiguous", "INT", "INTEGER", False),
-    ("ExternalIdNotFound", "INT", "INTEGER", False),
-    ("JobCount", "INT", "INTEGER", False),
-    ("EmailDeliverability", "NVARCHAR(255)", "TEXT", True),
-    ("WrittenTo", "NVARCHAR(255)", "TEXT", False),
-    ("StartedAt", "DATETIME2", "TEXT", False),
-    ("CompletedAt", "DATETIME2", "TEXT", False),
-    ("DurationSeconds", "FLOAT", "REAL", False),
-    ("RunBy", "NVARCHAR(128)", "TEXT", True),
+    ("Operation", "NVARCHAR(20)", "TEXT", "VARCHAR(20)", False),
+    ("ObjectName", "NVARCHAR(255)", "TEXT", "VARCHAR(255)", False),
+    ("SourceTable", "NVARCHAR(255)", "TEXT", "VARCHAR(255)", False),
+    ("TargetSchema", "NVARCHAR(128)", "TEXT", "VARCHAR(128)", False),
+    ("RecordsSubmitted", "INT", "INTEGER", "INTEGER", False),
+    ("RecordsSucceeded", "INT", "INTEGER", "INTEGER", False),
+    ("RecordsFailed", "INT", "INTEGER", "INTEGER", False),
+    ("RecordsAmbiguous", "INT", "INTEGER", "INTEGER", False),
+    ("ExternalIdNotFound", "INT", "INTEGER", "INTEGER", False),
+    ("JobCount", "INT", "INTEGER", "INTEGER", False),
+    ("EmailDeliverability", "NVARCHAR(255)", "TEXT", "VARCHAR(255)", True),
+    ("WrittenTo", "NVARCHAR(255)", "TEXT", "VARCHAR(255)", False),
+    ("StartedAt", "DATETIME2", "TEXT", "TIMESTAMP", False),
+    ("CompletedAt", "DATETIME2", "TEXT", "TIMESTAMP", False),
+    ("DurationSeconds", "FLOAT", "REAL", "DOUBLE PRECISION", False),
+    ("RunBy", "NVARCHAR(128)", "TEXT", "VARCHAR(128)", True),
 ]
 _BULKOPS_LOG_UPGRADE_COLUMNS = [
-    ("BatchSize", "INT", "INTEGER"),
-    ("BatchSizeSource", "NVARCHAR(20)", "TEXT"),
-    ("LockErrorCount", "INT", "INTEGER"),
-    ("FailureErrorCounts", "NVARCHAR(MAX)", "TEXT"),
+    ("BatchSize", "INT", "INTEGER", "INTEGER"),
+    ("BatchSizeSource", "NVARCHAR(20)", "TEXT", "VARCHAR(20)"),
+    ("LockErrorCount", "INT", "INTEGER", "INTEGER"),
+    ("FailureErrorCounts", "NVARCHAR(MAX)", "TEXT", "TEXT"),
 ]
-
-
-def _col_type(d, mssql_type, sqlite_type):
-    return mssql_type if isinstance(d, sql_dialect.MssqlDialect) else sqlite_type
 
 
 def _read_result_csv(csv_text):
@@ -285,26 +281,39 @@ def enable_bulkops_logging(engine, schema="dbo"):
     qualified = d.qualify(schema, "BulkOpsLog")
 
     if not d.table_exists(engine, schema, "BulkOpsLog"):
+        # Column names here are deliberately bare (not d.quote_ident()) --
+        # found via live Postgres testing: quoting at CREATE TABLE
+        # preserves exact case in Postgres's catalog, but every read/
+        # write of this table elsewhere (bulk_op()'s own INSERT above,
+        # plus batch_advisor.py/orchestrator.py/readiness.py/
+        # reconciliation.py, none of which quote their references) uses
+        # bare column references, which Postgres folds to lowercase --
+        # a real mismatch (psycopg2.errors.UndefinedColumn) if creation
+        # is quoted but every reference isn't. SQL Server/SQLite never
+        # surfaced this because both match case-insensitively regardless.
+        # Bare here matches the dominant convention everywhere else
+        # instead of requiring every scattered reference to be quoted.
         col_defs = [d.autoincrement_pk_column_ddl("LogId")]
-        for name, mssql_t, sqlite_t, nullable in _BULKOPS_LOG_BASE_COLUMNS:
+        for name, mssql_t, sqlite_t, postgres_t, nullable in _BULKOPS_LOG_BASE_COLUMNS:
             null_sql = "NULL" if nullable else "NOT NULL"
-            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} {null_sql}")
-        for name, mssql_t, sqlite_t in _BULKOPS_LOG_UPGRADE_COLUMNS:
-            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} NULL")
+            col_defs.append(f"{name} {d.pick_type(mssql_t, sqlite_t, postgres_t)} {null_sql}")
+        for name, mssql_t, sqlite_t, postgres_t in _BULKOPS_LOG_UPGRADE_COLUMNS:
+            col_defs.append(f"{name} {d.pick_type(mssql_t, sqlite_t, postgres_t)} NULL")
         with engine.begin() as cx:
             cx.execute(text(f"CREATE TABLE {qualified} (" + ", ".join(col_defs) + ");"))
         return
 
     missing = [
-        (name, mssql_t, sqlite_t) for name, mssql_t, sqlite_t in _BULKOPS_LOG_UPGRADE_COLUMNS
+        (name, mssql_t, sqlite_t, postgres_t)
+        for name, mssql_t, sqlite_t, postgres_t in _BULKOPS_LOG_UPGRADE_COLUMNS
         if not d.column_exists(engine, schema, "BulkOpsLog", name)
     ]
     if missing:
         with engine.begin() as cx:
-            for name, mssql_t, sqlite_t in missing:
+            for name, mssql_t, sqlite_t, postgres_t in missing:
                 cx.execute(text(
-                    f"ALTER TABLE {qualified} ADD {d.quote_ident(name)} "
-                    f"{_col_type(d, mssql_t, sqlite_t)} NULL;"
+                    f"ALTER TABLE {qualified} ADD {name} "
+                    f"{d.pick_type(mssql_t, sqlite_t, postgres_t)} NULL;"
                 ))
 
 

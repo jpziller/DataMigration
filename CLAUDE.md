@@ -673,15 +673,26 @@ and the remaining data-architect tools (`profiling.py`, `auto_mapper.py`,
 `reference_record.py`) are **SQL-Server-only for now** — a deliberate
 scope boundary, not an oversight; port one incrementally via the same
 `sql_dialect.py` helpers whenever a real SQLite or PostgreSQL project
-actually needs it. **One known gap `PostgresDialect` alone doesn't
-close**: `bulkops.py`/`orchestrator.py`/`source_ingestion.py`'s own
-opt-in log tables (`BulkOpsLog`/`OrchestratorRunEvent`/
-`SourceIngestionLog`) pick their custom column types via a private
-`isinstance(d, MssqlDialect)`-or-`sqlite_type` helper that bypasses
-`sql_dialect.py` entirely — real, silent mistyping risk for Postgres
-(e.g. a `DATETIME2` column would fall through to the `sqlite_type`
-branch, `TEXT`, rather than a real `TIMESTAMP`) until that helper is
-made properly three-way-aware. See `ROADMAP.md` #69 for the full status.
+actually needs it. The private, mssql-or-sqlite-only column-type helper
+that used to bypass `sql_dialect.py` in `bulkops.py`/`orchestrator.py`/
+`source_ingestion.py` (and, found in the same pass, `load_order.py`/
+`risk_analyzer.py` too) is fixed — all five now use a shared
+`SqlDialect.pick_type()`, verified against a real Postgres instance,
+including Hard Rule 6's sort-column UPDATE (Postgres has neither
+SQLite's `rowid` nor T-SQL's updatable-CTE syntax, so this needed a real
+third branch, not just a type swap) and the column-name case-folding
+gap that live testing turned up along the way (Postgres folds an
+unquoted reference to lowercase — both at `CREATE TABLE` and in a query's
+own result set — while SQL Server/SQLite don't; `sql_dialect.row_get()`
+is the fix for the read side). **What's still open**: the same
+exact-case `row["X"]`-style read pattern `orchestrator.py` had also
+exists, unfixed, in `migration_run_book.py`, `readiness.py`,
+`reconciliation.py`, `batch_advisor.py`, and `failure_triage.py` — don't
+assume `SQL_BACKEND=postgresql` is safe for `update-migration-run-book`/
+`reconcile-load-counts`/`assess-migration-readiness`/
+`recommend-batch-size`/`triage-failures` until that's fixed too. See
+`ROADMAP.md` #69 for the full, dated account of what's verified live vs.
+still open.
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,

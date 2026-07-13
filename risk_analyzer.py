@@ -167,25 +167,31 @@ def analyze_migration_risk(sf, object_names, fields_in_scope_by_object=None):
     ]
 
 
-def _col_type(d, mssql_type, sqlite_type):
-    return mssql_type if isinstance(d, sql_dialect.MssqlDialect) else sqlite_type
-
-
 def _ensure_table(engine, schema="dbo"):
     d = sql_dialect.for_engine(engine)
     if d.table_exists(engine, schema, "ObjectAutomationRisk"):
         return
     qualified = d.qualify(schema, "ObjectAutomationRisk")
     with engine.begin() as cx:
+        # Column names here are deliberately bare (not d.quote_ident()) --
+        # found via live Postgres testing: quoting at CREATE TABLE
+        # preserves exact case in Postgres's catalog, but every read/
+        # write of this table elsewhere (write_to_sql()'s own DELETE/
+        # INSERT below, plus batch_advisor.py's/failure_triage.py's/
+        # orchestrator.py's/readiness.py's own reads, none of which quote
+        # their references) uses bare column references, which Postgres
+        # folds to lowercase -- bare here matches that dominant
+        # convention instead of requiring every scattered reference to be
+        # quoted.
         cx.execute(text(
             f"CREATE TABLE {qualified} ("
-            f"{d.quote_ident('ObjectName')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
-            f"{d.quote_ident('CheckType')} {_col_type(d, 'NVARCHAR(50)', 'TEXT')} NOT NULL, "
-            f"{d.quote_ident('ItemName')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
-            f"{d.quote_ident('IsActive')} {_col_type(d, 'BIT', 'INTEGER')} NULL, "
-            f"{d.quote_ident('DirectHit')} {_col_type(d, 'BIT', 'INTEGER')} NULL, "
-            f"{d.quote_ident('Detail')} {d.raw_text_type()} NULL, "
-            f"{d.quote_ident('AnalyzedDate')} {_col_type(d, 'DATETIME2', 'TEXT')} NOT NULL);"
+            f"ObjectName {d.pick_type('NVARCHAR(255)', 'TEXT', 'VARCHAR(255)')} NOT NULL, "
+            f"CheckType {d.pick_type('NVARCHAR(50)', 'TEXT', 'VARCHAR(50)')} NOT NULL, "
+            f"ItemName {d.pick_type('NVARCHAR(255)', 'TEXT', 'VARCHAR(255)')} NOT NULL, "
+            f"IsActive {d.pick_type('BIT', 'INTEGER', 'BOOLEAN')} NULL, "
+            f"DirectHit {d.pick_type('BIT', 'INTEGER', 'BOOLEAN')} NULL, "
+            f"Detail {d.raw_text_type()} NULL, "
+            f"AnalyzedDate {d.pick_type('DATETIME2', 'TEXT', 'TIMESTAMP')} NOT NULL);"
         ))
 
 

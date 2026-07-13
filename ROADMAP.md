@@ -3967,32 +3967,79 @@ needed) end-to-end check that `config.py` → `sql_client.make_engine()`
 → `sql_dialect.for_engine()` resolves to a real `PostgresDialect`
 instance with a correctly-redacted engine URL.
 
-**What this does NOT yet cover — found during this same build, not
-glossed over**: every module already claimed to route purely through
-`sql_dialect.py` (`replicate.py`, `load_table_prep.py`, `risk_analyzer.py`,
-`migration_run_book.py`, `mapping_doc.py`, `snowfakery_data.py`,
-`mock_data.py`'s DDL step, `load_order.py`'s `write_to_sql()`) genuinely
-does, and is Postgres-capable now that `PostgresDialect` exists.
-`source_ingestion.py`'s SQL-Server-BULK-INSERT-vs-generic-load branch
-(`isinstance(d, MssqlDialect)`) also already generalizes correctly —
-its "else" path is a genuinely backend-agnostic chunked
-`pandas.read_csv`/`to_sql()`, not actually SQLite-specific despite the
-comments saying "SQLite." The one real exception found: `bulkops.py`'s
-and `orchestrator.py`'s own `_col_type()` helper (and the same pattern
-inlined in `source_ingestion.py`'s `enable_source_ingestion_logging()`)
-picks each opt-in log table's (`BulkOpsLog`/`OrchestratorRunEvent`/
-`SourceIngestionLog`) custom column types from a private
-`(mssql_type, sqlite_type)` tuple + `isinstance(d, MssqlDialect)`
-ternary that never calls into `sql_dialect.py` at all — for
-`SQL_BACKEND=postgresql`, this silently falls into the *sqlite* branch
-(e.g. a `DATETIME2` column becomes plain `TEXT` instead of a real
-`TIMESTAMP`). Not fixed in this pass — needs a shared, three-way-aware
-replacement for that private helper (ideally one, in `sql_dialect.py`
-itself, that all three call sites share instead of three independent
-copies) before those three specific opt-in logging tables are trusted
-against a real Postgres backend. Everything else in the core load
-engine (`replicate`/`bulkops`'s own writeback/`retry`, hard rules 6/7's
-`load_table_prep.py`) does not have this gap.
+**Follow-up pass (2026-07-13, same day): the column-type gap above is
+now actually fixed, plus two deeper gaps found and fixed along the
+way — verified against a real, throwaway Postgres 16 container
+(`docker run postgres:16`), not just reasoned from docs:**
+
+- **The type-mapping gap itself**: `sql_dialect.py` gained a shared
+  `SqlDialect.pick_type(mssql_type, sqlite_type, postgres_type)` method
+  (plus a `backend_key` class attribute per concrete dialect) replacing
+  the private, mssql-or-sqlite-only `_col_type()`/inline
+  `isinstance(d, MssqlDialect)` ternaries that used to be duplicated
+  independently in **five** places, not the three originally found:
+  `bulkops.py`, `orchestrator.py`, `source_ingestion.py`, **and
+  `load_order.py`/`risk_analyzer.py`** (the last two build
+  `ObjectDependency`/`ObjectLoadOrder`/`ObjectAutomationRisk` — core
+  `analyze-load-order`/`analyze-org-risk` output, not opt-in logging at
+  all, so this was a bigger miss than first documented). A future backend
+  now needs updating in one place, not five.
+- **Hard Rule 6 needed genuinely new code, not just a type swap**:
+  `load_table_prep.add_bulk_load_sort_column()`'s SQLite branch
+  correlates via SQLite's own implicit `rowid`, which doesn't exist in
+  Postgres. Added a real third branch using Postgres's `ctid` (its own
+  physical-row-identifier analogue) via `UPDATE ... FROM` — Postgres has
+  no updatable-CTE syntax either, so this isn't just find-and-replace.
+  Verified live against a real multi-child-per-parent case (the exact
+  scenario this rule exists for): every parent's rows land in a
+  contiguous `Sort` range, matching the mssql/sqlite behavior exactly.
+- **A second, unrelated bug surfaced only by live testing**: `CREATE
+  TABLE` in these five files quoted column names (`d.quote_ident(name)`,
+  preserving exact case in Postgres's catalog), while every `INSERT`/
+  `SELECT`/`WHERE`/`DELETE` elsewhere in the codebase that touches these
+  same tables (`batch_advisor.py`, `failure_triage.py`,
+  `migration_run_book.py`, `readiness.py`, `reconciliation.py`, plus
+  these five files' own INSERTs) already references columns **bare**
+  (unquoted). SQL Server/SQLite tolerate that mismatch (both match
+  unquoted references case-insensitively regardless); Postgres does not
+  — it folds an unquoted reference to lowercase, which doesn't match a
+  quoted, case-preserved catalog name, raising
+  `psycopg2.errors.UndefinedColumn`. Fixed by making `CREATE TABLE`
+  bare too (matching the codebase's own dominant convention) rather than
+  quoting every scattered reference across ten-plus files — the one
+  genuine exception, `SourceIngestionLog.RowCount` (a real T-SQL
+  reserved-word collision), stays quoted on both the creation and
+  reference side, exactly as it already was.
+- **A third bug, one layer deeper still**: Postgres also returns
+  **lowercased** column names in a query's own result set for any
+  unquoted column (not just at creation) — unlike SQL Server/SQLite,
+  which return whatever case was originally declared. `orchestrator.py`'s
+  `row["LogId"]` and `_row_to_current()`'s `row.get("RecordsSubmitted")`-
+  style exact-case access both silently broke (the `.get()` case is
+  worse: no crash, just silent `None`/zero defaults). Added
+  `sql_dialect.row_get(row, key)` (exact-case fast path, case-insensitive
+  fallback) and fixed both spots in `orchestrator.py` specifically, since
+  that's what this pass was scoped to.
+
+**What's still genuinely open — not fixed in this pass, stated plainly**:
+the identical bare-vs-exact-case read pattern `orchestrator.py` had also
+exists, unfixed, in `migration_run_book.py`, `readiness.py`,
+`reconciliation.py`, `batch_advisor.py`, `failure_triage.py`, and
+probably others that read these same tables back via
+`row["ExactCase"]`-style access (`auto_mapper.py`/`profiling.py`/
+`data_model_diagram.py`/`record_types.py`/`reference_record.py` do the
+same thing against their own SQL-Server-only tables, out of scope here
+regardless). `sql_dialect.row_get()` is built and tested for exactly
+this, but applying it file-by-file is real, separate follow-up work, not
+completed today — don't assume `SQL_BACKEND=postgresql` is safe for
+`update-migration-run-book`/`reconcile-load-counts`/
+`assess-migration-readiness`/`recommend-batch-size`/`triage-failures`
+until it is. Everything genuinely verified today: `PostgresDialect`
+itself, `replicate`/`bulkops`'s own writeback path, hard rules 6/7's
+`load_table_prep.py`, and `BulkOpsLog`/`OrchestratorRunEvent`/
+`SourceIngestionLog`/`ObjectDependency`/`ObjectLoadOrder`/
+`ObjectAutomationRisk` DDL + writes + (for `orchestrator-assess`
+specifically) reads.
 
 **Why this, specifically, over other possible third backends**: Postgres
 is free, genuinely production-grade (unlike SQLite, which this project

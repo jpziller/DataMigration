@@ -20,10 +20,6 @@ from sqlalchemy import text
 import sql_dialect
 
 
-def _col_type(d, mssql_type, sqlite_type):
-    return mssql_type if isinstance(d, sql_dialect.MssqlDialect) else sqlite_type
-
-
 def build_dependency_edges(sf, object_names):
     """Return a list of dependency edges among the given objects.
 
@@ -138,17 +134,25 @@ def write_to_sql(engine, object_names, edges, result, schema="dbo"):
     dep_exists = d.table_exists(engine, schema, "ObjectDependency")
     order_exists = d.table_exists(engine, schema, "ObjectLoadOrder")
 
+    # Column names in both CREATE TABLEs below are deliberately bare (not
+    # d.quote_ident()) -- found via live Postgres testing: quoting
+    # preserves exact case in Postgres's catalog, but every read/write of
+    # these two tables elsewhere (the INSERTs right below, plus
+    # migration_run_book.py's/readiness.py's own SELECTs, none of which
+    # quote their references) uses bare column references, which Postgres
+    # folds to lowercase -- bare here matches that dominant convention
+    # instead of requiring every scattered reference to be quoted.
     with engine.begin() as cx:
         if dep_exists:
             cx.execute(text(f"DROP TABLE {dep_qualified};"))
         cx.execute(text(
             f"CREATE TABLE {dep_qualified} ("
-            f"{d.quote_ident('ChildObject')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
-            f"{d.quote_ident('ParentObject')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
-            f"{d.quote_ident('LookupField')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL, "
-            f"{d.quote_ident('IsMasterDetail')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
-            f"{d.quote_ident('IsNillable')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
-            f"{d.quote_ident('AnalyzedDate')} {_col_type(d, 'DATETIME2', 'TEXT')} NOT NULL);"
+            f"ChildObject {d.pick_type('NVARCHAR(255)', 'TEXT', 'VARCHAR(255)')} NOT NULL, "
+            f"ParentObject {d.pick_type('NVARCHAR(255)', 'TEXT', 'VARCHAR(255)')} NOT NULL, "
+            f"LookupField {d.pick_type('NVARCHAR(255)', 'TEXT', 'VARCHAR(255)')} NOT NULL, "
+            f"IsMasterDetail {d.pick_type('BIT', 'INTEGER', 'BOOLEAN')} NOT NULL, "
+            f"IsNillable {d.pick_type('BIT', 'INTEGER', 'BOOLEAN')} NOT NULL, "
+            f"AnalyzedDate {d.pick_type('DATETIME2', 'TEXT', 'TIMESTAMP')} NOT NULL);"
         ))
         if edges:
             cx.execute(
@@ -164,14 +168,14 @@ def write_to_sql(engine, object_names, edges, result, schema="dbo"):
             cx.execute(text(f"DROP TABLE {order_qualified};"))
         cx.execute(text(
             f"CREATE TABLE {order_qualified} ("
-            f"{d.quote_ident('ObjectName')} {_col_type(d, 'NVARCHAR(255)', 'TEXT')} NOT NULL PRIMARY KEY, "
-            f"{d.quote_ident('LoadLevel')} {_col_type(d, 'INT', 'INTEGER')} NULL, "
-            f"{d.quote_ident('LoadSequence')} {_col_type(d, 'INT', 'INTEGER')} NULL, "
-            f"{d.quote_ident('HasSelfReference')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
-            f"{d.quote_ident('SelfReferenceFields')} {_col_type(d, 'NVARCHAR(500)', 'TEXT')} NULL, "
-            f"{d.quote_ident('InUnresolvedCycle')} {_col_type(d, 'BIT', 'INTEGER')} NOT NULL, "
-            f"{d.quote_ident('CycleMembers')} {_col_type(d, 'NVARCHAR(500)', 'TEXT')} NULL, "
-            f"{d.quote_ident('AnalyzedDate')} {_col_type(d, 'DATETIME2', 'TEXT')} NOT NULL);"
+            f"ObjectName {d.pick_type('NVARCHAR(255)', 'TEXT', 'VARCHAR(255)')} NOT NULL PRIMARY KEY, "
+            f"LoadLevel {d.pick_type('INT', 'INTEGER', 'INTEGER')} NULL, "
+            f"LoadSequence {d.pick_type('INT', 'INTEGER', 'INTEGER')} NULL, "
+            f"HasSelfReference {d.pick_type('BIT', 'INTEGER', 'BOOLEAN')} NOT NULL, "
+            f"SelfReferenceFields {d.pick_type('NVARCHAR(500)', 'TEXT', 'VARCHAR(500)')} NULL, "
+            f"InUnresolvedCycle {d.pick_type('BIT', 'INTEGER', 'BOOLEAN')} NOT NULL, "
+            f"CycleMembers {d.pick_type('NVARCHAR(500)', 'TEXT', 'VARCHAR(500)')} NULL, "
+            f"AnalyzedDate {d.pick_type('DATETIME2', 'TEXT', 'TIMESTAMP')} NOT NULL);"
         ))
 
         cycle_by_object = {}

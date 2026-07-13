@@ -86,12 +86,36 @@ def test_postgres_sf_type_to_sql_matches_mssql_granularity_with_postgres_names()
     assert d.sf_type_to_sql({"type": "reference"}) == "VARCHAR(18)"
 
 
+def test_pick_type_selects_the_right_backend_slot():
+    assert MssqlDialect().pick_type("DATETIME2", "TEXT", "TIMESTAMP") == "DATETIME2"
+    assert SqliteDialect().pick_type("DATETIME2", "TEXT", "TIMESTAMP") == "TEXT"
+    assert PostgresDialect().pick_type("DATETIME2", "TEXT", "TIMESTAMP") == "TIMESTAMP"
+
+
 def test_for_engine_resolves_postgresql_to_postgres_dialect():
     class _FakeDialectEngine:
         class dialect:
             name = "postgresql"
 
     assert isinstance(sql_dialect.for_engine(_FakeDialectEngine()), PostgresDialect)
+
+
+def test_row_get_exact_case_fast_path():
+    assert sql_dialect.row_get({"LogId": 5}, "LogId") == 5
+
+
+def test_row_get_falls_back_case_insensitively():
+    # Simulates a real Postgres result mapping, where an unquoted column
+    # comes back lowercased regardless of the originally-declared case.
+    assert sql_dialect.row_get({"logid": 5}, "LogId") == 5
+
+
+def test_row_get_raises_when_truly_missing():
+    try:
+        sql_dialect.row_get({"logid": 5}, "ObjectName")
+        assert False, "expected an exception"
+    except Exception:
+        pass
 
 
 def test_for_engine_rejects_unsupported_dialect_name():

@@ -55,6 +55,21 @@ def add_bulk_load_sort_column(engine, table, parent_key_column, schema="dbo"):
                 )
                 UPDATE NumberedRows SET {sort_col} = RowNum;
             """))
+        elif isinstance(d, sql_dialect.PostgresDialect):
+            # Postgres has no updatable-CTE equivalent either, but (unlike
+            # SQLite) DOES support UPDATE ... FROM a correlated subquery --
+            # correlate by ctid, Postgres's own physical-row identifier
+            # (its rowid analogue; stable for the duration of this single
+            # UPDATE statement, which is all that's needed here). Verified
+            # live against a real Postgres 16 instance, including the
+            # multi-row-per-parent case this function exists for.
+            cx.execute(text(f"""
+                UPDATE {qualified} AS t SET {sort_col} = sub.RowNum
+                FROM (
+                    SELECT ctid AS _rid, ROW_NUMBER() OVER (ORDER BY {parent_col}) AS RowNum
+                    FROM {qualified}
+                ) sub WHERE sub._rid = t.ctid;
+            """))
         else:
             # SQLite has no updatable-CTE equivalent -- correlate by the
             # table's own implicit rowid instead.

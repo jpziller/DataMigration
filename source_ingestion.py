@@ -451,17 +451,17 @@ def import_directory(engine, csv_dir, sql_dir=_SQL_DIR_DEFAULT, schema="dbo", ti
 
 
 _SOURCE_INGESTION_LOG_COLUMNS = [
-    # (name, mssql_type, sqlite_type, nullable)
-    ("TableName", "NVARCHAR(255)", "TEXT", False),
-    ("CsvPath", "NVARCHAR(1000)", "TEXT", False),
-    ("ScriptPath", "NVARCHAR(1000)", "TEXT", False),
-    ("Status", "NVARCHAR(20)", "TEXT", False),
-    ("RowCount", "INT", "INTEGER", True),  # RowCount collides with a T-SQL reserved keyword (SET ROWCOUNT/@@ROWCOUNT) -- must be quoted
-    ("StartedAt", "DATETIME2", "TEXT", False),
-    ("CompletedAt", "DATETIME2", "TEXT", False),
-    ("DurationSeconds", "FLOAT", "REAL", False),
-    ("RunBy", "NVARCHAR(128)", "TEXT", True),
-    ("DriftDetails", "NVARCHAR(1000)", "TEXT", True),
+    # (name, mssql_type, sqlite_type, postgres_type, nullable)
+    ("TableName", "NVARCHAR(255)", "TEXT", "VARCHAR(255)", False),
+    ("CsvPath", "NVARCHAR(1000)", "TEXT", "VARCHAR(1000)", False),
+    ("ScriptPath", "NVARCHAR(1000)", "TEXT", "VARCHAR(1000)", False),
+    ("Status", "NVARCHAR(20)", "TEXT", "VARCHAR(20)", False),
+    ("RowCount", "INT", "INTEGER", "INTEGER", True),  # RowCount collides with a T-SQL reserved keyword (SET ROWCOUNT/@@ROWCOUNT) -- must be quoted
+    ("StartedAt", "DATETIME2", "TEXT", "TIMESTAMP", False),
+    ("CompletedAt", "DATETIME2", "TEXT", "TIMESTAMP", False),
+    ("DurationSeconds", "FLOAT", "REAL", "DOUBLE PRECISION", False),
+    ("RunBy", "NVARCHAR(128)", "TEXT", "VARCHAR(128)", True),
+    ("DriftDetails", "NVARCHAR(1000)", "TEXT", "VARCHAR(1000)", True),
 ]
 
 
@@ -474,11 +474,20 @@ def enable_source_ingestion_logging(engine, schema="dbo"):
     d = sql_dialect.for_engine(engine)
     if d.table_exists(engine, schema, "SourceIngestionLog"):
         return
+    # Column names are bare here except RowCount (a genuine T-SQL reserved-
+    # word collision, quoted consistently both here and at its one
+    # reference point above) -- found via live Postgres testing: quoting
+    # every column at CREATE TABLE preserves exact case in Postgres's
+    # catalog, but the INSERT above already references every other column
+    # bare, which Postgres folds to lowercase -- a mismatch if creation
+    # doesn't match. Bare here matches that existing convention instead of
+    # requiring the INSERT to be quoted too.
     col_defs = [d.autoincrement_pk_column_ddl("LogId")]
-    for name, mssql_t, sqlite_t, nullable in _SOURCE_INGESTION_LOG_COLUMNS:
-        col_type = mssql_t if isinstance(d, sql_dialect.MssqlDialect) else sqlite_t
+    for name, mssql_t, sqlite_t, postgres_t, nullable in _SOURCE_INGESTION_LOG_COLUMNS:
+        col_type = d.pick_type(mssql_t, sqlite_t, postgres_t)
         null_sql = "NULL" if nullable else "NOT NULL"
-        col_defs.append(f"{d.quote_ident(name)} {col_type} {null_sql}")
+        col_name = d.quote_ident(name) if name == "RowCount" else name
+        col_defs.append(f"{col_name} {col_type} {null_sql}")
     with engine.begin() as cx:
         cx.execute(text(
             f"CREATE TABLE {d.qualify(schema, 'SourceIngestionLog')} (" + ", ".join(col_defs) + ");"

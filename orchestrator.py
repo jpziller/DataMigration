@@ -268,19 +268,29 @@ def _row_to_current(row):
     (any row logged before this column existed) becomes {}, same as a
     genuinely clean run with no failures at all; assess_tier() can't tell
     the two apart from this dict alone, which is fine -- a NULL-history
-    row simply can't contribute a "known signature" either way."""
-    raw = row.get("FailureErrorCounts")
+    row simply can't contribute a "known signature" either way.
+
+    Keys are lowercased once up front rather than accessed by exact case
+    -- found via live Postgres testing: an unquoted column comes back
+    lowercased in a Postgres result set (e.g. "recordssubmitted", not
+    "RecordsSubmitted") even though SQL Server/SQLite both preserve the
+    originally-declared case, so a plain row.get("RecordsSubmitted")
+    silently returned None (not even a crash) for every field on
+    Postgres. Lowercasing once here is simpler than routing every one of
+    these through sql_dialect.row_get() individually."""
+    row = {k.lower(): v for k, v in dict(row).items()}
+    raw = row.get("failureerrorcounts")
     failure_error_counts = json.loads(raw) if raw else {}
     return {
-        "operation": row.get("Operation"),
-        "submitted": row.get("RecordsSubmitted") or 0,
-        "succeeded": row.get("RecordsSucceeded") or 0,
-        "failed": row.get("RecordsFailed") or 0,
-        "ambiguous": row.get("RecordsAmbiguous") or 0,
-        "external_id_not_found": row.get("ExternalIdNotFound") or 0,
-        "lock_errors": row.get("LockErrorCount") or 0,
+        "operation": row.get("operation"),
+        "submitted": row.get("recordssubmitted") or 0,
+        "succeeded": row.get("recordssucceeded") or 0,
+        "failed": row.get("recordsfailed") or 0,
+        "ambiguous": row.get("recordsambiguous") or 0,
+        "external_id_not_found": row.get("externalidnotfound") or 0,
+        "lock_errors": row.get("lockerrorcount") or 0,
         "failure_error_counts": failure_error_counts,
-        "duration_seconds": row.get("DurationSeconds"),
+        "duration_seconds": row.get("durationseconds"),
     }
 
 
@@ -353,7 +363,7 @@ def assess_from_log(engine, object_name, log_id=None, schema="dbo", environment=
     if row is None:
         raise ValueError(f"No BulkOpsLog row found for {object_name}" + (f" with LogId {log_id}" if log_id else ""))
 
-    resolved_log_id = row["LogId"]
+    resolved_log_id = sql_dialect.row_get(row, "LogId")
     current = _row_to_current(dict(row))
     history = _read_bulkops_history(engine, object_name, schema=schema, before_log_id=resolved_log_id)
     has_risk_data = _has_automation_risk_data(engine, object_name, schema=schema)
@@ -363,21 +373,17 @@ def assess_from_log(engine, object_name, log_id=None, schema="dbo", environment=
 
 
 _RUN_EVENT_COLUMNS = [
-    ("LogId", "INT", "INTEGER", False),
-    ("ObjectName", "NVARCHAR(255)", "TEXT", False),
-    ("Tier", "INT", "INTEGER", False),
-    ("Reasons", "NVARCHAR(MAX)", "TEXT", False),
-    ("Environment", "NVARCHAR(10)", "TEXT", False),
-    ("AssessedAt", "DATETIME2", "TEXT", False),
-    ("RunBy", "NVARCHAR(128)", "TEXT", True),
+    ("LogId", "INT", "INTEGER", "INTEGER", False),
+    ("ObjectName", "NVARCHAR(255)", "TEXT", "VARCHAR(255)", False),
+    ("Tier", "INT", "INTEGER", "INTEGER", False),
+    ("Reasons", "NVARCHAR(MAX)", "TEXT", "TEXT", False),
+    ("Environment", "NVARCHAR(10)", "TEXT", "VARCHAR(10)", False),
+    ("AssessedAt", "DATETIME2", "TEXT", "TIMESTAMP", False),
+    ("RunBy", "NVARCHAR(128)", "TEXT", "VARCHAR(128)", True),
 ]
 _RUN_EVENT_UPGRADE_COLUMNS = [
-    ("TierName", "NVARCHAR(30)", "TEXT"),
+    ("TierName", "NVARCHAR(30)", "TEXT", "VARCHAR(30)"),
 ]
-
-
-def _col_type(d, mssql_type, sqlite_type):
-    return mssql_type if isinstance(d, sql_dialect.MssqlDialect) else sqlite_type
 
 
 def enable_orchestrator_logging(engine, schema="dbo"):
@@ -397,26 +403,36 @@ def enable_orchestrator_logging(engine, schema="dbo"):
     qualified = d.qualify(schema, "OrchestratorRunEvent")
 
     if not d.table_exists(engine, schema, "OrchestratorRunEvent"):
+        # Column names here are deliberately bare (not d.quote_ident()) --
+        # matches bulkops.py's own BulkOpsLog fix for the identical issue
+        # (found via live Postgres testing): quoting at CREATE TABLE
+        # preserves exact case in Postgres's catalog, but every read/write
+        # of this table elsewhere (log_run_event()'s own INSERT below,
+        # plus assess_tier()'s own history reads above) uses bare column
+        # references, which Postgres folds to lowercase -- bare here
+        # matches that dominant convention instead of requiring every
+        # scattered reference to be quoted.
         col_defs = [d.autoincrement_pk_column_ddl("EventId")]
-        for name, mssql_t, sqlite_t, nullable in _RUN_EVENT_COLUMNS:
+        for name, mssql_t, sqlite_t, postgres_t, nullable in _RUN_EVENT_COLUMNS:
             null_sql = "NULL" if nullable else "NOT NULL"
-            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} {null_sql}")
-        for name, mssql_t, sqlite_t in _RUN_EVENT_UPGRADE_COLUMNS:
-            col_defs.append(f"{d.quote_ident(name)} {_col_type(d, mssql_t, sqlite_t)} NULL")
+            col_defs.append(f"{name} {d.pick_type(mssql_t, sqlite_t, postgres_t)} {null_sql}")
+        for name, mssql_t, sqlite_t, postgres_t in _RUN_EVENT_UPGRADE_COLUMNS:
+            col_defs.append(f"{name} {d.pick_type(mssql_t, sqlite_t, postgres_t)} NULL")
         with engine.begin() as cx:
             cx.execute(text(f"CREATE TABLE {qualified} (" + ", ".join(col_defs) + ");"))
         return
 
     missing = [
-        (name, mssql_t, sqlite_t) for name, mssql_t, sqlite_t in _RUN_EVENT_UPGRADE_COLUMNS
+        (name, mssql_t, sqlite_t, postgres_t)
+        for name, mssql_t, sqlite_t, postgres_t in _RUN_EVENT_UPGRADE_COLUMNS
         if not d.column_exists(engine, schema, "OrchestratorRunEvent", name)
     ]
     if missing:
         with engine.begin() as cx:
-            for name, mssql_t, sqlite_t in missing:
+            for name, mssql_t, sqlite_t, postgres_t in missing:
                 cx.execute(text(
-                    f"ALTER TABLE {qualified} ADD {d.quote_ident(name)} "
-                    f"{_col_type(d, mssql_t, sqlite_t)} NULL;"
+                    f"ALTER TABLE {qualified} ADD {name} "
+                    f"{d.pick_type(mssql_t, sqlite_t, postgres_t)} NULL;"
                 ))
 
 

@@ -42,6 +42,54 @@ def _escape_doublequote_ident(name):
 
 
 class SqlDialect(ABC):
+    #: Short backend identifier ("mssql"/"sqlite"/"postgres") each concrete
+    #: subclass must set as a class attribute -- used only by pick_type()
+    #: below, for callers with their own ad hoc per-backend column types
+    #: (BulkOpsLog/OrchestratorRunEvent/SourceIngestionLog/ObjectDependency/
+    #: ObjectLoadOrder/ObjectAutomationRisk) that don't go through
+    #: sf_type_to_sql(). Not used anywhere else in this module.
+    backend_key = None
+
+    def pick_type(self, mssql_type, sqlite_type, postgres_type):
+        """Select the right column-type string for whichever real dialect
+        this is, from a single (mssql, sqlite, postgres) triple -- replaces
+        the private, mssql-or-sqlite-only `_col_type()`/inline
+        `isinstance(d, MssqlDialect)` ternaries that used to be duplicated
+        independently in bulkops.py, orchestrator.py, source_ingestion.py,
+        load_order.py, and risk_analyzer.py (found in review: every one of
+        those would have silently mistyped a Postgres column as whatever
+        the *sqlite* type was, e.g. DATETIME2 -> TEXT instead of TIMESTAMP,
+        since none of them knew a third backend existed). A fourth backend
+        now needs updating in exactly one place, not five."""
+        return {"mssql": mssql_type, "sqlite": sqlite_type, "postgres": postgres_type}[self.backend_key]
+
+
+def row_get(row, key):
+    """Case-insensitive lookup against a SQLAlchemy RowMapping (from
+    `.mappings().first()`/`.all()`) -- needed because Postgres folds an
+    unquoted column name to lowercase not just for matching but for the
+    catalog name itself, so a query result's actual keys come back
+    lowercased (`row["LogId"]` raises `NoSuchColumnError` there) even
+    though SQL Server/SQLite both preserve/return whatever case a column
+    was originally declared with. Exact-case access is tried first (the
+    fast, common-case path for mssql/sqlite); the slower case-insensitive
+    scan only runs as a fallback, so this is a safe drop-in replacement
+    for `row[key]` on every backend, not just Postgres. Confirmed live:
+    orchestrator.py's own `row["LogId"]` failed against a real Postgres
+    instance until routed through this. NOT YET applied to every other
+    module with the identical pattern (migration_run_book.py/readiness.py/
+    reconciliation.py/batch_advisor.py/failure_triage.py and others also
+    do `row["ExactCase"]`-style access against these same tables) -- see
+    ROADMAP.md #69 for the full, honest list of what's still open."""
+    try:
+        return row[key]
+    except Exception:
+        lowered = key.lower()
+        for k in row.keys():
+            if k.lower() == lowered:
+                return row[k]
+        raise
+
     @abstractmethod
     def qualify(self, schema, table):
         """Quoted schema.table identifier for raw SQL text."""
@@ -94,6 +142,8 @@ class SqlDialect(ABC):
 
 
 class MssqlDialect(SqlDialect):
+    backend_key = "mssql"
+
     def qualify(self, schema, table):
         return f"[{_escape_bracket_ident(schema)}].[{_escape_bracket_ident(table)}]"
 
@@ -146,6 +196,8 @@ class MssqlDialect(SqlDialect):
 
 
 class SqliteDialect(SqlDialect):
+    backend_key = "sqlite"
+
     def qualify(self, schema, table):
         return f'"{_escape_doublequote_ident(schema)}"."{_escape_doublequote_ident(table)}"'
 
@@ -227,14 +279,10 @@ class PostgresDialect(SqlDialect):
     (Postgres and SQLite happen to agree here); table/column introspection
     uses information_schema (Postgres, unlike SQLite, genuinely implements
     it) rather than SQLite's PRAGMA or SQL Server's OBJECT_ID/COL_LENGTH.
-    Not yet exercised against a live Postgres instance the way the mssql/
-    sqlite dialects were -- see ROADMAP.md #69 for what's verified vs.
-    reasoned-from-docs so far, and for the real, separate gap this alone
-    does NOT fix: bulkops.py/orchestrator.py/source_ingestion.py's own
-    opt-in log tables (BulkOpsLog/OrchestratorRunEvent/SourceIngestionLog)
-    pick their custom column types via a private mssql-or-sqlite-only
-    helper that bypasses this dialect seam entirely, not through
-    sf_type_to_sql() or anything else defined here."""
+    See ROADMAP.md #69 for what's been verified live against a real
+    Postgres instance vs. reasoned from docs."""
+
+    backend_key = "postgres"
 
     def qualify(self, schema, table):
         return f'"{_escape_doublequote_ident(schema)}"."{_escape_doublequote_ident(table)}"'
