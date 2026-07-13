@@ -80,6 +80,14 @@ instead of one-off commands:
 docker compose exec app bash
 ```
 
+**Verified (2026-07-13)** on a clean rebuild (`docker compose down` then
+`docker compose up -d --build`, no cached containers): Node 22 inside
+`app` (the `markAsUncloneable` fix holds), `sqlcmd` login as `sa` against
+`sqlserver`, the `SF_Migration` mirror DB created by `docker/init-db.sh`,
+and `cli.py list-objects` returning real data over a `jwt`-mode
+Salesforce connection — the whole stack end-to-end, not just the build
+step.
+
 ## Choosing a Salesforce auth mode inside the container
 
 `SF_AUTH_MODE` (from your mounted `.env`, per `sf_client.py`) works
