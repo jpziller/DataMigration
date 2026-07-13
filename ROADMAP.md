@@ -3592,6 +3592,61 @@ Dogfooded live against this project's own org and mirror DB, including
 watching the verdict flip from NOT READY to READY after a real
 `analyze-org-risk` run.
 
+**Two more real bugs found via the full pipeline dogfood run** (bootstrap
+through a live 4-object `bulkops` load, `analyze-org-risk`,
+`reconcile-load-counts`, and `generate-pass-summary`):
+
+- The Parent-Batch Sort gate's "does this object have an in-scope parent"
+  check counted a **self-reference** edge (`ChildObject == ParentObject`
+  in `dbo.ObjectDependency` — e.g. `Account.ParentId`/`MasterRecordId`,
+  both pointing `Account -> Account`) as a real parent, wrongly demanding
+  a `Sort` column on `Account_Load` even though `Account` has no actual
+  cross-object parent to batch against at all (a self-reference is a
+  two-pass-load field, per `load_order.py`'s own `self_references`
+  tracking — never mocked, never something `add-bulk-load-sort-column`
+  needs). Fixed by excluding `ParentObject != ChildObject` from the has-a-
+  parent query.
+- `check-mapping-balance`'s column-list parser (`mapping_doc.py`) had
+  **never actually recognized either of this project's own two real
+  *_Load-building patterns** — `SELECT ... INTO` (mssql,
+  `sql_dialect.py`'s own `MssqlDialect.create_table_as_select_sql()`) and
+  `CREATE TABLE ... AS SELECT` (sqlite) — only a literal
+  `INSERT INTO table (col1, col2, ...)` DML statement, which no real
+  transform script in this project uses at all. `assess-migration-
+  readiness`'s `mapping_balance` gate raised "No INSERT INTO statement
+  found" against every one of this project's own working scripts, mssql
+  or sqlite. Fixed by adding real SELECT-list parsing for both forms
+  (splitting on top-level commas so a `CAST(x AS y)`'s own internal
+  syntax isn't mistaken for a second column; taking the `AS alias` if
+  present, else the bare/qualified column name). That fix then exposed a
+  second, genuinely funny bug the same regex-only approach was hiding:
+  the parser had no SQL-comment awareness at all, so `010_account_load.sql`'s
+  own header comment — which happens to describe the port in English
+  prose, literally *"SELECT ... INTO is the equivalent"* — matched as if
+  it were real SQL, extracting `is` as the table name and comment text as
+  the column list. Fixed by stripping `/* */` and `--` comments before
+  any pattern match, for all three recognized forms.
+
+**One real, structural gap found but deliberately left open, not fixed
+this session**: a load table's own bookkeeping key column (this
+framework's own `LoadId` convention — the Snowfakery-era join key every
+generated `*_Load` table carries, distinct from a `REF_`-prefixed audit
+column, hard rule 13) is not a real Salesforce field and will **always**
+show up in `mapping_balance`'s `not_a_real_field` list for every object,
+in every project using this convention — there's currently no equivalent
+of `bulk_op()`'s own `key_column`/`id_column`/`error_column`/`ref_prefix`
+exclusion list for `check_mapping_balance()`. Confirmed live: every one of
+this dogfood run's 4 objects reported `NOT READY` on this gate alone, a
+false alarm each time (`LoadId` is expected and correct, not a mapping
+mistake) — a real usability problem for `assess-migration-readiness`'s
+whole "one aggregate go/no-go view" premise if every real project
+permanently shows `NOT READY` on a benign, unavoidable finding. Worth
+fixing before this command is relied on for a real (non-dogfood) project:
+thread the load table's own bookkeeping column names (and/or the `REF_`
+prefix) through to `check_mapping_balance()` the same way `bulk_op()`
+already excludes them, rather than reporting them as an ordinary
+not-a-real-field imbalance.
+
 ## 66. Auto-drafted client-facing pass summary — BUILT (`pass_summary.py`)
 
 A plain-English "here's what happened this pass" draft, pulled from the

@@ -80,6 +80,29 @@ def test_sort_gate_passes_when_sort_column_present(sqlite_engine):
     assert result["ok"] is True
 
 
+def test_sort_gate_not_applicable_when_only_self_reference_edges(sqlite_engine):
+    # Found via a real dogfood run: analyze-load-order records Account's
+    # own self-reference edges (ParentId/MasterRecordId, both
+    # Account -> Account) in ObjectDependency -- these are two-pass-load
+    # fields (load_order.py's own self_references tracking), never a real
+    # cross-object parent to batch against, so an object with ONLY
+    # self-reference edges must still report "No parent in scope," not a
+    # false Sort-column failure.
+    _seed_object_dependency(sqlite_engine, [("Account", "Account"), ("Account", "Account")])
+    d = sql_dialect.for_engine(sqlite_engine)
+    result = rd._sort_column_gate(sqlite_engine, d, "dbo", "Account", "Account_Load")
+    assert result["ok"] is None
+    assert "No parent in scope" in result["detail"]
+
+
+def test_sort_gate_ignores_self_reference_when_a_real_parent_also_exists(sqlite_engine):
+    _seed_object_dependency(sqlite_engine, [("Contact", "Contact"), ("Contact", "Account")])
+    pd.DataFrame({"LoadId": [1]}).to_sql("Contact_Load", sqlite_engine, schema="dbo", index=False)
+    d = sql_dialect.for_engine(sqlite_engine)
+    result = rd._sort_column_gate(sqlite_engine, d, "dbo", "Contact", "Contact_Load")
+    assert result["ok"] is False  # a real parent (Account) is still in scope
+
+
 # --- Migration Key Integrity gate ---
 
 def test_duplicate_key_gate_not_checked_without_migration_key(sqlite_engine):

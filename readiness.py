@@ -56,8 +56,18 @@ def _sort_column_gate(engine, d, schema, object_name, load_table):
     if not d.table_exists(engine, schema, "ObjectDependency"):
         return {"ok": None, "detail": "dbo.ObjectDependency doesn't exist yet -- run analyze-load-order first."}
     with engine.connect() as cx:
+        # Exclude a self-reference (ChildObject == ParentObject, e.g.
+        # Account.ParentId/MasterRecordId) -- found via a real dogfood
+        # run: a self-referencing object has no actual CROSS-object parent
+        # to batch against (that's a two-pass-load field, never mocked --
+        # see load_order.py's own self_references tracking), so it was
+        # wrongly flagged "Missing Sort column" here even with no in-scope
+        # parent at all.
         has_parent = cx.execute(
-            text(f"SELECT COUNT(*) FROM {d.qualify(schema, 'ObjectDependency')} WHERE ChildObject = :obj"),
+            text(
+                f"SELECT COUNT(*) FROM {d.qualify(schema, 'ObjectDependency')} "
+                "WHERE ChildObject = :obj AND ParentObject != :obj"
+            ),
             {"obj": object_name},
         ).scalar() > 0
     if not has_parent:

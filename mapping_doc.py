@@ -48,6 +48,29 @@ _INSERT_INTO_RE = re.compile(
     r"\s*\((?P<cols>[^)]+)\)",
     re.IGNORECASE,
 )
+# sql_dialect.py's own create_table_as_select_sql() -- the actual pattern
+# this project's real transform scripts use to build a *_Load table, on
+# either backend -- is neither of these forms; a plain INSERT INTO (...)
+# VALUES-shaped statement (what _INSERT_INTO_RE above matches) never
+# appears in a real sql/transformations/*.sql script at all. Found via a
+# real dogfood run: check-mapping-balance/assess-migration-readiness's
+# mapping_balance gate raised "No INSERT INTO statement found" against
+# every one of this project's own real, working scripts.
+#
+# mssql: SELECT <cols> INTO [schema].[table] FROM ...
+_SELECT_INTO_RE = re.compile(
+    r'SELECT\s+(?P<cols>.*?)\s+INTO\s+(?:(?:\[\w+\]|"\w+"|\w+)\.)?'
+    r'(?:\[(?P<table_br>\w+)\]|"(?P<table_dq>\w+)"|(?P<table_bare>\w+))',
+    re.IGNORECASE | re.DOTALL,
+)
+# sqlite: CREATE TABLE [schema].[table] AS SELECT <cols> FROM ...
+_CREATE_TABLE_AS_SELECT_RE = re.compile(
+    r'CREATE\s+TABLE\s+(?:(?:\[\w+\]|"\w+"|\w+)\.)?'
+    r'(?:\[(?P<table_br>\w+)\]|"(?P<table_dq>\w+)"|(?P<table_bare>\w+))'
+    r'\s+AS\s+SELECT\s+(?P<cols>.*?)\s+FROM\b',
+    re.IGNORECASE | re.DOTALL,
+)
+_AS_ALIAS_RE = re.compile(r'\bAS\s+(\[[^\]]+\]|"[^"]+"|\w+)\s*$', re.IGNORECASE)
 _INVALID_SHEET_CHARS = re.compile(r"[:\\/?*\[\]]")
 
 _HEADERS = [
@@ -253,15 +276,91 @@ def find_unmapped_required_fields(mapping_path, object_name):
     return gaps
 
 
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
+
+
+def _strip_sql_comments(sql_text):
+    """Strip /* ... */ block comments and -- line comments before any
+    pattern match below -- found via a real dogfood run, a genuinely
+    embarrassing bug: this project's own header comments describe the
+    SELECT...INTO port in English prose (literally "SELECT ... INTO is
+    the equivalent"), and _SELECT_INTO_RE matched that PROSE as if it
+    were real SQL (extracting "is" as the table name and comment text as
+    the column list) before this stripping step existed. A header comment
+    mentioning any of these keywords in passing must never be mistaken
+    for the real statement the same file's actual code contains."""
+    return _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub("", sql_text))
+
+
+def _split_top_level_commas(text):
+    """Split a SELECT column list on commas that aren't nested inside
+    parentheses -- a plain text.split(",") would wrongly split a single
+    column expression like CAST(x AS NVARCHAR(50)) or CONVERT(x, y) into
+    multiple pieces."""
+    parts, depth, current = [], 0, []
+    for ch in text:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+def _column_name_from_select_expr(expr):
+    """The implemented column name for one SELECT column expression: the
+    alias after AS if present (e.g. "_MockRowId AS LoadId" -> "LoadId",
+    "CAST(x AS NVARCHAR(50)) AS MigrationID__c" -> "MigrationID__c" --
+    _AS_ALIAS_RE anchors to the END of the expression so an AS inside a
+    CAST(...)'s own type-conversion syntax is never mistaken for the
+    column's real alias), otherwise the bare/qualified column name itself
+    (e.g. "m.Subject" -> "Subject", "Name" -> "Name")."""
+    expr = expr.strip()
+    m = _AS_ALIAS_RE.search(expr)
+    if m:
+        return m.group(1).strip('[]"')
+    return expr.split(".")[-1].strip().strip('[]"')
+
+
+def _extract_select_style_columns(sql_text, table_name, pattern):
+    for match in pattern.finditer(sql_text):
+        found_table = (
+            match.group("table_br") or match.group("table_dq") or match.group("table_bare")
+        )
+        if table_name is not None and found_table.lower() != table_name.lower():
+            continue
+        col_list = match.group("cols")
+        return [_column_name_from_select_expr(c) for c in _split_top_level_commas(col_list)]
+    return None
+
+
 def extract_insert_columns(sql_text, table_name=None):
-    """Return the column list from an INSERT INTO (...) statement in the
-    given SQL text -- the first one matching table_name (case-insensitive,
-    schema prefix/brackets/double-quotes ignored), or the first INSERT INTO
-    found if table_name is None. Recognizes SQL Server's [bracket] quoting
-    and SQLite/ANSI's "double quote" quoting (SqliteDialect.qualify()'s own
-    output shape), not just bracket-or-bare -- a SQLite transform script
-    using its own dialect's real quoting used to never match here at all.
-    Returns None if no match is found."""
+    """Return the implemented column list for a *_Load table build in the
+    given SQL text -- the first statement matching table_name
+    (case-insensitive, schema prefix/brackets/double-quotes ignored), or
+    the first match found if table_name is None. Recognizes all three real
+    patterns this project's own transform scripts use:
+      - INSERT INTO table (col1, col2, ...) -- a plain parenthesized list.
+      - SELECT col1, col2 AS alias, ... INTO table FROM ... -- mssql's own
+        canonical *_Load-building idiom (sql_dialect.py's
+        MssqlDialect.create_table_as_select_sql()); found via a real
+        dogfood run that this form was never recognized at all before,
+        so check-mapping-balance raised "No INSERT INTO statement found"
+        against every one of this project's own real, working scripts.
+      - CREATE TABLE table AS SELECT col1, col2 AS alias, ... FROM ... --
+        the equivalent sqlite idiom.
+    Recognizes SQL Server's [bracket] quoting and SQLite/ANSI's
+    "double quote" quoting (SqliteDialect.qualify()'s own output shape),
+    not just bracket-or-bare. Returns None if no match is found in any
+    of the three forms."""
+    sql_text = _strip_sql_comments(sql_text)
     for match in _INSERT_INTO_RE.finditer(sql_text):
         found_table = (
             match.group("table_br") or match.group("table_dq") or match.group("table_bare")
@@ -269,7 +368,11 @@ def extract_insert_columns(sql_text, table_name=None):
         col_list = match.group("cols")
         if table_name is None or found_table.lower() == table_name.lower():
             return [c.strip().strip('[]"') for c in col_list.split(",")]
-    return None
+
+    result = _extract_select_style_columns(sql_text, table_name, _SELECT_INTO_RE)
+    if result is not None:
+        return result
+    return _extract_select_style_columns(sql_text, table_name, _CREATE_TABLE_AS_SELECT_RE)
 
 
 def check_mapping_balance(sf, mapping_path, object_name, transform_sql_path, load_table_name=None):
