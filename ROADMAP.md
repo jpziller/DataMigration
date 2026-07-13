@@ -3824,44 +3824,85 @@ deck/PDF pulling from the same source-of-truth files (`CLAUDE.md`,
 but that's a real design decision for whoever scopes the actual build, not
 decided here.
 
-## 68. Docker-based local dev environment (not built — roadmap idea)
+## 68. Docker-based local dev environment — BUILT (`Dockerfile`, `docker-compose.yml`, `docker/init-db.sh`, `docs/DOCKER.md`)
 
-Raised directly, alongside PostgreSQL/Fivetran/Apache Hop, as a technology
-worth an opinion on. Verdict here is the opposite of the two FAQ entries
-below (#70) — this one is a genuine fit, not a "why not."
+Raised directly, alongside PostgreSQL/Fivetran/Apache Hop, as a
+technology worth an opinion on. Verdict here is the opposite of the two
+FAQ entries below (#70) — this one was a genuine fit, not a "why not," so
+it was built out for real rather than just scoped.
 
-**The actual friction today**: every setup instruction in this repo
-(`CLAUDE.md`'s own canonical commands, `sqlcmd -S localhost -E`) assumes a
+**The friction this solves**: every setup instruction in this repo
+(`CLAUDE.md`'s own canonical commands, `sqlcmd -S localhost -E`) assumed a
 Windows box with a local SQL Server instance and the ODBC driver already
 installed — real friction for a new contributor or a fresh project
 machine, and a genuine barrier on non-Windows hardware. The test suite
-already sidesteps this for CI (`SQL_BACKEND=sqlite`, no server needed at
-all — see `sql_client.py`'s `_make_sqlite_engine`), but that's a
-CI-only escape hatch, not a real local dev story for anyone who actually
-needs to run against `mssql` (most of the SQL-Server-only tooling listed
-in CLAUDE.md's "SQL backend" section — `sql/functions/`, `profiling.py`,
-`auto_mapper.py`, etc. — only exercises for real against `mssql`).
+already sidestepped this for CI (`SQL_BACKEND=sqlite`, no server needed
+at all), but that was a CI-only escape hatch, not a real local dev story
+for anyone who actually needs to run against `mssql` (most of the
+SQL-Server-only tooling listed in CLAUDE.md's "SQL backend" section —
+`sql/functions/`, `profiling.py`, `auto_mapper.py`, etc. — only exercises
+for real against `mssql`).
 
-**What this would look like**: a `docker-compose.yml` bundling a Python
-app container (this repo + `requirements.txt` + the SQL Server ODBC
-driver preinstalled) alongside a `mcr.microsoft.com/mssql/server`
-container (or a PostgreSQL container, if #69 below ever lands) — `docker
-compose up`, then the exact same `cli.py` commands this repo already
-documents, no manual driver/instance setup at all. Doesn't change
-anything about Hard Rule 1 (mirror-DB-only writes) or any other Hard
-Rule — purely a packaging change for the same architecture, not a design
-change.
+**What shipped**: `docker-compose.yml` defines three services — `sqlserver`
+(SQL Server 2022 Developer Edition, free/non-production, a named volume
+for persistence, a `sqlcmd`-based healthcheck), `sqlserver-init` (a
+one-shot, idempotent container that creates the empty mirror database
+once `sqlserver` is healthy, then exits — `docker/init-db.sh`), and `app`
+(this repo's Python environment — `Dockerfile` installs the Microsoft
+ODBC Driver 18, `mssql-tools18`/`sqlcmd`, and the Salesforce CLI on top
+of `python:3.12-slim-bookworm`, then `pip install -r requirements.txt`;
+the repo itself is bind-mounted rather than copied in, so host edits are
+live with no rebuild needed). `docker compose up -d` then `docker compose
+exec app python cli.py <verb>` replaces README.md's steps 3–7 (Python
+venv, SQL Server engine, SSMS, the ODBC driver, creating the database)
+entirely. Doesn't change anything about Hard Rule 1 (mirror-DB-only
+writes) or any other Hard Rule — purely a packaging change for the exact
+same architecture, not a design change.
 
-**Real open questions before this is scoped for real**: whether SQL
-Server's own Linux container image is licensed acceptably for this use
-(Developer edition is free for non-production use, which fits this
-project's own dev/practice framing); whether `sf` CLI auth (this
-framework's whole Salesforce connection story, per `sf_client.py`) works
-cleanly from inside a container without fighting browser-based OAuth
-flows; and whether the container should also bundle `sqlcmd`/`mssql-tools18`
-for the "look at SQL Server directly" read-only workflow CLAUDE.md
-documents, or leave that to the host machine. None of these are blockers,
-just real decisions for whoever picks this up.
+**The three real open questions from the original idea, resolved**:
+- *SQL Server licensing*: `MSSQL_PID: Developer` — free, full-featured,
+  non-production use, same edition README.md's own setup already
+  recommends; nothing new to clear here.
+- *`sf` CLI auth from inside a container*: genuinely mode-dependent, not
+  a single answer — `jwt`/`password` mode (`sf_client.py`'s
+  `connect_salesforce()`) are pure Python and need the `sf` binary not at
+  all, so they work with zero extra container config. `cli` mode needs a
+  real browser for `sf org login web`, which doesn't work headlessly
+  inside a container — solved by authenticating on the **host** as usual,
+  then bind-mounting the host's `sf` CLI config directory (`~/.sf`) into
+  the container so the *already-authenticated* org is reusable from
+  inside it (a commented-out, OS-specific volume line in
+  `docker-compose.yml`, since the exact host path differs Windows vs.
+  Mac/Linux — see `docs/DOCKER.md`'s auth-mode section for the full
+  reasoning and the troubleshooting step if the mount path doesn't match
+  a given `sf` CLI version's actual storage location).
+- *Whether to bundle `sqlcmd`*: yes — installed in the `app` image
+  alongside the ODBC driver (both come from the same Microsoft
+  `mssql-tools18` package), so the "look at SQL Server directly"
+  read-only workflow works the same way inside the container
+  (`docker compose exec app sqlcmd ...`) as it does today on a host with
+  SSMS/`sqlcmd` installed directly; port 1433 is also published so a
+  host-installed tool (SSMS, Azure Data Studio, DBeaver) can connect
+  directly too, whichever a given developer prefers.
+
+**One thing worth knowing that isn't obvious from the compose file
+alone**: the `app` service's own `environment:` block deliberately
+overrides `SQL_SERVER`/`SQL_DATABASE`/`SQL_TRUSTED_CONNECTION`/`SQL_UID`/
+`SQL_PWD` even though `.env` is also mounted in via `env_file` — inside
+the compose network, "localhost" means the app container itself, not a
+SQL Server the developer may separately have installed on their host.
+This works cleanly (not a footgun) because `config.py`'s
+`load_dotenv()` call never overrides an already-set OS environment
+variable (python-dotenv's own documented default), and Compose's
+`environment:` block sets real process env vars before the container's
+Python process ever starts — so the override always wins, and every
+non-SQL setting (`SF_*`, `MOCKAROO_API_KEY`, `TICKET_SYSTEM_*`) still
+loads normally from the developer's own mounted `.env`, unchanged.
+
+Not yet extended to PostgreSQL (#69, not built) or a SQLite container
+variant (SQLite needs no server at all, so there's nothing to
+containerize there) — `docs/DOCKER.md` notes both explicitly as
+deliberately out of scope for this pass.
 
 ## 69. PostgreSQL as a third `sql_dialect.py` backend (not built — roadmap idea)
 

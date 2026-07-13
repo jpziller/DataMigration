@@ -1162,7 +1162,17 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   (credential inventory, trust boundaries, what's code-enforced vs.
   convention-enforced — read this before a security review, and update it
   alongside any change that adds a credential type, network listener, or
-  auth boundary).
+  auth boundary), `DOCKER.md` (roadmap #68 — the Docker local dev
+  environment quickstart, auth-mode guidance, and what's deliberately out
+  of scope).
+- `Dockerfile`, `docker-compose.yml`, `docker/init-db.sh` (roadmap #68) —
+  the containerized local dev environment: SQL Server 2022 Developer
+  Edition + a Python/CLI environment with the ODBC driver, `sqlcmd`, and
+  the Salesforce CLI preinstalled. `docker compose up -d` replaces
+  README.md's manual SQL Server/SSMS/ODBC-driver setup steps; the repo is
+  bind-mounted into the `app` container, not copied in, so this is a
+  packaging change, not a design change — every Hard Rule below applies
+  identically whether `cli.py` runs in a venv or in this container.
 - `ROADMAP.md` — idea backlog and build status for planned tooling.
 - `metadata/*.json`, `mapping/*.xlsx` — generated, org-specific artifacts.
   Gitignored by default (every org's schema/mappings differ, so these

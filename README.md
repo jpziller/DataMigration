@@ -38,6 +38,11 @@ Windows host assumed (SQL Server's natural home); notes for Mac/Linux where
 they differ. **Follow this order** — later steps depend on earlier ones
 (noted inline), so installing out of order means backtracking.
 
+**Using Docker instead?** `docker compose up -d` replaces steps 3–7 below
+(Python venv, SQL Server engine, SSMS, the ODBC driver, creating the
+database) with one command — same architecture, just containerized. See
+[`docs/DOCKER.md`](docs/DOCKER.md).
+
 **Using SQLite instead (`SQL_BACKEND=sqlite`)?** Skip steps 4–7 entirely
 (SQL Server, SSMS, the ODBC driver, and creating a database) — SQLite needs
 no server, no separate driver install, and no credentials at all. Jump to

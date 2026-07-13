@@ -1,0 +1,90 @@
+# Local dev environment (roadmap #68) -- see docs/DOCKER.md for the full
+# quickstart. Three services: `sqlserver` (SQL Server 2022 Developer
+# Edition, free for non-production use), `sqlserver-init` (a one-shot
+# container that creates the empty mirror database, then exits), and
+# `app` (this repo's Python + CLI environment, bind-mounted so host edits
+# are reflected immediately -- see Dockerfile for why nothing is COPYed
+# in). Requires Docker Compose v2 (`service_completed_successfully` /
+# `service_healthy` conditions).
+#
+# Nothing here changes any Hard Rule in CLAUDE.md -- this packages the
+# exact same architecture (Python + SQL Server, `replicate`/`bulkops` as
+# the only write paths), it doesn't add a new one.
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      # Developer Edition -- free, full-featured, non-production use only
+      # (matches README.md's own step 4, just containerized).
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env first -- see .env.example. SQL Server requires 8+ characters with upper+lower+digit+symbol.}
+    ports:
+      # Published so a host tool (SSMS, Azure Data Studio, a host-installed
+      # sqlcmd) can also connect directly -- not required for `docker
+      # compose exec app ...` usage, which reaches this over the compose
+      # network by service name instead.
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env first -- see .env.example}
+      SQL_DATABASE: ${SQL_DATABASE:-SF_Migration}
+    volumes:
+      - ./docker/init-db.sh:/init-db.sh:ro
+    entrypoint: ["/bin/bash", "/init-db.sh"]
+    restart: "no"
+
+  app:
+    build: .
+    depends_on:
+      sqlserver-init:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+      # Optional, only for SF_AUTH_MODE=cli -- reuse an org already authed
+      # on the HOST via `sf org login web` (jwt/password mode needs none
+      # of this -- see docs/DOCKER.md's auth-mode guidance). Uncomment and
+      # adjust the host side for your OS:
+      #   Windows : ${USERPROFILE}/.sf:/root/.sf
+      #   Mac/Linux: ${HOME}/.sf:/root/.sf
+      # - ${USERPROFILE}/.sf:/root/.sf
+    env_file:
+      - .env
+    environment:
+      # Overrides whatever SQL_* values are in .env -- inside this
+      # network, "localhost" means the app container itself, not a SQL
+      # Server the developer may also have installed on their host.
+      # python-dotenv's load_dotenv() (config.py) never overrides an
+      # already-set OS environment variable (its documented default), so
+      # these values win over anything already in .env without editing
+      # that file. Every SF_* / MOCKAROO_API_KEY / TICKET_SYSTEM_* value
+      # still comes from the mounted .env via env_file above, unchanged.
+      SQL_BACKEND: mssql
+      SQL_SERVER: sqlserver
+      SQL_DATABASE: ${SQL_DATABASE:-SF_Migration}
+      SQL_DRIVER: ODBC Driver 18 for SQL Server
+      SQL_TRUSTED_CONNECTION: "no"
+      SQL_UID: sa
+      SQL_PWD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env first -- see .env.example}
+      SQL_ENCRYPT: "yes"
+      SQL_TRUST_SERVER_CERT: "yes"
+    working_dir: /app
+    tty: true
+    stdin_open: true
+    command: ["sleep", "infinity"]
+
+volumes:
+  sqlserver_data:

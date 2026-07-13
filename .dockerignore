@@ -1,0 +1,18 @@
+# Keeps `docker compose build`'s context small -- the repo is bind-mounted
+# into the app container at compose-up time (see docker-compose.yml), not
+# copied into the image, so none of this needs to reach the Docker daemon
+# at build time at all. Mirrors .gitignore's own exclusions plus the
+# Docker/git-specific ones.
+.git/
+.venv/
+__pycache__/
+*.pyc
+_stage/
+_sqlite/
+.pytest_cache/
+.env
+server.key
+server.crt
+*.log
+.mcp.json
+.claude/settings.local.json
