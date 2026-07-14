@@ -562,15 +562,29 @@ def bulk_op(sf, engine, object_name, operation, source_table,
 
         handler = getattr(sf.bulk2, object_name)
         if operation == "insert":
-            results = handler.insert(csv_path, batch_size=resolved_batch_size)
+            results = handler.insert(csv_file=csv_path, batch_size=resolved_batch_size)
         elif operation == "update":
-            results = handler.update(csv_path, batch_size=resolved_batch_size)
+            results = handler.update(csv_file=csv_path, batch_size=resolved_batch_size)
         elif operation == "upsert":
             if not external_id:
                 raise ValueError("upsert requires external_id")
-            results = handler.upsert(csv_path, external_id, batch_size=resolved_batch_size)
+            # simple_salesforce's SFBulk2Handler.upsert() signature is
+            # (csv_file=None, records=None, external_id_field='Id', ...) --
+            # its SECOND positional parameter is records, not
+            # external_id_field. Passing external_id positionally (as this
+            # call previously did) silently bound the external-id field
+            # name string into records instead, which _convert_dict_to_csv()
+            # then tried to iterate as a list of row dicts -- found live
+            # against a real org ("'str' object has no attribute 'keys'"),
+            # invisible to the test suite because tests/stub_salesforce.py's
+            # own StubBulkHandler.upsert() had drifted to match this WRONG
+            # calling convention rather than the real library's actual
+            # signature. Always pass both by keyword here so a future
+            # signature change fails loudly instead of silently rebinding.
+            results = handler.upsert(csv_file=csv_path, external_id_field=external_id,
+                                      batch_size=resolved_batch_size)
         else:  # delete
-            results = handler.delete(csv_path, batch_size=resolved_batch_size)
+            results = handler.delete(csv_file=csv_path, batch_size=resolved_batch_size)
         job_count = len(results)
 
         # Collect per-job successful + failed records.

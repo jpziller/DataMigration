@@ -538,6 +538,25 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, primary_pare
         for col in int_bookkeeping_cols:
             object_rows[col] = object_rows[col].astype("Int64")
 
+        # Same upcast-to-float problem as the bookkeeping int columns above,
+        # for real describe()-"boolean" fields: pd.read_json() reads every
+        # object type's records at once, and a sibling object type with no
+        # such field name leaves NaN in that column, upcasting it to
+        # float64 for the whole merged DataFrame -- surviving even after
+        # filtering down to just this object's own (fake: Boolean-filled,
+        # never-NaN) rows. A real value like True round-trips as the Python
+        # float 1.0, not the bool True. Found live generating mock data
+        # against Postgres (roadmap #69): pyodbc/sqlite3 both silently
+        # accept a float against a BIT/INTEGER column, but Postgres's
+        # native BOOLEAN column rejects it outright ("column is of type
+        # boolean but expression is of type numeric") -- the exact same
+        # failure mode replicate.py's own boolean-column fix addressed for
+        # live org data, here for Snowfakery-generated mock data instead.
+        bool_cols = [f["name"] for f in mapped_fields
+                     if f["type"] == "boolean" and f["name"] in object_rows.columns]
+        for col in bool_cols:
+            object_rows[col] = object_rows[col].astype(bool)
+
         object_rows = truncate_to_field_lengths(object_rows, mapped_fields)
         object_rows = _fix_snowfakery_datetime_strings(object_rows, mapped_fields)
         object_rows = _parse_datetime_fields_to_real_datetime64(object_rows, mapped_fields)

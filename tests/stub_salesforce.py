@@ -106,17 +106,29 @@ class StubBulkHandler:
         self._next_id = 1
         self._results_by_job = None  # set by insert(); reuse guard
 
-    def insert(self, csv_path, batch_size=None):
-        return self._submit(csv_path)
+    def insert(self, csv_file=None, batch_size=None):
+        return self._submit(csv_file)
 
-    def update(self, csv_path, batch_size=None):
-        return self._submit(csv_path)
+    def update(self, csv_file=None, batch_size=None):
+        return self._submit(csv_file)
 
-    def upsert(self, csv_path, external_id_field, batch_size=None):
-        return self._submit(csv_path)
+    def upsert(self, csv_file=None, external_id_field=None, batch_size=None):
+        # Matches the real simple_salesforce.bulk2.SFBulk2Handler.upsert()
+        # signature -- external_id_field is the THIRD parameter, not the
+        # second (that's `records`, unused by this stub since bulk_op()
+        # always calls with csv_file). A prior version of this stub took
+        # external_id_field as a plain positional second argument, which
+        # matched bulkops.py's own (wrong) positional call rather than the
+        # real library -- masking a real bug where the external-id field
+        # name was silently bound into the real library's `records` param
+        # instead. Require external_id_field so a caller reverting to the
+        # old positional-call bug fails here too, not just against a live org.
+        if external_id_field is None:
+            raise TypeError("upsert() requires external_id_field (by keyword)")
+        return self._submit(csv_file)
 
-    def delete(self, csv_path, batch_size=None):
-        return self._submit(csv_path)
+    def delete(self, csv_file=None, batch_size=None):
+        return self._submit(csv_file)
 
     def _submit(self, csv_path):
         if self._results_by_job is not None:
