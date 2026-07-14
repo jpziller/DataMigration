@@ -6,12 +6,15 @@ Copyright (c) 2026 JP Ziller LLC. Released under the [MIT License](LICENSE) —
 free to use, modify, and redistribute (including commercially), provided the
 copyright notice is retained.
 
-SQL Server is the integration hub — SQLite is also supported as a lighter
-alternative (`SQL_BACKEND=sqlite`, no server/install required; see "SQL
-backend: SQL Server or SQLite" below). Python handles the two directions of
+A SQL database is the integration hub — SQL Server (the default), SQLite
+(`SQL_BACKEND=sqlite`, no server/install required), or PostgreSQL
+(`SQL_BACKEND=postgresql`), per project (see "SQL backend: SQL Server,
+SQLite, or PostgreSQL" below). Python handles the two directions of
 movement: `replicate` (org → SQL) and `bulkops` (SQL → org, with Id/Error
 written back). All transformation logic stays in versioned SQL under
-`sql/` (T-SQL by convention, since SQL Server is the default backend).
+`sql/` — T-SQL by convention on the default SQL Server backend, ANSI SQL or
+SQLite's own dialect on the other two (a project's own scripts are written
+once, in whichever dialect that project's `SQL_BACKEND` actually uses).
 
 See [`docs/MIGRATION_PLAYBOOK.md`](docs/MIGRATION_PLAYBOOK.md) for the
 methodology behind this framework — script pattern, row-lock/batching
@@ -21,7 +24,7 @@ review — credential inventory, trust boundaries, and what's actually
 code-enforced versus convention-enforced today.
 
 ```
-org  --replicate-->  SQL Server or SQLite (typed mirror tables)
+org  --replicate-->  SQL Server, SQLite, or PostgreSQL (typed mirror tables)
                          |
                          |  SQL transforms (sql/transformations/*.sql, in git)
                          v
@@ -34,9 +37,11 @@ org  --replicate-->  SQL Server or SQLite (typed mirror tables)
 
 ## One-time environment setup
 
-Windows host assumed (SQL Server's natural home); notes for Mac/Linux where
-they differ. **Follow this order** — later steps depend on earlier ones
-(noted inline), so installing out of order means backtracking.
+Windows host assumed for the steps below (SQL Server's natural home, and
+still the default backend); notes for Mac/Linux where they differ, and the
+SQLite/PostgreSQL paths below need none of the Windows-specific pieces.
+**Follow this order** — later steps depend on earlier ones (noted inline),
+so installing out of order means backtracking.
 
 **Using Docker instead?** `docker compose up -d` replaces steps 3–7 below
 (Python venv, SQL Server/PostgreSQL engine, SSMS/psql, the driver,
@@ -104,7 +109,7 @@ everywhere.)
 Install separately from Microsoft — `pyodbc` (step 3) needs this at runtime;
 it doesn't ship with the SQL Server engine or with the Python package itself.
 Driver 18 encrypts by default, so for a local instance with a self-signed
-cert keep `SQL_TRUST_SERVER_CERT=yes` in `.env` (step 13) or connections fail.
+cert keep `SQL_TRUST_SERVER_CERT=yes` in `.env` (step 14) or connections fail.
 
 **7. Create the mirror database**
 In SSMS (step 5) or via `sqlcmd`:
@@ -132,7 +137,7 @@ first, or they'll have nothing to detect.
 **10. Mockaroo (optional — only needed for `generate-mock-data`)**
 Sign up free at mockaroo.com, then get an API key from mockaroo.com/account.
 Free tier: 200 requests/day, up to 5,000 records/request. Add it to `.env` in
-step 13 — never commit it or paste it into a chat/AI session (see step 13).
+step 14 — never commit it or paste it into a chat/AI session (see step 14).
 
 **11. GitHub CLI (`gh`, optional — only needed for PR/issue workflows)**
 Install from cli.github.com (or `winget install --id GitHub.cli`), then
@@ -144,16 +149,28 @@ Interactive — run it directly in your own terminal (not piped through an
 AI assistant) so you can see and respond to the prompts, including the
 one-time device code. Choose GitHub.com → HTTPS → login with a web browser.
 
-**12. Claude Code (optional, but this repo's operating model assumes it)**
+**12. SFDMU (optional — only needed for `bulkops --engine sfdmu`)**
+```bash
+sf plugins install sfdmu
+```
+Needs the `sf` CLI (step 8) already installed — Node.js itself doesn't need
+a separate install, it's bundled with the CLI. This is a second, optional
+load engine for `bulkops` (`forcedotcom/SFDX-Data-Move-Utility`, Salesforce's
+own Apache-2.0-licensed data migration plugin) — the default `python` engine
+needs nothing here and is unaffected either way. See "Two `bulkops` load
+engines" below for what it's for and its current scope.
+
+**13. Claude Code (optional, but this repo's operating model assumes it)**
 Needs Git for Windows (step 1) for its Bash shell. See "Claude Code operating
 layer" below for install + setup details.
 
-**13. Configure**
+**14. Configure**
 ```bash
 copy .env.example .env       # cp on Mac/Linux
 ```
-Set `SF_ORG_ALIAS=MIGRATION_TARGET`, your SQL Server values (or, on
-SQLite, `SQL_BACKEND=sqlite` + `SQL_SQLITE_DIR`/`SQL_SQLITE_SCHEMAS` — see
+Set `SF_ORG_ALIAS=MIGRATION_TARGET`, your SQL database values for whichever
+backend you're using (or, on SQLite, `SQL_BACKEND=sqlite` +
+`SQL_SQLITE_DIR`/`SQL_SQLITE_SCHEMAS` — see
 "SQL backend: SQL Server, SQLite, or PostgreSQL" below), and (if using mock data)
 `MOCKAROO_API_KEY`. `.gitignore` already excludes `.env`, `_stage/`,
 `_sqlite/`, and `server.key` — never commit real credentials, and never
@@ -227,10 +244,11 @@ default template isn't a file at all -- it's built directly from Python in
 `solution_doc.py`, so it's already template content, versioned like the
 rest of the framework.
 
-**Also generated, but living in SQL Server rather than as files** — every
-table below is a deploy target, safe to drop/regenerate by re-running the
-command that built it, never the source of truth for anything git already
-tracks:
+**Also generated, but living in the SQL database rather than as files** —
+every table below is a deploy target, safe to drop/regenerate by re-running
+the command that built it, never the source of truth for anything git
+already tracks (most are backend-agnostic; see "SQL backend" below for the
+few that are still SQL-Server-only):
 
 | Table | Written by |
 |---|---|
@@ -242,8 +260,8 @@ tracks:
 | `<LoadTable>_Result`, `<LoadTable>_Retry` | `bulkops` (no `key_column`) / `bulkops-retry` |
 
 The one exception worth calling out: `auto-map`'s thesaurus
-(`reference/field_synonyms.json`) always originates in git, never in SQL
-Server — `dbo.AutoMapSuggestions` stores *results*, not the matching rules
+(`reference/field_synonyms.json`) always originates in git, never in the SQL
+database — `dbo.AutoMapSuggestions` stores *results*, not the matching rules
 themselves.
 
 If a real engagement wants a versioned copy of its own describe snapshots or
@@ -359,6 +377,59 @@ the equivalent PostgreSQL writeup.
 
 ---
 
+## Two `bulkops` load engines: `python` (default) and `sfdmu`
+
+`bulkops`'s `--engine` flag picks which engine actually pushes SQL → org.
+Both write Id/Error back into the same SQL Load table the same way (Hard
+Rule 4), so `reconcile-load-counts`, `triage-failures`, and
+`migration_run_book` sync don't need to know or care which one ran.
+
+**`python` (default, unchanged)** — this framework's own Bulk API 2.0
+wrapper (`bulkops.py`). No extra install. Supports insert/update/upsert/
+delete, purge-by-filter, dynamic batch sizing, and activity logging.
+
+**`sfdmu`** (opt-in, `--engine sfdmu`) — delegates to
+[forcedotcom/SFDX-Data-Move-Utility](https://github.com/forcedotcom/SFDX-Data-Move-Utility)
+(Apache-2.0, Salesforce's own actively maintained data migration plugin).
+Needs `sf plugins install sfdmu` (step 12 above) — nothing else changes.
+**v1 scope, deliberately narrower than the python engine**: upsert/update
+only (`--external-id` required — every Load table here already carries a
+real migration key, so this matches this framework's own convention
+everywhere else); insert/delete aren't supported yet (SFDMU's own
+CSV-source insert convention relies on an ambiguous "Id column as
+placeholder" scheme for matching results back to source rows, murkier
+than upsert/update's real external-id match). A polymorphic lookup field
+(e.g. `Task.WhatId`) is automatically skipped rather than guessed at
+(`sent_columns.pop`'d before the CSV is built) — load those via the
+`python` engine as a separate pass.
+
+**Why bother, given the python engine already works?** SFDMU's
+relationship engine correctly resolves an already-loaded parent's real
+target Id into a child's lookup field (e.g. `Contact_Load.AccountId`,
+already populated by Account's own earlier load) — confirmed live against
+this project's own dogfood data, not assumed from docs — via a specific,
+non-obvious declaration `sfdmu_bridge.py` builds automatically: the parent
+object's query needs more than just `Id` (a bare-`Id` query makes SFDMU
+treat it as degenerate and exclude it, silently stripping the child's
+lookup along with it), `"externalId": "Id"` (the recognized
+"already-resolved, match directly" case), `"operation": "Readonly"`, and
+its own tiny source CSV (the distinct already-resolved parent Ids actually
+referenced — without one, SFDMU has nothing to correlate the match
+against and the field silently resolves blank instead of erroring). See
+`sfdmu_bridge.py`'s module docstring for the full account of everything
+found live building this — including a genuine Salesforce datetime-parse
+failure on every row of this integration's own first real test (the exact
+same space-separated-vs-`T`-separated bug `bulk_op()`'s own
+`_format_datetime_columns_for_csv()` was built to fix, just never applied
+to this second CSV export path until it was found live here too).
+
+**Not yet confirmed**: whether SFDMU offers anything comparable to Hard
+Rule 6's `[Sort]`-column lock-contention batching — nothing found in the
+installed plugin's own source suggests one; a disclosed gap, not assumed
+either way.
+
+---
+
 ## Usage
 
 ```bash
@@ -373,7 +444,8 @@ python cli.py query "SELECT Id, Name, Account.Name FROM Contact LIMIT 10"
 # Replicate org -> SQL (typed columns)
 python cli.py replicate Account
 python cli.py replicate Contact --where "CreatedDate = LAST_N_DAYS:30"
-python cli.py replicate Opportunity --raw    # all NVARCHAR(MAX); CAST in T-SQL
+python cli.py replicate Opportunity --raw    # all raw-text type (NVARCHAR(MAX) on
+                                              # SQL Server, TEXT on SQLite/PostgreSQL); CAST in SQL
 
 # Import a Parquet file -> typed SQL Server table (column types inferred
 # from the file's own schema -- no coercion step, unlike Salesforce's
@@ -416,7 +488,8 @@ python cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts
 python cli.py generate-solution-doc Solution.docx Account Contact Opportunity \
     --mapping-path mapping/Migration_Mapping.xlsx --company "Acme Corp" --appendix
 
-# Transform in T-SQL (sql/transformations/*.sql) to build *_Load tables
+# Transform in SQL (sql/transformations/*.sql) to build *_Load tables --
+# T-SQL by default, ANSI SQL/SQLite's dialect on the other two backends
 
 # Load SQL -> org, with Id/Error written back into the load table.
 # Every sent column is checked against the target object's live describe()
@@ -547,21 +620,28 @@ locally-generated error on that row, the same shape as any other failure.
 - **Compound fields** (`address`, `location`) are skipped; their components
   (`BillingStreet`, etc.) are replicated instead — same net result,
   different column set than a naive `SELECT *`.
-- **Type coercion at load.** Typed replicate maps booleans `true/false → 1/0`.
+- **Type coercion at load.** Typed replicate maps real Salesforce booleans to
+  real Python `True`/`False`, which every backend's driver adapts correctly
+  (`BIT` on SQL Server, `INTEGER` on SQLite, native `BOOLEAN` on
+  PostgreSQL) — confirmed live: an earlier `0`/`1` integer mapping worked
+  fine on SQL Server/SQLite but Postgres's `BOOLEAN` column rejects an
+  integer outright, so this had to become a real bool (`ROADMAP.md` #69).
   Datetimes are loaded as ISO strings — on SQL Server this relies on implicit
   conversion into `DATETIME2` (verify on your first datetime-heavy object);
   on SQLite there's no enforced column typing to rely on at all (type
   *affinity*, not enforcement), so a malformed value wouldn't error the way
-  SQL Server's strict typing would — use `--raw` and `CAST` during transform
-  if you need to double-check this on either backend.
+  SQL Server's/PostgreSQL's strict typing would — use `--raw` and `CAST`
+  during transform if you need to double-check this on any backend.
 - **Performance.** Replicate loads via `to_sql` + `fast_executemany`. Fine into
   the low millions on SQL Server. For very large objects there, swap the load
   step for `BULK INSERT` against the staged CSVs (the SQL Server service
   account must be able to read the file) or `bcp` — both are markedly faster
-  at scale. On SQLite, `sql_client.py`'s connect hook sets `PRAGMA
-  journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout` for real write
-  throughput, but SQLite is still single-writer — it's the lighter-weight
-  option, not the higher-throughput one.
+  at scale; PostgreSQL's `COPY` is the equivalent lever there, not yet
+  exercised in this framework at real volume. On SQLite, `sql_client.py`'s
+  connect hook sets `PRAGMA journal_mode=WAL`/`synchronous=NORMAL`/
+  `busy_timeout` for real write throughput, but SQLite is still
+  single-writer — it's the lighter-weight option, not the higher-throughput
+  one.
 - **Open bug: `Contact.MigrationID__c` FLS.** Deployed with a bundled `Admin`
   profile FLS grant (see hard rule 8), and both a SOQL query and a
   `FieldPermissions` query confirmed System Administrator had access right
@@ -575,7 +655,8 @@ locally-generated error on that row, the same shape as any other failure.
 ## Claude Code operating layer
 
 Claude Code drives this repo through a deliberate split: **read-only eyes** on
-the mirror DB (SQL Server or SQLite), **reviewed hands** for mutations.
+the mirror DB (SQL Server, SQLite, or PostgreSQL, per project), **reviewed
+hands** for mutations.
 
 - `CLAUDE.md` — loaded every session; the rules and canonical commands.
 - `.claude/settings.json` — permissions. Read/inspect/replicate and git-read run
@@ -631,6 +712,13 @@ under `SQL_SQLITE_DIR` directly via the `sqlite3` CLI or a plain file
 read; the "read-only eyes, reviewed hands" split still holds (introspect
 freely, mutations go through the Python CLI), it's just a smaller trust
 surface to begin with.
+
+**On a PostgreSQL-backed project (`SQL_BACKEND=postgresql`)**, the same
+tiered approach applies with Postgres-native tooling instead: `psql` is the
+zero-setup option (parallel to `sqlcmd` above — a read-only login, same
+"table drops and loads go through the reviewed Python CLI, never the MCP"
+rule), or a Postgres-specific read-only MCP server if you want nicer schema
+tools. No SQL Server/ODBC pieces apply on this path at all.
 
 Next-level guardrail (not shipped): a `PreToolUse` hook in `.claude/settings.json`
 that vetoes `bulkops` against a production org alias, or any `DROP`/`TRUNCATE`

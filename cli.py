@@ -38,6 +38,7 @@ from sql_client import make_engine
 import metadata as md
 import replicate as rep
 import bulkops as bo
+import sfdmu_bridge as sfdmu
 import batch_advisor as ba
 import load_order as lo
 import profiling as pf
@@ -331,9 +332,16 @@ def disable_source_ingestion_logging_cmd(schema):
                    "number always wins and is never overridden.")
 @click.option("--run-book", "run_book_path", default=None, help="Migration Run Book workbook path -- with --run-book-tab, auto-syncs this load's BulkOpsLog row into that tab's Load phase right after it's written.")
 @click.option("--run-book-tab", default=None, help="Migration Run Book tab name to sync into -- requires --run-book.")
+@click.option("--engine", type=click.Choice(["python", "sfdmu"]), default="python",
+              help="Load engine. 'python' (default) is this framework's own Bulk API 2.0 wrapper -- "
+                   "unchanged. 'sfdmu' delegates to forcedotcom/SFDX-Data-Move-Utility (requires "
+                   "`sf plugins install sfdmu` -- see README.md) -- upsert/update only, requires "
+                   "--external-id, and skips any polymorphic lookup field (e.g. Task.WhatId), same "
+                   "restrictions --where/purge mode has. Id/Error still land in the same SQL Load "
+                   "table either way; see sfdmu_bridge.py's module docstring for the full design.")
 def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_id,
                 key_column, fingerprint_columns, ref_prefix, schema, email_deliverability, confirm_external_email_risk,
-                batch_size, run_book_path, run_book_tab):
+                batch_size, run_book_path, run_book_tab, engine):
     fingerprint_columns = [c.strip() for c in fingerprint_columns.split(",")] if fingerprint_columns else None
     if bool(run_book_path) != bool(run_book_tab):
         raise click.BadParameter("--run-book and --run-book-tab must be given together.")
@@ -346,16 +354,29 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
         raise click.UsageError("--dry-run only applies to --where purge mode.")
     if not where and not source_table:
         raise click.UsageError("Pass a source table, or (delete only) --where \"<SOQL filter>\" to purge by filter.")
-    s, sf, engine = _ctx()
+    if engine == "sfdmu":
+        if where:
+            raise click.UsageError("--engine sfdmu doesn't support purge mode (--where) -- use the default python engine.")
+        if operation not in ("upsert", "update"):
+            raise click.UsageError("--engine sfdmu only supports upsert/update -- insert/delete are out of scope for v1 (see sfdmu_bridge.py).")
+        if not external_id:
+            raise click.UsageError("--engine sfdmu requires --external-id.")
+    s, sf, engine_conn = _ctx()
 
     if where:
-        summary = bo.purge_by_filter(sf, engine, object_name, where,
+        summary = bo.purge_by_filter(sf, engine_conn, object_name, where,
                                      schema=schema, stage_dir=s.stage_dir,
                                      batch_size=batch_size, dry_run=dry_run,
                                      run_book_path=run_book_path,
                                      run_book_tab=run_book_tab)
+    elif engine == "sfdmu":
+        summary = sfdmu.run_sfdmu_upsert(sf, engine_conn, object_name, operation, source_table,
+                                         external_id, s.sf_org_alias, key_column=key_column,
+                                         ref_prefix=ref_prefix, schema=schema, stage_dir=s.stage_dir,
+                                         email_deliverability=email_deliverability,
+                                         confirm_external_email_risk=confirm_external_email_risk)
     else:
-        summary = bo.bulk_op(sf, engine, object_name, operation, source_table,
+        summary = bo.bulk_op(sf, engine_conn, object_name, operation, source_table,
                              external_id=external_id, key_column=key_column,
                              fingerprint_columns=fingerprint_columns,
                              ref_prefix=ref_prefix,

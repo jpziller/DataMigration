@@ -1,10 +1,13 @@
 # CLAUDE.md — SQL-centric Salesforce migration framework
 
 ## What this repo is
-A Python framework for SQL-centric Salesforce data migration. SQL Server (local, database `SF_Migration`)
-is the integration hub. `replicate` pulls org → SQL; `bulkops` pushes SQL → org
-and writes the Salesforce `Id` / `Error` back into the load table. All
-transformation logic is T-SQL under `sql/transformations/`, versioned in git.
+A Python framework for SQL-centric Salesforce data migration. A SQL database
+(local, database `SF_Migration`) is the integration hub — SQL Server, SQLite,
+or PostgreSQL, per project (`SQL_BACKEND` in `.env`; see "SQL backend" below).
+`replicate` pulls org → SQL; `bulkops` pushes SQL → org and writes the
+Salesforce `Id` / `Error` back into the load table. All transformation logic
+is SQL under `sql/transformations/`, versioned in git — T-SQL, ANSI SQL, or
+SQLite's dialect, depending on the project's backend.
 Full design is in `README.md` — read it before making architectural changes.
 
 ## Claude Code behavior defaults (edit this section for your own preferences)
@@ -59,8 +62,9 @@ for you, and it'll stick for future sessions too.
   instead of being retyped. See `ROADMAP.md` #16 and `migration_run_book.py`.
 
 ## How to operate here: read-only eyes, reviewed hands
-- To **look** at SQL Server (schemas, row counts, samples, validating a load),
-  use `sqlcmd` (or the read-only DBHub MCP if configured). Read-only.
+- To **look** at the SQL backend (schemas, row counts, samples, validating a
+  load), use `sqlcmd` on SQL Server, `psql` on PostgreSQL, or the `sqlite3`
+  CLI on SQLite (or the read-only DBHub MCP if configured). Read-only.
 - To **change** anything, run the Python CLI verbs via bash. Those are the
   auditable operations.
 - The migration logic lives in `sql/transformations/*.sql`. Edit those files;
@@ -373,6 +377,18 @@ venv may not be active in a fresh shell:
                 sync `update-migration-run-book` uses against that tab's Load phase. Not automatic by
                 default; `bulkops` shouldn't silently touch a spreadsheet file unless asked to. See
                 `ROADMAP.md` #16.)
+                `--engine python|sfdmu` (default `python`, this framework's own Bulk API 2.0 wrapper,
+                unchanged. `sfdmu` delegates to `forcedotcom/SFDX-Data-Move-Utility` — Salesforce's own
+                Apache-2.0 data migration plugin, `sf plugins install sfdmu` required — as an
+                alternate write engine, upsert/update only, requiring `--external-id`; a polymorphic
+                lookup field like `Task.WhatId` is skipped automatically rather than guessed at, load
+                it via the `python` engine as a separate pass instead. Id/Error land in the same SQL
+                Load table either way via the exact same writeback `bulk_op()` itself uses, so nothing
+                downstream needs to know or care which engine ran. See `sfdmu_bridge.py`'s module
+                docstring and README.md's "Two `bulkops` load engines" section for the confirmed-live
+                mechanics — including the non-obvious `Id,Name`/`externalId:Id`/`Readonly` declaration
+                an already-loaded parent object needs so its real, already-resolved Id passes through
+                to a child's lookup field instead of triggering SFDMU's own relationship re-matching.)
 - Retry a failed load:
                 `.venv/Scripts/python.exe cli.py bulkops-retry Contact_Load`
                 (copies only the failed rows — where `Error` is populated — from a load table or its
@@ -945,7 +961,7 @@ tool-proposes-human-commits principle as `reference/batch_size_heuristics.json`.
 
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
-don't jump straight to writing T-SQL:
+don't jump straight to writing SQL:
 1. **Check the validators library first** — read `validators/<Object>.md`
    if one exists for this object (a project-specific gotcha found the hard
    way last time), and skim `validators/system/` if this is your first
@@ -1016,12 +1032,12 @@ replacement for (DBAmp, Field Trip, Salesforce Inspector Reloaded, Maven,
 Workbench, etc.) in code, comments, docs, or generated file contents
 (including spreadsheet column headers) — describe the behavior generically
 instead. This does **not** apply to tools this framework actually integrates
-with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
+with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine.
 
 ## Where things live
 - `cli.py` — CLI entry point wiring every verb together.
 - `config.py`, `sf_client.py`, `sql_client.py` — settings/env, Salesforce
-  auth, SQL connection (SQL Server or SQLite, per `SQL_BACKEND`).
+  auth, SQL connection (SQL Server, SQLite, or PostgreSQL, per `SQL_BACKEND`).
 - `sql_dialect.py` — the backend-aware SQL seam every other module routes
   through instead of hand-rolling `OBJECT_ID`/`COL_LENGTH`/bracket-quoted
   T-SQL: table/column existence checks, identifier quoting, `SELECT INTO`
@@ -1064,6 +1080,31 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping. `type_map.py` is the SQL Server flavor;
   `sql_dialect.py`'s `SqliteDialect.sf_type_to_sql()` is SQLite's.
+- `sfdmu_bridge.py` — the `--engine sfdmu` alternate load engine (opt-in,
+  `bulkops` defaults to `python`/`bulk_op()` unchanged). Reuses
+  `bulkops.py`'s own `_derive_sent_columns()`/`_preflight_check()`/
+  `_check_email_deliverability()`/`_writeback_inplace()`/
+  `_format_datetime_columns_for_csv()` rather than duplicating any of that
+  logic — only the actual Salesforce write differs, shelling out to
+  `sf sfdmu run` (`forcedotcom/SFDX-Data-Move-Utility`, Apache-2.0) against
+  a generated `export.json`. Its own module docstring has the full account
+  of every real, confirmed-live gotcha found building it: the specific
+  `Id,Name`/`externalId:Id`/`Readonly` declaration an already-loaded parent
+  object needs (a bare-`Id` query makes SFDMU treat it as degenerate and
+  silently exclude any lookup pointing at it), that parent also needing its
+  own tiny source CSV (its distinct already-resolved Ids, or the match
+  silently resolves blank instead of erroring), SFDMU's own target-file
+  naming (always `<Object>_update_target.csv`, even for an `Upsert`
+  operation), why this framework's own `id_column` must NOT be sent to
+  SFDMU (it gets treated as SFDMU's own row-tracking key, suppressing the
+  full business-column echo-back needed to match results by external id),
+  and the exact same datetime-string XSD parse failure `bulk_op()`'s own
+  `_format_datetime_columns_for_csv()` already existed to fix, just never
+  applied to this second CSV export path until found live here too. v1
+  scope is upsert/update only (a real migration key is required either
+  way, matching this framework's own convention everywhere else) with
+  polymorphic lookup fields (e.g. `Task.WhatId`) skipped automatically, not
+  guessed at — load those via the `python` engine as a separate pass.
 - `failure_triage.py` — bulk-load failure triage assistant (roadmap #61):
   groups a completed `bulk_op()` run's failures by normalized error
   signature (`bulkops.py`'s own `_normalize_error_signature()`) and maps
@@ -1192,10 +1233,11 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
 - `force-app/` — Salesforce metadata deployed via `sf project deploy`
   (custom fields, profile FLS grants).
 - `mapping/` — generated field-mapping workbooks (`generate-mapping-doc`).
-- **SQL Server tables this framework creates** (not files — all deploy
+- **SQL tables this framework creates** (not files — all deploy
   targets only, safe to drop/regenerate by re-running the command that
   built them, never edited by hand, never the source of truth for anything
-  git already tracks):
+  git already tracks; most are backend-agnostic per the "SQL backend"
+  porting work above — a few noted there are still SQL-Server-only):
   - `dbo.FieldProfile`, `dbo.FieldProfileValues` — `profile-salesforce`/
     `profile-sql-table` results.
   - `dbo.ObjectDependency`, `dbo.ObjectLoadOrder` — `analyze-load-order`

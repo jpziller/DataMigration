@@ -231,6 +231,34 @@ def _preflight_check(sf, object_name, operation, sent_columns, id_column="Id"):
     }
 
 
+def _derive_sent_columns(df, operation, send_columns=None, id_column="Id",
+                         key_column="LoadId", error_column="Error", ref_prefix="REF_"):
+    """Which load-table columns actually get sent to Salesforce for a given
+    operation -- shared by bulk_op() (Bulk API 2.0 engine) and
+    sfdmu_bridge.py (SFDMU engine), so the REF_/Sort/key_column/id_column
+    exclusion rules (hard rules 6/13) live in exactly one place. See
+    bulk_op()'s own docstring for the full rationale; an explicit
+    send_columns is never second-guessed by any of this."""
+    _auto_excluded_exact = {error_column}
+    if operation == "delete":
+        return [id_column]
+    if operation == "insert":
+        return send_columns or [
+            c for c in df.columns
+            if c not in (_auto_excluded_exact | {id_column, key_column})
+            and c.upper() != "SORT"
+            and not c.upper().startswith(ref_prefix.upper())
+        ]
+    # update / upsert -- id_column IS sent (Salesforce needs it to identify
+    # the record); key_column/Sort are not.
+    return send_columns or [
+        c for c in df.columns
+        if c not in (_auto_excluded_exact | {key_column})
+        and c.upper() != "SORT"
+        and not c.upper().startswith(ref_prefix.upper())
+    ]
+
+
 _DELIVERABILITY_LEVELS = ("no-access", "system-email-only", "all-email")
 
 
@@ -501,24 +529,9 @@ def bulk_op(sf, engine, object_name, operation, source_table,
     # excluded there but missing here, the same class of bug. Only applies
     # to the auto-derived list -- an explicit send_columns is never
     # second-guessed.
-    _auto_excluded_exact = {error_column}
-    if operation == "delete":
-        sent = [id_column]
-    elif operation == "insert":
-        sent = send_columns or [
-            c for c in df.columns
-            if c not in (_auto_excluded_exact | {id_column, key_column})
-            and c.upper() != "SORT"
-            and not c.upper().startswith(ref_prefix.upper())
-        ]
-    else:  # update / upsert -- id_column IS sent (Salesforce needs it to
-        # identify the record); key_column/Sort are not.
-        sent = send_columns or [
-            c for c in df.columns
-            if c not in (_auto_excluded_exact | {key_column})
-            and c.upper() != "SORT"
-            and not c.upper().startswith(ref_prefix.upper())
-        ]
+    sent = _derive_sent_columns(df, operation, send_columns=send_columns,
+                               id_column=id_column, key_column=key_column,
+                               error_column=error_column, ref_prefix=ref_prefix)
 
     missing = [c for c in sent if c not in df.columns]
     if missing:
