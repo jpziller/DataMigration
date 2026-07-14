@@ -60,6 +60,25 @@ for you, and it'll stick for future sessions too.
   `add-migration-run-book-pass` rather than a fresh `generate-migration-run-book`, so the
   recipe (Items/Script names/dependencies/Critical flags) carries forward
   instead of being retyped. See `ROADMAP.md` #16 and `migration_run_book.py`.
+- **Real work happens on a branch, not `main` — not just a fixed rule, a
+  practice adopted deliberately once the project outgrew always-direct
+  pushes.** Anything that changes behavior, adds a feature, or fixes a bug
+  with real logic gets its own branch (or an isolated worktree for
+  genuinely exploratory/risky work — new dependencies, unverified
+  compatibility questions, "let's see if this works" spikes) and a real PR
+  (`gh pr create`), not a direct push to `main`. Reasoning: a same-day
+  ruthless review of a direct-to-main change once found 16 real issues
+  already living on `main`, including a crash-on-success bug — a branch
+  doesn't prevent bugs, but it keeps them off `main` until review actually
+  happens. Trivial fixes (a typo, a one-line doc clarification) can still
+  go direct — say so out loud when treating something as trivial rather
+  than silently deciding for the user.
+- **Let CI finish before merging.** This repo runs its test suite on
+  push/PR already (`.github/workflows/tests.yml`) — that should gate the
+  merge, not just report after the fact once something's already on `main`.
+- **Never merge a PR without explicit approval**, the same rule that
+  already governs `git push` to `main`, extended to merging. Opening a PR
+  is not the same as approving it — always wait to be told to merge.
 
 ## How to operate here: read-only eyes, reviewed hands
 - To **look** at the SQL backend (schemas, row counts, samples, validating a
