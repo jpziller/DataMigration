@@ -276,9 +276,11 @@ def _row_to_current(row):
     "RecordsSubmitted") even though SQL Server/SQLite both preserve the
     originally-declared case, so a plain row.get("RecordsSubmitted")
     silently returned None (not even a crash) for every field on
-    Postgres. Lowercasing once here (sql_dialect.lower_keys()) is simpler
-    than routing every one of these through sql_dialect.row_get()
-    individually."""
+    Postgres. `row` may already be lowercased by a caller (assess_from_log
+    passes one through) -- lower_keys() is idempotent, so re-lowering an
+    already-lowercase dict here is harmless and keeps this function
+    self-sufficient for its other caller (_read_bulkops_history), which
+    doesn't pre-lower."""
     row = sql_dialect.lower_keys(row)
     raw = row.get("failureerrorcounts")
     failure_error_counts = json.loads(raw) if raw else {}
@@ -364,8 +366,14 @@ def assess_from_log(engine, object_name, log_id=None, schema="dbo", environment=
     if row is None:
         raise ValueError(f"No BulkOpsLog row found for {object_name}" + (f" with LogId {log_id}" if log_id else ""))
 
-    resolved_log_id = sql_dialect.row_get(row, "LogId")
-    current = _row_to_current(dict(row))
+    # Lowercased once here, then passed straight to _row_to_current() --
+    # found in review: this used to route through a since-removed
+    # row_get() helper for just this one key, then _row_to_current() did
+    # its own separate lower_keys() pass right after, two redundant
+    # passes over the same row for no benefit.
+    row = sql_dialect.lower_keys(row)
+    resolved_log_id = row["logid"]
+    current = _row_to_current(row)
     history = _read_bulkops_history(engine, object_name, schema=schema, before_log_id=resolved_log_id)
     has_risk_data = _has_automation_risk_data(engine, object_name, schema=schema)
 

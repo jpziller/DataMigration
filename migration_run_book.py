@@ -679,12 +679,12 @@ def _insert_load_row(ws, object_name, phase_prefix="load"):
 
 
 def _apply_log_result(ws, row_idx, log_row, git_info=None):
-    # Normalized to lowercase keys once here rather than accessed by exact
-    # case throughout this function -- see orchestrator.py's own
-    # _row_to_current() for the identical fix and why it's needed
-    # (Postgres returns an unquoted column lowercased in its own query
-    # results, unlike SQL Server/SQLite).
-    log_row = sql_dialect.lower_keys(log_row)
+    # log_row's keys are already lowercased -- its one caller,
+    # sync_run_book_from_log(), lowercases the whole batch once before
+    # looping (found in review: this function used to re-lower here too,
+    # a redundant second pass over the same row on every call). Postgres
+    # returns an unquoted column lowercased in its own query results,
+    # unlike SQL Server/SQLite -- see sql_dialect.lower_keys()'s docstring.
     submitted = log_row["recordssubmitted"]
     succeeded = log_row["recordssucceeded"]
     failed = log_row["recordsfailed"]
@@ -785,10 +785,9 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
 
 
 def _apply_source_ingestion_result(ws, row_idx, log_row, schema):
-    # Normalized to lowercase keys once here -- see _apply_log_result()'s
-    # own docstring for why (Postgres returns an unquoted column
-    # lowercased in its own query results, unlike SQL Server/SQLite).
-    log_row = sql_dialect.lower_keys(log_row)
+    # log_row's keys are already lowercased by its one caller,
+    # sync_source_ingestion_to_run_book() -- see _apply_log_result()'s
+    # own comment for why this used to (redundantly) re-lower here too.
     row_count = log_row["rowcount"]
     is_blocked = log_row["status"] == "drift_blocked"
 

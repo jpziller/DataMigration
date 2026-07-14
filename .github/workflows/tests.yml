@@ -5,6 +5,25 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Real PostgreSQL service for tests/test_*_postgres_integration.py
+    # (roadmap #69) -- GitHub Actions runs this as a sibling container
+    # reachable on localhost, no docker-compose/testcontainers needed.
+    # tests/conftest.py's postgres_engine fixture skips gracefully (not a
+    # failure) if TEST_POSTGRES_PASSWORD isn't set, so a contributor
+    # running the suite locally without Postgres still gets a clean run --
+    # this service is what makes it non-skipped specifically in CI.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,4 +40,9 @@ jobs:
         # bare `pytest` console script doesn't do that insertion, which is
         # why every CI run failed with ModuleNotFoundError until this fix
         # (confirmed by reproducing the exact failure locally).
+        env:
+          TEST_POSTGRES_HOST: localhost
+          TEST_POSTGRES_PORT: 5432
+          TEST_POSTGRES_USER: postgres
+          TEST_POSTGRES_PASSWORD: ci_test_password
         run: python -m pytest tests/ -v

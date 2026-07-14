@@ -4127,29 +4127,98 @@ else. What live testing found instead, in both files:
 (`r["ItemName"]`/`r["Detail"]`) on top of its own `IsActive = 1` —
 fixed via `sql_dialect.lower_keys()`, same as everywhere else.
 
-**What's still genuinely open — not fixed in this pass, stated
-plainly**: `auto_mapper.py`/`profiling.py`/`data_model_diagram.py`/
-`record_types.py`/`reference_record.py` weren't touched — they're
+**`auto_mapper.py`/`profiling.py`/`data_model_diagram.py`/
+`record_types.py`/`reference_record.py` weren't touched** — they're
 SQL-Server-only tables, out of scope for `SQL_BACKEND=postgresql`
-regardless. No other file in the codebase currently reads/writes
-`BulkOpsLog`/`OrchestratorRunEvent`/`SourceIngestionLog`/
-`ObjectDependency`/`ObjectLoadOrder`/`ObjectAutomationRisk`, so — as far
-as this project's own grep-for-every-reference audit this pass and the
-three before it could find — the case-folding read pattern and the
-`IsActive`-style boolean-literal pattern are both now fully closed for
-`SQL_BACKEND=postgresql` across every module that touches these tables.
-Everything genuinely verified live today: `PostgresDialect` itself
-(including the `column_exists()` fix), `replicate`/`bulkops`'s own
-writeback path, hard rules 6/7's `load_table_prep.py`, `BulkOpsLog`/
-`OrchestratorRunEvent`/`SourceIngestionLog`/`ObjectDependency`/`ObjectLoadOrder`/
+regardless.
+
+**The "fully closed" claim above was wrong — a ruthless code-review pass
+found it wasn't.** A full multi-angle review (8 finder agents + a
+mandatory security pass) of everything in this and the three prior
+follow-up passes found the audit above had missed `load_table_prep.py`
+itself — Hard Rules 6/7's own implementation, the one this whole chain
+of fixes exists to protect:
+
+- **`add_bulk_load_sort_column()`** and **`check_load_table_duplicate_keys()`**
+  both used bare SQL aliases (`ParentKey`/`MinSort`/`MaxSort`/`SortSpan`/
+  `DuplicateKey`/`Occurrences`) and returned `dict(r)` unlowered — but
+  their return values are a **public, documented Pascal-case contract**
+  `cli.py` reads by exact key. On Postgres this raised `KeyError`
+  precisely when either check found something real to report (a
+  non-contiguous Sort range, a genuine duplicate migration key) — the
+  exact opposite of every other fix in this chain, which normalizes the
+  *reader* to lowercase. Here the *aliases themselves* are wrapped in
+  `d.quote_ident()` instead (same mechanism `RowCount`/`Sort` already
+  used in this file), guaranteeing the exact declared case on all three
+  backends with zero changes needed to `cli.py`/`readiness.py`. Verified
+  live with a genuinely non-contiguous range and a genuine duplicate key
+  (not just the clean path) — both now report correctly instead of
+  crashing.
+- **`source_ingestion.py`'s generated `.sql` script** (and its module/
+  function docstrings) hardcoded "SQLite has no BULK INSERT equivalent"
+  regardless of the actual backend — false, and a real, permanent
+  inaccuracy in a Hard-Rule-10-traceable, git-committed artifact once
+  `SQL_BACKEND=postgresql` existed. Fixed to name the real backend
+  (`Backend: PostgreSQL` in the generated header) and describe both
+  non-mssql backends accurately (SQLite has no bulk-load mechanism at
+  all; Postgres has `COPY`, genuinely not used here). `import-directory`
+  itself (both the "new file" and "existing file, later pass" cases) is
+  now live-verified against Postgres too — CLAUDE.md's claim that it
+  "works on all three backends" was true in practice (the generic pandas
+  path) but had never actually been exercised against Postgres before
+  this pass.
+- **Doc drift**: `docs/SECURITY_OVERVIEW.md` (never updated for the
+  Postgres backend — added its credential row to §3, `psycopg2-binary`
+  to §9), `docs/DOCKER.md` (still said Postgres "isn't built yet" — now
+  distinguishes "the Python-level backend is built and live-verified" from
+  "no `docker-compose.yml` service exists yet"), and `README.md`'s own
+  "SQL backend" section (still only described `mssql`/`sqlite` — now has
+  a full PostgreSQL config example, mirroring `CLAUDE.md`'s).
+- **Cleanup**: the review found `row_get()` had exactly one production
+  call site, which itself did two redundant passes over the same row
+  (`row_get()` then a separate `lower_keys()` inside `_row_to_current()`)
+  — collapsed to a single `lower_keys()` call, and `row_get()` removed
+  entirely (no remaining callers). `migration_run_book.py`'s
+  `_apply_log_result()`/`_apply_source_ingestion_result()` each
+  re-lowered a row their one caller had already lowered for the whole
+  batch — removed the redundant second pass in both.
+- **The actual testing-strategy gap the review flagged is now closed
+  too**: added `tests/conftest.py`'s `postgres_engine` fixture (skips
+  gracefully with no Postgres reachable, matching every contributor's
+  machine without one) and `tests/test_load_table_prep_postgres_integration.py`
+  (6 tests, including the one case neither backend's suite covered
+  before at all — a genuinely non-contiguous Sort range actually being
+  reported, not just the clean path), plus a real `postgres:16` service
+  in `.github/workflows/tests.yml` so these run automatically in CI, the
+  same way the 6 existing `test_*_sqlite_integration.py` files already
+  do for SQLite. Every one of this pass's bug classes was found by a
+  human manually running `docker run postgres:16` — this is the first
+  of that manual verification to become a permanent, automated
+  regression guard instead of a one-time check.
+
+Everything genuinely verified live across all four follow-up passes:
+`PostgresDialect` itself (including the `column_exists()` fix),
+`replicate`/`bulkops`'s own writeback path, hard rules 6/7's
+`load_table_prep.py` (now with real reporting-path test coverage, not
+just the clean path), `BulkOpsLog`/`OrchestratorRunEvent`/
+`SourceIngestionLog`/`ObjectDependency`/`ObjectLoadOrder`/
 `ObjectAutomationRisk` DDL + writes + reads, `orchestrator-assess`,
 `generate-migration-run-book`, `update-migration-run-book` (both its
 `BulkOpsLog` and `SourceIngestionLog` syncs), `reconcile-load-counts`,
 `recommend-batch-size` (all three of its seed/automation/history
 layers), `suggest-batch-heuristics`, `triage-failures`'s
-`ObjectAutomationRisk` cross-reference, and `assess-migration-readiness`'s
+`ObjectAutomationRisk` cross-reference, `assess-migration-readiness`'s
 own `email_deliverability_attested` and `row_count_reconciliation`
-gates.
+gates, and `import-csv-directory` end to end (both new-file and
+reused-on-a-later-pass cases).
+
+**What's genuinely still not built**: the actual `docker-compose.yml`
+`postgres` service (only CI has a live Postgres wired up so far, via
+GitHub Actions' own `services:` block — a local `docker compose up`
+still only gets SQL Server). A true end-to-end pass — Docker Compose +
+Postgres + Snowfakery mock data + the full replicate/transform/bulkops
+methodology together, not individual functions probed by hand — hasn't
+been attempted yet.
 
 **Why this, specifically, over other possible third backends**: Postgres
 is free, genuinely production-grade (unlike SQLite, which this project

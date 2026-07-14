@@ -683,14 +683,13 @@ SQLite's `rowid` nor T-SQL's updatable-CTE syntax, so this needed a real
 third branch, not just a type swap) and the column-name case-folding
 gap that live testing turned up along the way (Postgres folds an
 unquoted reference to lowercase — both at `CREATE TABLE` and in a query's
-own result set — while SQL Server/SQLite don't; `sql_dialect.row_get()`
-is the fix for the read side). `migration_run_book.py`'s three affected
-functions (`_load_order_rows()`, `sync_run_book_from_log()`,
-`sync_source_ingestion_to_run_book()`) are fixed too, via a second shared
-helper, `sql_dialect.lower_keys()` (lowercase every key once instead of
-routing ~15 individual field accesses through `row_get()`) —
-`orchestrator.py`'s own `_row_to_current()` now calls this too instead of
-its own inline version. `readiness.py`'s `_email_deliverability_gate()`
+own result set — while SQL Server/SQLite don't; `sql_dialect.lower_keys()`
+is the fix for the read side, lowercasing every key of a row once instead
+of accessing each field by exact case). `migration_run_book.py`'s three
+affected functions (`_load_order_rows()`, `sync_run_book_from_log()`,
+`sync_source_ingestion_to_run_book()`) are fixed the same way —
+`orchestrator.py`'s own `_row_to_current()`/`assess_from_log()` also both
+call `lower_keys()` now. `readiness.py`'s `_email_deliverability_gate()`
 and `reconciliation.py`'s `_latest_bulkops_row()`/
 `reconcile_load_counts()` (including the actual stale-prior-run
 comparison, not just a display value) are fixed the same way.
@@ -704,16 +703,41 @@ instead. That in turn surfaced a bug in `PostgresDialect.column_exists()`
 itself (not a caller): it compared column names by exact case, which
 works for table names (always quoted via `qualify()`) but not for the
 columns this codebase creates bare almost everywhere — fixed with
-`LOWER(column_name) = LOWER(:column)`. A repo-wide grep confirmed no
-other module reads/writes these six tables, so as of this pass the
-case-folding and boolean-literal patterns are both fully closed for
-`SQL_BACKEND=postgresql`. See `ROADMAP.md` #69 for the full, dated
-account of what's verified live vs. still open —
-including a structural bug found and fixed along the way,
-where an earlier edit had accidentally
-stripped `SqlDialect`'s own `@abstractmethod` enforcement without
-breaking any test (every concrete dialect still fully implements its own
-methods independently, so it was invisible at runtime).
+`LOWER(column_name) = LOWER(:column)`.
+
+A repo-wide grep at that point concluded the case-folding/boolean-literal
+patterns were "fully closed" — **a ruthless multi-angle code-review pass
+found that claim was wrong.** `load_table_prep.py` (Hard Rules 6/7's own
+implementation) had the identical bug, missed by every prior pass because
+its return value is a *public, documented Pascal-case contract* `cli.py`
+reads by exact key, not an internal row read — fixed the opposite way
+from everywhere else, by wrapping the SQL aliases themselves in
+`d.quote_ident()` (matching `RowCount`/`Sort`'s existing convention in
+that file) rather than lowering the reader, so `cli.py`/`readiness.py`
+needed no changes. Verified live with a genuine non-contiguous Sort range
+and a genuine duplicate key, not just the clean path. The same review
+also found `source_ingestion.py`'s generated `.sql` script hardcoded
+"SQLite" regardless of actual backend (fixed, and `import-csv-directory`
+is now live-verified against Postgres end to end, both new-file and
+reused-on-a-later-pass), doc drift in `docs/SECURITY_OVERVIEW.md`/
+`docs/DOCKER.md`/`README.md` (all fixed), and two redundant double-row-
+lowering passes (`orchestrator.py`, `migration_run_book.py`) — the latter
+fix also removed `row_get()` entirely (one caller, itself redundant;
+`lower_keys()` alone is now the one canonical helper). Also added: real
+Postgres integration test coverage (`tests/conftest.py`'s `postgres_engine`
+fixture, `tests/test_load_table_prep_postgres_integration.py`, and a
+`postgres:16` service in `.github/workflows/tests.yml`) — every bug in
+this whole chain was found by a human manually running Postgres in a
+throwaway container; this is the first of that verification to become an
+automated, permanent regression guard instead of a one-time check. See
+`ROADMAP.md` #69 for the full, dated account of what's verified live vs.
+still open (the actual `docker-compose.yml` Postgres service, and a true
+Docker+Snowfakery+full-methodology end-to-end pass, remain unbuilt) —
+including a structural bug found and fixed along the way, where an
+earlier edit had accidentally stripped `SqlDialect`'s own
+`@abstractmethod` enforcement without breaking any test (every concrete
+dialect still fully implements its own methods independently, so it was
+invisible at runtime).
 
 Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,

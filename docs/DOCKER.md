@@ -178,9 +178,15 @@ command in this repo already assumes.
   server at all (see README.md's "SQL backend" section), so there's
   nothing for Docker to add there; run it directly in a plain Python venv
   as documented, container or not.
-- PostgreSQL as a second database option (roadmap #69) isn't built yet —
-  once it lands, this compose file is the natural place to add a
-  `postgres` service alongside (or instead of) `sqlserver`.
+- No `postgres` service in `docker-compose.yml` yet, even though
+  `SQL_BACKEND=postgresql` itself is now built and live-verified (roadmap
+  #69 — `sql_dialect.py`'s `PostgresDialect`, `sql_client.py`'s
+  `_make_postgres_engine()`) — it just has no server to connect to inside
+  this container setup today. Point `SQL_SERVER`/`SQL_PORT` at a Postgres
+  instance running elsewhere (a host-installed one, or a separate
+  `docker run postgres:...`) in the meantime; this compose file is the
+  natural place to add a real `postgres` service alongside (or instead
+  of) `sqlserver` once that's built.
 - No production deployment story here — `MSSQL_PID: Developer` in
   `docker-compose.yml` is explicitly the free, non-production edition,
   matching this framework's own dev/practice framing throughout

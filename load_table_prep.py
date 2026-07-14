@@ -87,12 +87,26 @@ def add_bulk_load_sort_column(engine, table, parent_key_column, schema="dbo"):
         # (confirmed live: "Incorrect syntax near the keyword 'RowCount'"
         # without quoting), the same reserved-word collision
         # source_ingestion.py's own SourceIngestionLog.[RowCount] column
-        # already has to work around.
+        # already has to work around. Every OTHER alias below is quoted
+        # the same way now too, not just RowCount -- found via live
+        # Postgres testing: this function's return value is a public,
+        # documented Pascal-case contract (ParentKey/MinSort/MaxSort/
+        # SortSpan) cli.py reads by exact key, but a bare (unquoted) alias
+        # comes back lowercased in a Postgres result set even though SQL
+        # Server/SQLite both return whatever case was written -- cli.py's
+        # r['ParentKey'] raised KeyError there, precisely when this check
+        # found a real non-contiguous Sort range to report. Quoting every
+        # alias via d.quote_ident() guarantees the exact declared case on
+        # all three backends, so cli.py/readiness.py need no changes.
         row_count_col = d.quote_ident("RowCount")
+        parent_key_col = d.quote_ident("ParentKey")
+        min_sort_col = d.quote_ident("MinSort")
+        max_sort_col = d.quote_ident("MaxSort")
+        sort_span_col = d.quote_ident("SortSpan")
         rows = cx.execute(text(f"""
-            SELECT {parent_col} AS ParentKey,
-                   MIN({sort_col}) AS MinSort, MAX({sort_col}) AS MaxSort, COUNT(*) AS {row_count_col},
-                   MAX({sort_col}) - MIN({sort_col}) AS SortSpan
+            SELECT {parent_col} AS {parent_key_col},
+                   MIN({sort_col}) AS {min_sort_col}, MAX({sort_col}) AS {max_sort_col}, COUNT(*) AS {row_count_col},
+                   MAX({sort_col}) - MIN({sort_col}) AS {sort_span_col}
             FROM {qualified}
             GROUP BY {parent_col}
             HAVING MAX({sort_col}) - MIN({sort_col}) <> COUNT(*) - 1
@@ -125,10 +139,17 @@ def check_load_table_duplicate_keys(engine, table, key_column, schema="dbo"):
         )
     qualified = d.qualify(schema, table)
     key_col = d.quote_ident(key_column)
+    # Aliases quoted via d.quote_ident() -- same fix as
+    # add_bulk_load_sort_column() above, for the identical reason: this
+    # function's return value is a public, documented Pascal-case
+    # contract (DuplicateKey/Occurrences) cli.py reads by exact key, and
+    # a bare alias comes back lowercased in a Postgres result set.
+    duplicate_key_col = d.quote_ident("DuplicateKey")
+    occurrences_col = d.quote_ident("Occurrences")
 
     with engine.connect() as cx:
         duplicates = cx.execute(text(f"""
-            SELECT {key_col} AS DuplicateKey, COUNT(*) AS Occurrences
+            SELECT {key_col} AS {duplicate_key_col}, COUNT(*) AS {occurrences_col}
             FROM {qualified}
             WHERE {key_col} IS NOT NULL
             GROUP BY {key_col}

@@ -100,6 +100,7 @@ default:
 | Data Cloud tenant token (`data-cloud-query`, `list-calculated-insights`, `query-calculated-insight`, `data-cloud-profile`, `list-data-graphs` — `data-cloud-status`'s six checks don't need it, plain core-org SOQL) | In-process memory only, for the duration of a single CLI invocation | A second OAuth hop off an already-valid core-org session (`POST {instance}/services/a360/token`, `grant_type=urn:salesforce:grant-type:external:cdp`) — see `ROADMAP.md` #18 | `data_cloud.py`; a genuinely separate host (`*.c360a.salesforce.com`) and access token from the core org's, so treat it as its own credential, not an extension of the core session. |
 | Salesforce username/password/security token (`password` mode) | `.env` | Manually configured | Documented as the "dev fallback only" mode in `README.md` -- weakest of the three, avoid in any shared/production environment. |
 | SQL Server credentials (`SQL_BACKEND=mssql`, the default) | `.env` (`SQL_UID`/`SQL_PWD`), or none at all if `SQL_TRUSTED_CONNECTION=yes` (Windows auth, the default) | Manually configured | Windows/trusted auth is the default and avoids a stored SQL password entirely. |
+| PostgreSQL credentials (`SQL_BACKEND=postgresql`, roadmap #69) | `.env` (`SQL_UID`/`SQL_PWD`, reused from the SQL Server fields above — already backend-generic names), plus `SQL_PORT`/`SQL_POSTGRES_SSLMODE` (connection parameters, not credentials) | Manually configured | Built via `sqlalchemy.engine.URL.create()` (`sql_client.py`'s `_make_postgres_engine()`), not a hand-rolled connection string — the password is a distinct URL field SQLAlchemy already redacts in any `repr()`/`str()` of the engine or its `.url`, confirmed live; a stronger default than the SQL Server path's `odbc_connect` blob, which that function's own comment already flags as unmaskable. No Windows/trusted-auth equivalent — a password is always required unless the Postgres server itself is configured for passwordless local trust auth (a server-side setting, not something this framework controls). |
 | Mockaroo API key | `.env` | Manually configured | Only ever sent to Mockaroo's API; scoped to mock-data generation. |
 
 **`SQL_BACKEND=sqlite` (roadmap #28) has no credential at all** — SQLite is
@@ -249,7 +250,11 @@ just the feature surface.
 ## 9. Supply chain
 
 All dependencies (`requirements.txt`) are established, widely-used open
-source packages (`simple-salesforce`, `SQLAlchemy`, `pyodbc`, `pandas`,
+source packages (`simple-salesforce`, `SQLAlchemy`, `pyodbc`,
+`psycopg2-binary` (roadmap #69, PostgreSQL support -- a mature, widely-used
+driver with no known CVEs at time of writing; the `-binary` wheel statically
+bundles its own libpq/OpenSSL rather than linking the system's, a documented,
+non-blocking tradeoff of that package variant, not a vulnerability), `pandas`,
 `click`, `openpyxl`, `requests`, `rich`, `docxtpl`, `python-docx`,
 `python-dotenv`, `pyarrow`, `snowfakery`, `PyYAML`),
 version-pinned with a minimum floor, no vendored/copied third-party source
@@ -304,7 +309,11 @@ adoption.
 
 ---
 
-*Last reviewed against the codebase during the 2026-07-13 Docker-environment
+*Last reviewed against the codebase during the 2026-07-13 PostgreSQL
+backend pass (roadmap #69): added the PostgreSQL credential row to §3
+and its own supply-chain entry (`psycopg2-binary`) to §9 -- none of this
+existed as of the Docker-environment pass immediately below. Previously
+reviewed during the 2026-07-13 Docker-environment
 pass (roadmap #68): added the optional containerized variant to §2, the
 cli-mode-in-container credential-reachability finding to §3 (Salesforce's
 May 2026 CLI update moved org auth into the host OS keychain, unreachable

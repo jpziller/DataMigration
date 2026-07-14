@@ -3,10 +3,10 @@
 A client hands over a directory of CSV files (or this is a later pass --
 e.g. a UAT reload -- of a directory shaped like one seen before). This
 module reads a whole directory in one bulk operation and turns it into a
-Source mirror database (SQL Server or SQLite), generalizing a proven
-real-world convention from hand-built client migration scripts: stage
-every column as untyped text (NVARCHAR(MAX) on SQL Server, TEXT on
-SQLite), type/transform later via SQL under sql/transformations/ --
+Source mirror database (SQL Server, SQLite, or PostgreSQL), generalizing
+a proven real-world convention from hand-built client migration scripts:
+stage every column as untyped text (NVARCHAR(MAX) on SQL Server, TEXT on
+SQLite/PostgreSQL), type/transform later via SQL under sql/transformations/ --
 deliberately NOT type-sniffing the CSV (dates, leading-zero ids, and
 numeric-looking strings are exactly the values type inference gets wrong;
 explicit typed transforms are this framework's own established way to type
@@ -22,10 +22,10 @@ Two cases, handled differently:
     regenerated -- only its current CSV's header is checked against what
     the script expects. The staging step maps columns *positionally*, not
     by name (BULK INSERT on SQL Server; the CSV's own header order on
-    SQLite), so a reordered column is exactly as dangerous as a renamed
-    one; check_drift() compares the full ordered column list, not just set
-    membership. Any difference is a hard stop for that file -- the
-    architect must understand what changed and explicitly --rebuild it
+    SQLite/PostgreSQL), so a reordered column is exactly as dangerous as a
+    renamed one; check_drift() compares the full ordered column list, not
+    just set membership. Any difference is a hard stop for that file --
+    the architect must understand what changed and explicitly --rebuild it
     before it loads again.
 
 Execution never shells out to sqlcmd/the sqlite3 CLI or blindly evals a
@@ -36,17 +36,19 @@ parquet_import.py's create_table() for the identical drop+create shape).
 The .sql file's DDL is a human-readable artifact matching what actually
 runs, not something Python re-parses and evals wholesale -- on SQL
 Server it's also independently re-runnable via `sqlcmd -i` end to end
-(BULK INSERT included); on SQLite the file documents the DDL, but the
-data-load half only happens through this module's own Python path, since
-SQLite has no BULK INSERT equivalent in SQL syntax.
+(BULK INSERT included); on SQLite/PostgreSQL the file documents the DDL,
+but the data-load half only happens through this module's own Python
+path, since this framework doesn't use either backend's own bulk-load
+mechanism here (SQLite has none; PostgreSQL's COPY isn't used for this
+staging step).
 
 Known operational requirement, not fixable from Python: SQL Server's BULK
 INSERT needs the SQL Server service account itself to have filesystem read
 access to the CSV's path -- true by default for a local/on-prem instance
 sharing a machine (or a reachable UNC path) with the files, but a real
-constraint to be aware of on an unusual setup. Not a concern for SQLite --
-the CSV is read directly by this same Python process, no separate service
-account involved.
+constraint to be aware of on an unusual setup. Not a concern for
+SQLite/PostgreSQL -- the CSV is read directly by this same Python
+process (the chunked pandas path), no separate service account involved.
 """
 import csv
 import os
@@ -62,9 +64,10 @@ import sql_dialect
 _SQL_DIR_DEFAULT = os.path.join(os.path.dirname(__file__), "sql", "source_ingestion")
 
 _TABLE_NAME_RE = re.compile(r"[^A-Za-z0-9_]")
-# Matches either bracket-quoted (SQL Server) or double-quoted (SQLite)
-# identifiers -- generate_import_script()/_run_script() write one or the
-# other depending on backend, and both must parse the same way here.
+# Matches either bracket-quoted (SQL Server) or double-quoted
+# (SQLite/PostgreSQL) identifiers -- generate_import_script()/
+# _run_script() write one or the other depending on backend, and all
+# must parse the same way here.
 _CREATE_TABLE_RE = re.compile(
     r'CREATE\s+TABLE\s+(?:[\[\"]?\w+[\]\"]?\.)?[\[\"]?(\w+)[\]\"]?\s*\(([^;]+?)\)\s*;',
     re.IGNORECASE | re.DOTALL,
@@ -148,11 +151,12 @@ def _dialect_for_script(engine):
 
 def generate_import_script(csv_path, table_name, ticket, schema="dbo", sql_dir=_SQL_DIR_DEFAULT, engine=None):
     """Write a new numbered staging script for csv_path -- BULK INSERT on
-    SQL Server, or (engine is a SQLite engine) a DDL-only script paired
-    with a Python-driven data load, since SQLite has no BULK INSERT
-    equivalent in SQL syntax (see _run_script()). Never overwrites an
-    existing script for this table -- rebuild_import_script() is the only
-    explicit path that replaces one."""
+    SQL Server, or (engine is a SQLite or PostgreSQL engine) a DDL-only
+    script paired with a Python-driven data load, since this framework
+    doesn't use either backend's own bulk-load mechanism here (SQLite has
+    none; PostgreSQL's COPY isn't used for this staging step) -- see
+    _run_script(). Never overwrites an existing script for this table --
+    rebuild_import_script() is the only explicit path that replaces one."""
     d = _dialect_for_script(engine)
     os.makedirs(sql_dir, exist_ok=True)
     columns = _read_csv_header(csv_path)
@@ -211,8 +215,18 @@ WITH (
 );
 """
     else:
+        # Found in review: this comment used to hardcode "SQLite has no
+        # BULK INSERT equivalent" regardless of the actual backend --
+        # false (and a real, permanent inaccuracy in this git-committed,
+        # Hard-Rule-10-traceable artifact) once SQL_BACKEND=postgresql
+        # existed, since Postgres genuinely does have a bulk-load
+        # mechanism (COPY) -- this framework just doesn't use it here,
+        # for either non-mssql backend. backend_label names the real
+        # backend in hand instead of assuming SQLite.
+        backend_label = {"sqlite": "SQLite", "postgres": "PostgreSQL"}.get(d.backend_key, d.backend_key)
         script = f"""/*  Source ingestion: stage {os.path.basename(csv_path)} into {qualified}.
     Ticket: {ticket}
+    Backend: {backend_label}
 
     Every column is staged as TEXT -- no type sniffing. Type and transform
     this data via sql/transformations/*.sql once mapped, the same "stage
@@ -225,13 +239,15 @@ WITH (
     `import-csv-directory` checks this automatically and blocks the load
     on drift, only proceeding once --rebuild is passed explicitly.
 
-    SQLite has no BULK INSERT equivalent -- the DDL below documents the
-    staged shape for audit/git-history, same as the SQL Server flavor of
-    this script, but the actual data load (this CSV's rows into the table)
-    happens via a chunked pandas read_csv + to_sql step in Python, not by
-    running this file directly through a SQL client. The DROP/CREATE
-    statements below ARE what actually runs (reconstructed from known
-    values, not this file's text -- see source_ingestion.py's _run_script()).
+    This framework doesn't use a {backend_label}-native bulk-load
+    mechanism here (SQLite has none at all; PostgreSQL has COPY, not used
+    for this staging step) -- the DDL below documents the staged shape
+    for audit/git-history, same as the SQL Server flavor of this script,
+    but the actual data load (this CSV's rows into the table) happens via
+    a chunked pandas read_csv + to_sql step in Python, not by running
+    this file directly through a SQL client. The DROP/CREATE statements
+    below ARE what actually runs (reconstructed from known values, not
+    this file's text -- see source_ingestion.py's _run_script()).
 */
 DROP TABLE IF EXISTS {qualified};
 
@@ -306,9 +322,11 @@ def _run_script(engine, schema, table_name, columns, csv_path):
     blind exec of a script file's raw text. Returns the row count.
 
     SQL Server: DROP/CREATE + BULK INSERT, all as SQL text (matches the
-    generated .sql script exactly). SQLite: DROP/CREATE as SQL text, but
-    the actual data load is a chunked pandas read_csv + to_sql step --
-    SQLite has no BULK INSERT equivalent in SQL syntax."""
+    generated .sql script exactly). SQLite/PostgreSQL: DROP/CREATE as SQL
+    text, but the actual data load is a chunked pandas read_csv + to_sql
+    step -- this framework doesn't use either backend's own bulk-load
+    mechanism here (SQLite has none; PostgreSQL's COPY isn't used for
+    this staging step)."""
     d = sql_dialect.for_engine(engine)
     qualified = d.qualify(schema, table_name)
     cols_sql = ",\n    ".join(f"{d.quote_ident(c)} {d.raw_text_type()} NULL" for c in columns)

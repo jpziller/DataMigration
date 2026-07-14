@@ -114,35 +114,21 @@ class SqlDialect(ABC):
         path -- see SqliteDialect's own docstring for why this exists."""
 
 
-def row_get(row, key):
-    """Case-insensitive lookup against a SQLAlchemy RowMapping (from
-    `.mappings().first()`/`.all()`) -- needed because Postgres folds an
-    unquoted column name to lowercase not just for matching but for the
-    catalog name itself, so a query result's actual keys come back
-    lowercased (`row["LogId"]` raises `NoSuchColumnError` there) even
-    though SQL Server/SQLite both preserve/return whatever case a column
-    was originally declared with. Exact-case access is tried first (the
-    fast, common-case path for mssql/sqlite); the slower case-insensitive
-    scan only runs as a fallback, so this is a safe drop-in replacement
-    for `row[key]` on every backend, not just Postgres. Confirmed live:
-    orchestrator.py's own `row["LogId"]` failed against a real Postgres
-    instance until routed through this."""
-    try:
-        return row[key]
-    except Exception:
-        lowered = key.lower()
-        for k in row.keys():
-            if k.lower() == lowered:
-                return row[k]
-        raise
-
-
 def lower_keys(row):
     """Lowercase every key of a SQLAlchemy RowMapping (or plain dict) --
-    the simpler fix when MANY fields of one row get accessed by exact-
-    case key throughout a function, as an alternative to calling
-    row_get() at every individual call site. See row_get()'s own
-    docstring for why this is needed at all."""
+    needed because Postgres folds an unquoted column name to lowercase
+    not just for matching but for the catalog name itself, so a query
+    result's actual keys come back lowercased (`row["LogId"]` raises
+    `NoSuchColumnError` there) even though SQL Server/SQLite both
+    preserve/return whatever case a column was originally declared with.
+    Confirmed live: orchestrator.py's own `row["LogId"]` failed against a
+    real Postgres instance until routed through this. Found in review: an
+    earlier version of this fix also had a `row_get(row, key)` variant
+    (exact-case fast path, case-insensitive fallback, for a single-field
+    access) -- removed once its only real call site turned out to still
+    need `lower_keys()` right next to it anyway (a second helper with no
+    call site of its own is not a justified split, just incidental
+    duplication)."""
     return {k.lower(): v for k, v in dict(row).items()}
 
 

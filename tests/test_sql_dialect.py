@@ -100,22 +100,17 @@ def test_for_engine_resolves_postgresql_to_postgres_dialect():
     assert isinstance(sql_dialect.for_engine(_FakeDialectEngine()), PostgresDialect)
 
 
-def test_row_get_exact_case_fast_path():
-    assert sql_dialect.row_get({"LogId": 5}, "LogId") == 5
+def test_lower_keys_lowercases_every_key():
+    assert sql_dialect.lower_keys({"LogId": 5, "ObjectName": "Account"}) == {"logid": 5, "objectname": "Account"}
 
 
-def test_row_get_falls_back_case_insensitively():
+def test_lower_keys_is_idempotent_on_an_already_lowercase_dict():
     # Simulates a real Postgres result mapping, where an unquoted column
-    # comes back lowercased regardless of the originally-declared case.
-    assert sql_dialect.row_get({"logid": 5}, "LogId") == 5
-
-
-def test_row_get_raises_when_truly_missing():
-    try:
-        sql_dialect.row_get({"logid": 5}, "ObjectName")
-        assert False, "expected an exception"
-    except Exception:
-        pass
+    # comes back lowercased regardless of the originally-declared case --
+    # a caller that already lowered a row and passes it to a function
+    # that lowers again (see orchestrator.py's _row_to_current()) must
+    # get the same result back, not an error or a double-transform.
+    assert sql_dialect.lower_keys({"logid": 5}) == {"logid": 5}
 
 
 def test_for_engine_rejects_unsupported_dialect_name():

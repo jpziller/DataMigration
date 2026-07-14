@@ -48,7 +48,7 @@ and `docs/DOCKER.md`'s own auth-mode section for the full finding).
 **Using SQLite instead (`SQL_BACKEND=sqlite`)?** Skip steps 4–7 entirely
 (SQL Server, SSMS, the ODBC driver, and creating a database) — SQLite needs
 no server, no separate driver install, and no credentials at all. Jump to
-"SQL backend: SQL Server or SQLite" below for the config and what's in/out
+"SQL backend: SQL Server, SQLite, or PostgreSQL" below for the config and what's in/out
 of scope on that path.
 
 ```
@@ -152,7 +152,7 @@ copy .env.example .env       # cp on Mac/Linux
 ```
 Set `SF_ORG_ALIAS=MIGRATION_TARGET`, your SQL Server values (or, on
 SQLite, `SQL_BACKEND=sqlite` + `SQL_SQLITE_DIR`/`SQL_SQLITE_SCHEMAS` — see
-"SQL backend: SQL Server or SQLite" below), and (if using mock data)
+"SQL backend: SQL Server, SQLite, or PostgreSQL" below), and (if using mock data)
 `MOCKAROO_API_KEY`. `.gitignore` already excludes `.env`, `_stage/`,
 `_sqlite/`, and `server.key` — never commit real credentials, and never
 paste `.env` contents into a chat session (including with an AI assistant).
@@ -282,32 +282,41 @@ keeping it in git per-object as you build it out.)
 
 ---
 
-## SQL backend: SQL Server or SQLite
+## SQL backend: SQL Server, SQLite, or PostgreSQL
 
-`SQL_BACKEND` in `.env` — `mssql` (default) or `sqlite`, per project. Every
-backend-specific SQL construct (existence checks, identifier quoting,
-`SELECT INTO` vs `CREATE TABLE AS SELECT`, autoincrement PK DDL) routes
-through `sql_dialect.py`, keyed off the real engine in hand
+`SQL_BACKEND` in `.env` — `mssql` (default), `sqlite`, or `postgresql`
+(roadmap #69), per project. Every backend-specific SQL construct
+(existence checks, identifier quoting, `SELECT INTO` vs
+`CREATE TABLE AS SELECT`, autoincrement PK DDL) routes through
+`sql_dialect.py`, keyed off the real engine in hand
 (`engine.dialect.name`), so the rest of the framework doesn't need to know
 or care which one is active.
 
 **Why you'd pick SQLite**: no server to install, no ODBC driver, no
 credentials at all — genuinely useful for a quick trial, a CI/test
 environment, or a project that just doesn't want a SQL Server install.
+**Why you'd pick PostgreSQL**: free and genuinely production-grade
+(unlike SQLite, which this project treats as CI/dev-only) — the obvious
+choice for a client environment with no other reason to run Windows/SQL
+Server infrastructure; a self-hosted instance or a managed one (RDS,
+Supabase, Cloud SQL) removes the SQL Server licensing question entirely.
 **Why you'd stick with SQL Server**: it's the fully-featured path — the
 whole `sql/functions/` cleansing/matching library (Jaro-Winkler, Soundex,
 postal cleansing) and several data-architect tools (`profiling.py`,
-`risk_analyzer.py`, `auto_mapper.py`, `migration_run_book.py`,
-`mock_data.py`'s single-object generator, `solution_doc.py`,
-`load_order.py`, `mapping_doc.py`, `parquet_import.py`, `record_types.py`,
-`reference_record.py`) are SQL-Server-only today — a deliberate scope
-boundary, not a bug. **What does work on SQLite**: the actual load
-engine — `replicate`, `bulkops` (writeback, activity logging, retry), hard
-rules 6/7's sort-column/duplicate-key checks (`add-bulk-load-sort-column`/
-`check-load-table-duplicate-keys` — no longer stored procedures on either
-backend), `import-csv-directory`'s CSV staging, and
-`snowfakery_data.py`'s relationship-aware mock data
-(`generate-related-mock-data`).
+`auto_mapper.py`, `solution_doc.py`, `parquet_import.py`,
+`record_types.py`, `reference_record.py`) are SQL-Server-only today — a
+deliberate scope boundary, not a bug. **What does work on SQLite and
+PostgreSQL both**: the actual load engine — `replicate`, `bulkops`
+(writeback, activity logging, retry), hard rules 6/7's sort-column/
+duplicate-key checks (`add-bulk-load-sort-column`/
+`check-load-table-duplicate-keys` — no longer stored procedures on any
+backend), `import-csv-directory`'s CSV staging, `snowfakery_data.py`'s
+relationship-aware mock data (`generate-related-mock-data`),
+`risk_analyzer.py`, `migration_run_book.py`, `mapping_doc.py`,
+`load_order.py`, `orchestrator-assess`, `reconcile-load-counts`,
+`recommend-batch-size`, and `triage-failures` — all live-verified against
+a real Postgres 16 instance, not just reasoned from docs (see
+`ROADMAP.md` #69 for the full, dated account).
 
 **Config for SQLite mode**:
 ```bash
@@ -323,9 +332,27 @@ backend, no different usage. To look at the data directly: the `sqlite3`
 CLI, or any SQLite browser (DB Browser for SQLite, DBeaver, etc.) pointed
 at the relevant `<schema>.db` file — no `sqlcmd`/SSMS/MCP setup needed.
 
-See `ROADMAP.md` #28 for the full design writeup and what was found/fixed
+**Config for PostgreSQL mode**:
+```bash
+SQL_BACKEND=postgresql
+SQL_SERVER=localhost              # reused from the SQL Server fields --
+SQL_DATABASE=SF_Migration          # already backend-generic names
+SQL_UID=postgres
+SQL_PWD=<your password>
+SQL_PORT=5432
+SQL_POSTGRES_SSLMODE=prefer        # disable/allow/prefer/require/verify-ca/verify-full
+```
+Built via `sqlalchemy.engine.URL.create()` (`sql_client.py`'s
+`_make_postgres_engine()`), not a hand-rolled connection string, so the
+password is redacted by SQLAlchemy's own `repr()`/`str()` by default.
+`docker-compose.yml` doesn't have a `postgres` service yet (see
+`docs/DOCKER.md`) — point `SQL_SERVER`/`SQL_PORT` at any Postgres instance
+you already have running in the meantime.
+
+See `ROADMAP.md` #28 for the SQLite design writeup and what was found/fixed
 building it (a couple of real `bulk_op()` correctness bugs, unrelated to
-SQLite specifically, surfaced by testing both backends live).
+SQLite specifically, surfaced by testing both backends live), and #69 for
+the equivalent PostgreSQL writeup.
 
 ---
 
