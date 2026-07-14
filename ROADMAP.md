@@ -4318,23 +4318,39 @@ correctly, the same way `risk_analyzer.py`'s own `IsActive`/`DirectHit`
 rows correctly, `IsDeleted` stored as a real Postgres `f`/`t`, and the
 data survives the idempotent-restart check (step 7) unchanged.
 
-**What's genuinely still not built, stated plainly**: the actual
-migration *methodology* — Snowfakery mock data, a real Postgres-flavored
-transform, `bulkops` against a live org — hasn't been run through this
-new container yet. This is deliberately a separate, later piece of work,
-not scriptable straight through: Hard Rule 2 (Live-Org Write
-Confirmation) and Hard Rule 9 (Email Deliverability Attestation) both
-require a human, in that live session, to state the org/mode and what
-Setup's Deliverability page actually shows — neither has any code
-representation to pre-script past, and pre-filling either to make a
-pass "fully automated" would defeat the rule's actual purpose even
-though nothing in the code would catch it. The prior real dogfood pass
-(`_dogfood/brief.yaml` → discovery checklist → mapping → transforms →
-live `bulkops` insert against `D360_PLAYGROUND` → pass summary, commit
-`3314caf`) is this project's own working definition of "end to end," and
-its four existing transform scripts are hand-written T-SQL — not valid
-Postgres syntax, so a Postgres pass needs new transform scripts, not a
-rerun of the same artifacts.
+**Follow-up (2026-07-14): the actual migration methodology has since been
+run through this container and confirmed.** Reusing the exact recipe from
+the prior real dogfood pass (`_dogfood/brief.yaml` → discovery checklist →
+mapping → transforms → live `bulkops` insert against `D360_PLAYGROUND` →
+pass summary, commit `3314caf`) — same org, same four objects — this pass
+built four new Postgres-flavored transform scripts
+(`sql/transformations/050-080_*_postgres.sql`, since the original four are
+hand-written T-SQL, not valid Postgres syntax), generated Snowfakery mock
+data, ran Hard Rules 6/7/12, and, after explicit live org/mode confirmation
+and a real Email Deliverability attestation in that session (Hard Rules
+2/9 — neither has a code representation to script past, and none was
+invented here), completed real `bulkops` loads: Account 5/5, Contact
+40/40, Opportunity 507/520 (13 failures were a pre-existing `MigrationID__c`
+key collision from reusing the same org as the original SQL Server
+pass — not a defect), Task 27/27 (deliberately sampled from a 14,175-row
+`Task_Mock`, since `generate-related-mock-data`'s nested-count model has no
+way to express a flat/absolute total for a polymorphic cohort child — a
+real, found-live tool-capability gap, not yet built).
+
+Two more real, backend-independent bugs were found and fixed along the
+way: `snowfakery_data.py`'s boolean fields upcast to `float64` in
+Snowfakery's merged multi-object JSON output (the same root cause as this
+section's own `replicate.py` fix above, a different code path); and
+`bulkops.py`'s `upsert()` call passed `external_id` positionally, silently
+binding into `simple_salesforce`'s own `records` parameter instead of
+`external_id_field` — invisible to the test suite because
+`tests/stub_salesforce.py`'s own stub had drifted to match that wrong
+calling convention rather than the real library's actual signature (both
+now fixed, and the stub's own regression-test gap this created was later
+found and closed by a ruthless review pass, see #71's account of that
+review). `migration_run_book.xlsx` gained a `Postgres1` tab (recipe carried
+forward from `Dogfood1`); its Load-phase rows are blank since
+`BulkOpsLog` logging wasn't enabled until after these loads ran.
 
 ## 70. FAQ: Fivetran / Apache Hop — why they're not part of this framework (researched — not pursued, out of scope)
 
@@ -4426,3 +4442,141 @@ this file) — and adopting either would trade away the core trust model
 at a genuinely different job (ongoing SaaS sync, general-purpose
 heterogeneous visual ETL). Recorded here so this substitution doesn't get
 re-proposed without this reasoning being visible first, same as #43.
+
+## 71. SFDMU as an opt-in alternate `bulkops` load engine (built and live-verified 2026-07-14)
+
+Evaluated `forcedotcom/SFDX-Data-Move-Utility` (SFDMU) as a candidate to
+improve the SQL→Salesforce write side specifically, after the user's
+stated priorities: the plan is mostly pushing data into Salesforce, often
+migrating other platforms, and the load path needs to get errors back into
+the database cleanly. Decision: **keep the existing `bulk_op()` Python
+engine as the default, add SFDMU as a second, opt-in `--engine sfdmu`
+option** on the existing `bulkops` CLI command — not a replacement, per
+the user's own framing.
+
+**Why bother, given `bulk_op()` already works**: SFDMU is Salesforce's own
+Apache-2.0-licensed, actively maintained plugin with a mature relationship-
+graph resolver — genuinely more hardened than this framework's own
+hand-rolled Bulk API 2.0 wrapper, which this same session found two real
+bugs in (see #69's own follow-up account). SFDMU's per-record CSV error
+reporting (a real `Errors` column, blank on success) is real, but
+file-based only — nothing in its design writes results into a database, so
+"get errors back to the database cleanly" still needed building: SFDMU's
+own target CSV becomes an intermediate hand-off, immediately absorbed by
+this framework's *existing* `_writeback_inplace()`/`_writeback_result_table()`
+so Id/Error land in the exact same SQL Load table regardless of engine.
+
+**v1 scope, deliberately narrower than the python engine**: upsert/update
+only (`--external-id` required — matches this framework's own convention
+everywhere else, since every Load table already carries a real migration
+key); insert/delete are out of scope (SFDMU's own CSV-source insert
+convention relies on an ambiguous "Id column as placeholder" scheme for
+matching results, murkier than upsert/update's real external-id match). A
+polymorphic lookup field (e.g. `Task.WhatId`) and a self-referencing
+lookup field (e.g. `Account.ParentId`) are both automatically skipped, not
+guessed at — load those via the python engine as a separate pass.
+
+**Real, confirmed-live mechanics found building this** (`--simulation`
+mode testing against `D360_PLAYGROUND` — no writes — plus reading the
+installed plugin's own compiled TypeScript source, not assumed from docs):
+an already-loaded parent object needs a specific `Id,Name` /
+`externalId:"Id"` / `Readonly` declaration (a bare-`Id` query makes SFDMU
+auto-exclude the object as degenerate, silently stripping any lookup
+pointing at it) plus its own tiny source CSV (the distinct already-resolved
+parent Ids actually referenced — without one, the lookup silently resolves
+blank instead of erroring); SFDMU always names its result file
+`<Object>_update_target.csv`, even for an `Upsert` operation; sending this
+framework's own `Id` column to SFDMU gets it treated as SFDMU's internal
+row-tracking key, suppressing the business-column echo-back needed to
+match results by external id; and the exact same datetime-string XSD parse
+failure `bulk_op()` already had to fix for its own CSV export (see #28),
+never applied to this second export path until it failed live here too
+(`Contact.EmailBouncedDate` on every one of 8 rows in this integration's
+own first real test run).
+
+**Confirmed end-to-end** against real dogfood data in `D360_PLAYGROUND`:
+`bulkops Contact upsert Contact_Load --engine sfdmu --external-id
+MigrationID__c` — 8/8 succeeded, real Ids and the resolved `AccountId`
+lookup both landed correctly in the same SQL Load table.
+
+**Ruthless review pass, same day — 16 findings, all fixed**: a `--effort
+max` review of this diff (`sfdmu_bridge.py` plus the surrounding fixes)
+found the integration's first version had several real gaps beyond the
+mechanics above:
+- `run_sfdmu_upsert()` never wrote a `dbo.BulkOpsLog` row at all, making an
+  sfdmu-engine load invisible to `orchestrator-assess` (which crashed
+  outright with a `ValueError`), `assess-migration-readiness`,
+  `reconcile-load-counts`, and `batch_advisor.py` — all five read
+  `BulkOpsLog` as their one source of truth for "did this object get
+  loaded," regardless of engine. Fixed: logs identically to `bulk_op()`'s
+  own call, and `--run-book`/`--run-book-tab` (previously silently
+  accepted and validated for `--engine sfdmu` but never actually honored,
+  with no warning) now syncs the same way too.
+- Two different lookup columns referencing the same parent object had
+  their source CSVs overwrite rather than union each other's distinct Ids
+  — silently dropping legitimate parent references. Fixed: grouped by
+  parent, unioned before writing.
+- A self-referencing lookup field (single `referenceTo` target equal to
+  the object itself) produced a duplicate sObject declaration in
+  `export.json`, a shape SFDMU can't accept. Fixed: excluded the same way
+  a polymorphic field already was, and reported back in the summary
+  (`self_referencing_fields_skipped`).
+- The exact regression this session's `upsert()` fix targeted had **zero
+  test coverage** — nothing in the suite called
+  `bulk_op(..., operation="upsert", ...)` at all, so the new
+  `tests/stub_salesforce.py` guard could never fire in CI. Fixed: added a
+  real regression test, then validated it two ways — confirmed it fails
+  when the old buggy positional call is reintroduced, and found along the
+  way that the stub's OWN parameter order (`external_id_field` as its
+  2nd param, no `records` param at all) didn't actually mirror the real
+  library's order, meaning the first version of the new test would have
+  passed even with the bug still present. Fixed the stub's signature to
+  genuinely reproduce the real library's parameter order, then reconfirmed
+  the test now fails/passes correctly in both directions.
+- A NULL-driven (or genuinely-numeric) external-id column upcasts to
+  `float64` in pandas, serializing as `"1.0"` instead of `"1"` — not just a
+  local matching problem, but a real risk of writing the wrong migration-
+  key value onto the Salesforce record itself. Fixed with a
+  `_stringify_migration_key()` helper applied consistently on both the
+  outbound CSV and the local result-matching side.
+- `_run_sfdmu()` had re-implemented `sf_client.py`'s existing `_run_sf()`
+  Windows shell-escaping/subprocess logic as a separate function with its
+  own regex and error handling. Fixed: extracted a shared
+  `sf_client.run_sf_cli()` seam both now call, each with their own arg
+  allowlist.
+- `describe()` was fetched three separate times per `run_sfdmu_upsert()`
+  call (inside `_preflight_check()`, again inline, again inside the old
+  `_lookup_parent_objects()`) — three real network round-trips for one
+  load. Fixed: fetched once, threaded through (`_preflight_check()` gained
+  an optional `desc=` param, backward-compatible with `bulk_op()`'s own
+  unchanged call).
+- The stage-directory cleanup was a hand-rolled, non-recursive glob/remove
+  loop that wouldn't fully clear a nested `reports/`/`target/` subfolder
+  from a prior run. Fixed: `shutil.rmtree()` + `os.makedirs()`.
+- The result filename was hardcoded to `_update_target.csv` with no
+  fallback if a future SFDMU version or untested operation named it
+  differently. Fixed: discovered via `glob`, with a clear error if zero or
+  more than one match is found.
+- `polymorphic_fields_skipped` (and the new
+  `self_referencing_fields_skipped`) were only ordinary summary-dict keys,
+  easy to miss among a dozen other status lines, unlike `preflight_warnings`
+  which gets a distinct `Warning:`-prefixed line. Fixed: `cli.py` now
+  prints both as explicit warnings too.
+- Documentation staleness found in the same pass and fixed: `CLAUDE.md`
+  and this file's own #69 entry both still claimed the Postgres
+  methodology end-to-end pass "hadn't been attempted," directly
+  contradicted by #69's own follow-up two sections above this one;
+  `bulkops.py`'s module docstring still said "SQL Server or SQLite,"
+  omitting PostgreSQL; `docs/DOCKER.md` referenced a README.md setup step
+  number that had shifted after this integration's own new install step
+  was inserted; `docs/SECURITY_OVERVIEW.md` had no mention of the new
+  `sf sfdmu run` subprocess surface or the `sf plugins install sfdmu`
+  third-party dependency, despite an established precedent for exactly
+  this kind of write-up (DBHub's `npx`-fetched MCP server, already
+  documented there); and this file itself had zero entry for the whole
+  integration until this one was written.
+
+See `sfdmu_bridge.py`'s own module docstring for the fullest technical
+account, `README.md`'s "Two `bulkops` load engines" section for the
+user-facing summary, and `CLAUDE.md`'s `bulkops` command entry for the
+`--engine` flag itself.

@@ -755,11 +755,18 @@ testing above already found: `replicate.py` wrote every Salesforce
 boolean field as a Python `0`/`1` integer, which SQL Server's `BIT` and
 SQLite's `INTEGER` both tolerate but Postgres's native `BOOLEAN` column
 rejects outright — fixed to write real Python `True`/`False`, which all
-three backends' drivers adapt correctly. A true
-Docker+Snowfakery+full-methodology end-to-end pass against a live org
-(the actual next step) still hasn't been attempted — see `ROADMAP.md`
-#69 for exactly where that has to hand off to a live, human-confirmed
-turn (Hard Rules 2/9) rather than being scriptable straight through.
+three backends' drivers adapt correctly. **A full Docker+Snowfakery+full-methodology end-to-end pass against a live
+org has since been run and confirmed** (2026-07-14, same dogfood recipe
+and org as the original SQL Server pass, `D360_PLAYGROUND`): Snowfakery
+mock data generation, four new Postgres-flavored transform scripts
+(`sql/transformations/050-080_*_postgres.sql`), Hard Rules 6/7/12, and real
+`bulkops` loads — Account 5/5, Contact 40/40, Opportunity 507/520 (13
+failures were a pre-existing key collision with the original SQL Server
+pass reusing the same org, not a defect), Task 27/27. See `ROADMAP.md` #69
+for the full account, including two more real bugs this pass found and
+fixed (a boolean-coercion bug in `snowfakery_data.py`, and a positional-arg
+bug in `bulkops.py`'s `upsert()` call — both backend-independent, not
+Postgres-specific).
 
 See `ROADMAP.md` #69 for the full, dated account of everything above,
 including a structural bug found and fixed along the way, where an

@@ -253,6 +253,36 @@ def test_bulk_op_update_excludes_key_column_but_still_sends_id(sqlite_engine, tm
     assert summary["failed"] == 0
 
 
+def test_bulk_op_upsert_calls_handler_upsert_with_external_id_field(sqlite_engine, tmp_path):
+    """Regression test for a real bug found live this session: bulk_op()'s
+    call to handler.upsert() previously passed external_id positionally
+    (handler.upsert(csv_path, external_id, ...)), which silently bound into
+    simple_salesforce's own `records` parameter instead of
+    `external_id_field` (its actual second parameter) -- invisible to every
+    other test in this file, since none of them exercise operation=
+    "upsert" at all. StubBulkHandler.upsert() requires external_id_field
+    to be given (and non-None) specifically to catch a regression back to
+    the old positional-call bug; this is the one test that actually calls
+    that code path."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({
+        "LoadId": [1, 2],
+        "LegacyId__c": ["A1", "A2"],
+        "Name": ["Row1", "Row2"],
+    })
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    sf = _stub_sf(StubBulkHandler(echo_cols=["LegacyId__c", "Name"]))
+    summary = bo.bulk_op(
+        sf, engine, "Account", "upsert", "Account_Load",
+        external_id="LegacyId__c", key_column="LoadId", schema="dbo",
+        stage_dir=str(tmp_path / "_stage"), email_deliverability="no-access",
+    )
+    assert summary["submitted"] == 2
+    assert summary["succeeded"] == 2
+    assert summary["failed"] == 0
+
+
 def test_bulk_op_aggregates_successes_and_failures_across_multiple_jobs(sqlite_engine, tmp_path):
     """bulk_op() concatenates success/failure records across every job a
     real Bulk API submission can split into (see its own docstring's

@@ -374,7 +374,8 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
                                          external_id, s.sf_org_alias, key_column=key_column,
                                          ref_prefix=ref_prefix, schema=schema, stage_dir=s.stage_dir,
                                          email_deliverability=email_deliverability,
-                                         confirm_external_email_risk=confirm_external_email_risk)
+                                         confirm_external_email_risk=confirm_external_email_risk,
+                                         run_book_path=run_book_path, run_book_tab=run_book_tab)
     else:
         summary = bo.bulk_op(sf, engine_conn, object_name, operation, source_table,
                              external_id=external_id, key_column=key_column,
@@ -390,8 +391,14 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
     if rationale:
         for line in rationale:
             click.echo(f"[batch-size] {line}")
+    skipped_polymorphic = summary.pop("polymorphic_fields_skipped", [])
+    skipped_self_ref = summary.pop("self_referencing_fields_skipped", [])
     for k, v in summary.items():
         click.echo(f"{k:12}: {v}")
+    if skipped_polymorphic:
+        click.echo(f"Warning: polymorphic lookup field(s) not sent via --engine sfdmu (load via the python engine instead): {skipped_polymorphic}")
+    if skipped_self_ref:
+        click.echo(f"Warning: self-referencing lookup field(s) not sent via --engine sfdmu (load via the python engine as a second pass instead): {skipped_self_ref}")
     if warnings:
         click.echo(f"Warning: required field(s) not sent (only fails if nothing else defaults them): {warnings}")
 

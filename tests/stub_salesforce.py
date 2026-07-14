@@ -112,17 +112,22 @@ class StubBulkHandler:
     def update(self, csv_file=None, batch_size=None):
         return self._submit(csv_file)
 
-    def upsert(self, csv_file=None, external_id_field=None, batch_size=None):
+    def upsert(self, csv_file=None, records=None, external_id_field=None, batch_size=None):
         # Matches the real simple_salesforce.bulk2.SFBulk2Handler.upsert()
-        # signature -- external_id_field is the THIRD parameter, not the
-        # second (that's `records`, unused by this stub since bulk_op()
-        # always calls with csv_file). A prior version of this stub took
-        # external_id_field as a plain positional second argument, which
-        # matched bulkops.py's own (wrong) positional call rather than the
-        # real library -- masking a real bug where the external-id field
-        # name was silently bound into the real library's `records` param
-        # instead. Require external_id_field so a caller reverting to the
-        # old positional-call bug fails here too, not just against a live org.
+        # signature's actual parameter ORDER -- external_id_field is the
+        # THIRD parameter, not the second (that's `records`, a genuine
+        # positional slot here too, even though this stub never uses it,
+        # specifically so a positional call binds WRONG the same way it
+        # would against the real library). A prior version of this stub
+        # omitted `records` entirely and put external_id_field second,
+        # which meant a positional call `upsert(csv_path, external_id, ...)`
+        # happened to bind correctly against the STUB even though it's
+        # wrong against the real library -- found via review: the stub's
+        # own regression test still passed with the old buggy positional
+        # bulkops.py call reintroduced, because the stub's signature didn't
+        # actually reproduce the real bug's mechanics. Require
+        # external_id_field so a caller reverting to the old positional-call
+        # bug fails here too, not just against a live org.
         if external_id_field is None:
             raise TypeError("upsert() requires external_id_field (by keyword)")
         return self._submit(csv_file)

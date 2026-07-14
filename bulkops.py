@@ -1,4 +1,5 @@
-"""Bulk load operations: SQL load table -> Salesforce (SQL Server or SQLite).
+"""Bulk load operations: SQL load table -> Salesforce (SQL Server, SQLite,
+or PostgreSQL, per SQL_BACKEND).
 
 Reads a SQL "load table", pushes insert / update / upsert / delete to
 Salesforce via Bulk API 2.0, then writes the resulting Salesforce Id and Error
@@ -201,8 +202,15 @@ def _resolve_external_ids_to_sf_id(sf, object_name, external_id_field, values, c
     return resolved
 
 
-def _preflight_check(sf, object_name, operation, sent_columns, id_column="Id"):
-    desc = getattr(sf, object_name).describe()
+def _preflight_check(sf, object_name, operation, sent_columns, id_column="Id", desc=None):
+    """desc: an already-fetched describe() payload, if the caller has one
+    in hand -- skips this function's own describe() call (a real network
+    round-trip) when given. bulk_op() itself never passes this (unchanged
+    behavior); sfdmu_bridge.py does, since it needs describe() for its own
+    parent-lookup/polymorphic-field classification too and previously
+    fetched it three separate times per call (found in review)."""
+    if desc is None:
+        desc = getattr(sf, object_name).describe()
     fields_by_name = {f["name"]: f for f in desc["fields"]}
 
     checked_columns = [c for c in sent_columns if c != id_column]

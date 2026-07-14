@@ -90,6 +90,21 @@ default:
   Identity Resolution/Data Transform/Data Graph) do **not** use this hop
   at all -- confirmed live, they're plain core-org SOQL like everything
   else in this list.
+- **SFDMU** (`sfdmu_bridge.py`; `bulkops --engine sfdmu`, see `ROADMAP.md`
+  #71) -- an opt-in second load engine, `forcedotcom/SFDX-Data-Move-Utility`,
+  installed once via `sf plugins install sfdmu` (a supply-chain
+  consideration worth the same scrutiny as DBHub's `npx` fetch above,
+  though this one is a signed `sf` CLI plugin rather than an
+  invocation-time `npx` pull) and invoked as a subprocess
+  (`subprocess.run(["sf", "sfdmu", "run", ...], shell=True on Windows)` --
+  a second, independent shell-out surface alongside `sf_client.py`'s own
+  `_run_sf()`, both now routed through one shared, arg-allowlisted
+  `run_sf_cli()` seam). Unlike DBHub, this is in the live **write** path
+  when used: it authenticates against the same already-configured target
+  org and pushes real record data to Salesforce via its own CSV staging
+  files under `_stage/sfdmu/<object>/` (deleted and rebuilt on every
+  call). Off entirely unless `--engine sfdmu` is explicitly passed; the
+  default `python` engine (`bulk_op()`) is unaffected either way.
 
 ## 3. Credential inventory
 
@@ -261,10 +276,16 @@ version-pinned with a minimum floor, no vendored/copied third-party source
 beyond what's explicitly disclosed: `sql/functions/`'s provenance notes
 document that two functions were deliberately rewritten from scratch rather
 than ported, because their original source carried third-party copyright
-notices (see `sql/functions/README.md`). The one runtime supply-chain
-exception is the optional DBHub MCP server (§2), fetched via `npx` rather
-than pinned in this repo -- flag it explicitly if evaluating this framework
-for adoption.
+notices (see `sql/functions/README.md`). Two runtime supply-chain
+exceptions exist, both optional and off by default: the DBHub MCP server
+(§2), fetched via `npx` rather than pinned in this repo; and SFDMU (§2,
+`bulkops --engine sfdmu`, `ROADMAP.md` #71), installed once via
+`sf plugins install sfdmu` -- a digitally signed `sf` CLI plugin (verified
+at install time by the `sf` CLI itself, unlike DBHub's unsigned `npx`
+fetch), but still a third-party dependency not pinned in this repo's own
+`requirements.txt`, and -- unlike DBHub, which is read-only -- one that
+sits in the live Salesforce write path when explicitly enabled. Flag both
+explicitly if evaluating this framework for adoption.
 
 **The optional Docker variant** (`Dockerfile`, roadmap #68) has its own
 supply-chain surface, separate from the packages above: the base image
@@ -303,17 +324,24 @@ adoption.
 - [ ] If DBHub MCP is adopted, confirm it's configured read-only and that
       the `npx`-fetched package is acceptable under the org's supply-chain
       policy, or pin/vendor it first.
+- [ ] If `bulkops --engine sfdmu` is adopted, confirm `sf plugins install
+      sfdmu`'s digitally-signed third-party plugin is acceptable under the
+      org's supply-chain policy -- unlike DBHub, this one writes to the
+      live Salesforce org when used.
 - [ ] Independently review Anthropic's current data handling/retention
       terms for whichever Claude Code plan is in use (§6) -- don't assume.
 - [ ] Re-review this entire document before any UI/SSO work (§8) ships.
 
 ---
 
-*Last reviewed against the codebase during the 2026-07-13 PostgreSQL
-backend pass (roadmap #69): added the PostgreSQL credential row to §3
-and its own supply-chain entry (`psycopg2-binary`) to §9 -- none of this
-existed as of the Docker-environment pass immediately below. Previously
-reviewed during the 2026-07-13 Docker-environment
+*Last reviewed against the codebase during the 2026-07-14 SFDMU
+integration (roadmap #71, found missing by a ruthless review pass): added
+SFDMU's own subprocess/supply-chain surface to §2/§9/§10 -- none of this
+existed until that integration landed. Previously reviewed during the
+2026-07-13 PostgreSQL backend pass (roadmap #69): added the PostgreSQL
+credential row to §3 and its own supply-chain entry (`psycopg2-binary`) to
+§9 -- none of this existed as of the Docker-environment pass immediately
+below. Previously reviewed during the 2026-07-13 Docker-environment
 pass (roadmap #68): added the optional containerized variant to §2, the
 cli-mode-in-container credential-reachability finding to §3 (Salesforce's
 May 2026 CLI update moved org auth into the host OS keychain, unreachable

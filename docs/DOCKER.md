@@ -61,7 +61,7 @@ app-<backend> <command>`.
   (Linux) — this setup uses Compose v2 syntax (`condition:
   service_healthy`, `profiles:`), not the older standalone
   `docker-compose` v1.
-- A `.env` file (`copy .env.example .env`, same as README.md's step 13):
+- A `.env` file (`copy .env.example .env`, same as README.md's step 14):
   `COMPOSE_PROFILES` picks the backend (`mssql` default, or `postgres`);
   **`MSSQL_SA_PASSWORD`** (mssql profile) or **`POSTGRES_PASSWORD`**
   (postgres profile) set to a strong password; your normal `SF_*` auth

@@ -30,20 +30,33 @@ from config import Settings
 _SAFE_SF_ARG_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
-def _run_sf(args):
+def run_sf_cli(args, arg_pattern, check=True):
+    """Shared subprocess mechanics for shelling out to the `sf` CLI --
+    shell=True is required on Windows for sf.cmd resolution, which means
+    cmd.exe's own metacharacter interpretation (&|^%<>) applies even inside
+    a quoted argument, so every arg must be validated against a safety
+    allowlist before ever reaching subprocess. `_run_sf()` below (org/auth
+    commands) and `sfdmu_bridge.py`'s `_run_sfdmu()` (a broader path-safe
+    allowlist, since a real filesystem path needs `/`, `\\`, `:`, spaces)
+    both route through this one seam rather than each re-implementing the
+    same shell=True/subprocess.run() shape with its own drift risk --
+    found via review: they'd previously done exactly that independently."""
     for arg in args:
-        if not _SAFE_SF_ARG_RE.fullmatch(arg):
+        if not arg_pattern.fullmatch(arg):
             raise ValueError(
                 f"Refusing to pass {arg!r} to the `sf` CLI -- contains characters "
-                "outside [A-Za-z0-9_.-], which risks shell metacharacter "
+                "outside the allowed pattern, which risks shell metacharacter "
                 "interpretation on Windows (shell=True is required there for "
-                "sf.cmd resolution). Check SF_ORG_ALIAS in .env."
+                "sf.cmd resolution)."
             )
-    proc = subprocess.run(
-        ["sf", *args, "--json"],
-        capture_output=True, text=True, check=True,
+    return subprocess.run(
+        ["sf", *args], capture_output=True, text=True, check=check,
         shell=(os.name == "nt"),
     )
+
+
+def _run_sf(args):
+    proc = run_sf_cli([*args, "--json"], _SAFE_SF_ARG_RE, check=True)
     return json.loads(proc.stdout)
 
 
