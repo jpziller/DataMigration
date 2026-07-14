@@ -1,15 +1,48 @@
-# Local dev environment (roadmap #68) -- see docs/DOCKER.md for the full
-# quickstart. Two services: `sqlserver` (SQL Server 2022 Developer
-# Edition, free for non-production use) and `app` (this repo's Python +
-# CLI environment, bind-mounted so host edits are reflected immediately
-# -- see Dockerfile for why nothing is COPYed in). Requires Docker
-# Compose v2 (`condition: service_healthy`).
+# Local dev environment (roadmap #68/#69) -- see docs/DOCKER.md for the
+# full quickstart. Two backend profiles, `mssql` (default) and `postgres`
+# -- pick one via COMPOSE_PROFILES in .env or `--profile` per command,
+# never both at once. Compose profiles, not a second override file:
+# Compose merges `depends_on` additively across `-f base -f override`,
+# so an override adding `postgres` to `app`'s `depends_on` would NOT
+# remove the base file's `sqlserver` dependency, forcing both databases
+# to start on every run -- profiles avoid that structurally by keeping
+# each backend's services (and its own `app-*` variant) mutually
+# exclusive in one file. Requires Docker Compose v2 (`condition:
+# service_healthy`, `profiles:`).
 #
 # Nothing here changes any Hard Rule in CLAUDE.md -- this packages the
-# exact same architecture (Python + SQL Server, `replicate`/`bulkops` as
-# the only write paths), it doesn't add a new one.
+# same architecture (Python + SQL Server/PostgreSQL, `replicate`/
+# `bulkops` as the only write paths) under two backend choices, it
+# doesn't add a new one.
+x-app-common: &app-common
+  build: .
+  volumes:
+    - .:/app
+    # Does NOT work as a way to reuse SF_AUTH_MODE=cli's host login --
+    # confirmed live (2026-07-13), current `sf` CLI stores org auth in
+    # the host OS's own keychain, unreachable from a Linux container no
+    # matter how this is mounted. Left commented out for reference only
+    # -- see docs/DOCKER.md's auth-mode section for the full finding
+    # (canonical explanation lives there, not here). Use jwt/password
+    # instead.
+    #   Windows : ${USERPROFILE}/.sf:/root/.sf
+    #   Mac/Linux: ${HOME}/.sf:/root/.sf
+  env_file:
+    - .env
+  working_dir: /app
+  tty: true
+  stdin_open: true
+  # Creates the (idempotent, safe-to-repeat) empty mirror database --
+  # see docker/init-db.sh -- using this container's own SQL_* values
+  # below, then leaves the container running for `docker compose exec
+  # app-<backend> <command>`. Not a separate init container/service (the
+  # original design's riskiest assumption -- see the sqlserver
+  # healthcheck comment below for why).
+  command: ["sh", "-c", "sh docker/init-db.sh && sleep infinity"]
+
 services:
   sqlserver:
+    profiles: ["mssql"]
     image: mcr.microsoft.com/mssql/server:2022-latest
     environment:
       ACCEPT_EULA: "Y"
@@ -20,8 +53,8 @@ services:
     ports:
       # Published so a host tool (SSMS, Azure Data Studio, a host-installed
       # sqlcmd) can also connect directly -- not required for `docker
-      # compose exec app ...` usage, which reaches this over the compose
-      # network by service name instead.
+      # compose exec app-mssql ...` usage, which reaches this over the
+      # compose network by service name instead.
       - "1433:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
@@ -35,8 +68,8 @@ services:
       # is verified), whether mcr.microsoft.com/mssql/server bundles
       # sqlcmd at all was never actually confirmed, and relying on that
       # unverified assumption for a healthcheck this many things depend on
-      # was the single riskiest part of the original design. `app`'s own
-      # docker/init-db.sh does the real, finer-grained "can it actually
+      # was the single riskiest part of the original design. `app-mssql`'s
+      # own docker/init-db.sh does the real, finer-grained "can it actually
       # log in yet" check with its own retry loop instead.
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/1433' || exit 1"]
       interval: 10s
@@ -44,35 +77,55 @@ services:
       retries: 15
       start_period: 30s
 
-  app:
-    build: .
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env first -- see .env.example.}
+      # Auto-creates the mirror DB on first-ever volume init (belt) --
+      # docker/init-db.sh's postgres branch defensively re-checks/creates
+      # it too (suspenders), for a volume that predates a SQL_DATABASE
+      # rename.
+      POSTGRES_DB: ${SQL_DATABASE:-SF_Migration}
+    ports:
+      # Published so a host tool (psql, Azure Data Studio, DBeaver) can
+      # also connect directly -- not required for `docker compose exec
+      # app-postgres ...` usage, which reaches this over the compose
+      # network by service name instead.
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Unlike sqlserver's deliberately dependency-free TCP-only check
+      # above: pg_isready is not an unverified assumption here -- this
+      # exact repo's own .github/workflows/tests.yml already runs
+      # `--health-cmd pg_isready` against this exact postgres:16 image
+      # today and it works, a real, already-observed precedent rather
+      # than a hopeful bet on what an image might bundle.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${SQL_DATABASE:-SF_Migration}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  app-mssql:
+    <<: *app-common
+    profiles: ["mssql"]
     depends_on:
       sqlserver:
         condition: service_healthy
-    volumes:
-      - .:/app
-      # Does NOT work as a way to reuse SF_AUTH_MODE=cli's host login --
-      # confirmed live (2026-07-13), current `sf` CLI stores org auth in
-      # the host OS's own keychain, unreachable from a Linux container no
-      # matter how this is mounted. Left commented out for reference only
-      # -- see docs/DOCKER.md's auth-mode section for the full finding
-      # (canonical explanation lives there, not here). Use jwt/password
-      # instead.
-      #   Windows : ${USERPROFILE}/.sf:/root/.sf
-      #   Mac/Linux: ${HOME}/.sf:/root/.sf
-    env_file:
-      - .env
     environment:
       # Overrides whatever SQL_* values are in .env -- inside this
-      # network, "localhost" means the app container itself, not a SQL
-      # Server the developer may also have installed on their host. This
-      # wins over env_file above per Compose's own documented precedence
-      # (environment: > env_file:); config.py's load_dotenv() also never
-      # overrides an already-set OS environment variable, a second,
-      # redundant reason it can't be silently clobbered. Every SF_* /
-      # MOCKAROO_API_KEY / TICKET_SYSTEM_* value still comes from the
-      # mounted .env via env_file above, unchanged -- only these SQL_*
-      # connection settings are overridden.
+      # network, "sqlserver"/"postgres" mean the sibling container
+      # itself, not a SQL Server/Postgres instance the developer may also
+      # have installed on their host. This wins over env_file above per
+      # Compose's own documented precedence (environment: > env_file:);
+      # config.py's load_dotenv() also never overrides an already-set OS
+      # environment variable, a second, redundant reason it can't be
+      # silently clobbered. Every SF_*/MOCKAROO_API_KEY/TICKET_SYSTEM_*
+      # value still comes from the mounted .env via env_file above,
+      # unchanged -- only these SQL_* connection settings are overridden.
       SQL_BACKEND: mssql
       SQL_SERVER: sqlserver
       SQL_DATABASE: ${SQL_DATABASE:-SF_Migration}
@@ -82,16 +135,26 @@ services:
       SQL_PWD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env first (8+ chars, upper+lower+digit+symbol) -- see .env.example.}
       SQL_ENCRYPT: "yes"
       SQL_TRUST_SERVER_CERT: "yes"
-    working_dir: /app
-    tty: true
-    stdin_open: true
-    # Creates the (idempotent, safe-to-repeat) empty mirror database --
-    # see docker/init-db.sh -- using this container's own SQL_* values
-    # above, then leaves the container running for `docker compose exec
-    # app <command>`. Not a separate init container/service (the
-    # original design's riskiest assumption -- see the sqlserver
-    # healthcheck comment above for why).
-    command: ["sh", "-c", "sh docker/init-db.sh && sleep infinity"]
+
+  app-postgres:
+    <<: *app-common
+    profiles: ["postgres"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SQL_BACKEND: postgresql
+      SQL_SERVER: postgres
+      SQL_PORT: "5432"
+      SQL_DATABASE: ${SQL_DATABASE:-SF_Migration}
+      SQL_UID: ${POSTGRES_USER:-postgres}
+      SQL_PWD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env first -- see .env.example.}
+      # disable, not .env.example's own "prefer" host default -- this is
+      # container-network-internal traffic between two sibling
+      # containers on the same compose network, not a connection to a
+      # real remote server where "prefer"'s opportunistic upgrade matters.
+      SQL_POSTGRES_SSLMODE: disable
 
 volumes:
   sqlserver_data:
+  postgres_data:

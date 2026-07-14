@@ -79,8 +79,19 @@ def replicate(sf, engine, object_name, stage_dir, schema="dbo",
             if not raw and bool_cols:
                 for c in bool_cols:
                     if c in chunk.columns:
+                        # Real Python True/False, not 1/0 -- found via
+                        # live Postgres testing (roadmap #69): SQL
+                        # Server's BIT and SQLite's INTEGER both accept a
+                        # plain integer for a boolean-ish column, but
+                        # Postgres's native BOOLEAN column rejects an
+                        # integer outright ("column is of type boolean
+                        # but expression is of type integer"). A real
+                        # Python bool binds correctly to all three
+                        # (pyodbc/sqlite3/psycopg2 each adapt it to their
+                        # own column type), the same way risk_analyzer.py's
+                        # own IsActive/DirectHit BIT columns already do.
                         chunk[c] = chunk[c].map(
-                            {"true": 1, "false": 0}
+                            {"true": True, "false": False}
                         ).where(chunk[c].isin(["true", "false"]))
             for c, fn in coercers.items():
                 if c in chunk.columns:

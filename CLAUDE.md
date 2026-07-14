@@ -729,10 +729,23 @@ fixture, `tests/test_load_table_prep_postgres_integration.py`, and a
 `postgres:16` service in `.github/workflows/tests.yml`) — every bug in
 this whole chain was found by a human manually running Postgres in a
 throwaway container; this is the first of that verification to become an
-automated, permanent regression guard instead of a one-time check. See
-`ROADMAP.md` #69 for the full, dated account of what's verified live vs.
-still open (the actual `docker-compose.yml` Postgres service, and a true
-Docker+Snowfakery+full-methodology end-to-end pass, remain unbuilt) —
+automated, permanent regression guard instead of a one-time check.
+
+**The actual `docker-compose.yml` Postgres service is now built too**
+(a `postgres`/`app-postgres` profile alongside the default `mssql` one
+— see "Where things live" below and `docs/DOCKER.md`). Running it live
+surfaced one more genuine bug beyond everything the throwaway-container
+testing above already found: `replicate.py` wrote every Salesforce
+boolean field as a Python `0`/`1` integer, which SQL Server's `BIT` and
+SQLite's `INTEGER` both tolerate but Postgres's native `BOOLEAN` column
+rejects outright — fixed to write real Python `True`/`False`, which all
+three backends' drivers adapt correctly. A true
+Docker+Snowfakery+full-methodology end-to-end pass against a live org
+(the actual next step) still hasn't been attempted — see `ROADMAP.md`
+#69 for exactly where that has to hand off to a live, human-confirmed
+turn (Hard Rules 2/9) rather than being scriptable straight through.
+
+See `ROADMAP.md` #69 for the full, dated account of everything above,
 including a structural bug found and fixed along the way, where an
 earlier edit had accidentally stripped `SqlDialect`'s own
 `@abstractmethod` enforcement without breaking any test (every concrete
@@ -1231,22 +1244,34 @@ with rather than replaces (Mockaroo, Snowfakery) — naming those is fine.
   (credential inventory, trust boundaries, what's code-enforced vs.
   convention-enforced — read this before a security review, and update it
   alongside any change that adds a credential type, network listener, or
-  auth boundary), `DOCKER.md` (roadmap #68 — the Docker local dev
-  environment quickstart, auth-mode guidance, and what's deliberately out
-  of scope).
-- `Dockerfile`, `docker-compose.yml`, `docker/init-db.sh` (roadmap #68) —
-  the containerized local dev environment: SQL Server 2022 Developer
-  Edition + a Python/CLI environment with the ODBC driver, `sqlcmd`, and
-  the Salesforce CLI preinstalled. `docker compose up -d` replaces
-  README.md's manual SQL Server/SSMS/ODBC-driver setup steps; the repo is
-  bind-mounted into the `app` container, not copied in, so this is a
+  auth boundary), `DOCKER.md` (roadmap #68/#69 — the Docker local dev
+  environment quickstart for both the `mssql` and `postgres` profiles,
+  auth-mode guidance, and what's deliberately out of scope).
+- `Dockerfile`, `docker-compose.yml`, `docker/init-db.sh` (roadmap
+  #68/#69) — the containerized local dev environment, one Dockerfile
+  shared by two Compose **profiles**: `mssql` (default — SQL Server 2022
+  Developer Edition + `sqlserver`/`app-mssql`) and `postgres`
+  (PostgreSQL 16 + `postgres`/`app-postgres`), never both running at
+  once. The shared `app-*` image has the ODBC driver + `sqlcmd`,
+  `postgresql-client` (`psql`/`pg_isready`), and the Salesforce CLI
+  preinstalled. `docker compose --profile <name> up -d` replaces
+  README.md's manual SQL Server/PostgreSQL/driver setup steps; the repo
+  is bind-mounted into the `app-*` container, not copied in, so this is a
   packaging change, not a design change — every Hard Rule below applies
-  identically whether `cli.py` runs in a venv or in this container. One
-  real exception, not a Hard Rule but worth knowing: `SF_AUTH_MODE=cli`
-  itself does NOT work inside this container (Salesforce's May 2026 CLI
+  identically regardless of profile or whether `cli.py` runs in a venv or
+  in either container. `docker/init-db.sh`'s Postgres branch also creates
+  a `dbo` schema (`CREATE SCHEMA IF NOT EXISTS`) since Postgres has no
+  built-in one the way SQL Server does, and every `cli.py` command
+  defaults `--schema` to `"dbo"` regardless of backend. One real
+  exception, not a Hard Rule but worth knowing: `SF_AUTH_MODE=cli` itself
+  does NOT work inside either container (Salesforce's May 2026 CLI
   update moved org auth into the host OS's own keychain, unreachable from
   a Linux container) — `jwt`/`password` only there. See `docs/DOCKER.md`'s
-  auth-mode section for the full finding.
+  auth-mode section for the full finding, and `ROADMAP.md` #69 for the
+  full account of the Docker Postgres build, its own live verification,
+  and a real bug it surfaced (`replicate.py` writing Salesforce booleans
+  as `0`/`1` instead of real Python `True`/`False`, which Postgres's
+  native `BOOLEAN` columns reject outright).
 - `ROADMAP.md` — idea backlog and build status for planned tooling.
 - `metadata/*.json`, `mapping/*.xlsx` — generated, org-specific artifacts.
   Gitignored by default (every org's schema/mappings differ, so these

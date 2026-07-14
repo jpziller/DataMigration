@@ -3941,7 +3941,7 @@ variant (SQLite needs no server at all, so there's nothing to
 containerize there) — `docs/DOCKER.md` notes both explicitly as
 deliberately out of scope for this pass.
 
-## 69. PostgreSQL as a third `sql_dialect.py` backend (in progress — core dialect built 2026-07-13)
+## 69. PostgreSQL as a third `sql_dialect.py` backend (core dialect + Docker service both built and live-verified 2026-07-13)
 
 The other technology worth a genuine "yes, eventually" out of the four
 raised. `sql_dialect.py` already proves the seam works — one `SqlDialect`
@@ -4242,18 +4242,99 @@ discipline CLAUDE.md already states for SQLite. Not a reason to avoid
 this — just a reason not to promise more than `sql_dialect.py`'s own
 seam actually delivers on day one.
 
-**Docker placeholder already exists** (roadmap #68): `docs/DOCKER.md`'s
-own "What this doesn't (yet) do" section already flags this exact gap —
-"PostgreSQL as a second database option (roadmap #69) isn't built yet —
-once it lands, this compose file is the natural place to add a
-`postgres` service alongside (or instead of) `sqlserver`." No actual
-`postgres` service, image, or env var exists in `docker-compose.yml`
-today — this is a documented intention, not a stub already sitting in
-the compose file. When `PostgresDialect` lands, the compose-side work is
-a new service block (official `postgres` image, its own healthcheck,
-its own `POSTGRES_PASSWORD`-style env var alongside `MSSQL_SA_PASSWORD`)
-plus a `docker/init-db.sh` branch for whichever backend `SQL_BACKEND`
-selects — not a redesign of the two-service shape already in place.
+**Follow-up pass, same day: the Docker placeholder above is now actually
+built, planned via `EnterPlanMode` and verified against a real
+container, not an ad hoc one.** `docker-compose.yml` gained a `postgres`
+service + its own `app-postgres` variant, structured as Compose
+**profiles** (`mssql` default, `postgres` new) rather than a second
+override file — Compose merges `depends_on` additively across `-f base
+-f override`, so an override adding `postgres` to `app`'s `depends_on`
+would NOT have removed the base file's `sqlserver` dependency, forcing
+both databases to start on every run; profiles avoid that structurally
+by keeping each backend's services (and its own `app-*` variant)
+mutually exclusive in one file. `POSTGRES_PASSWORD` mirrors
+`MSSQL_SA_PASSWORD`'s existing pattern exactly (a docker-only var,
+separate from `.env`'s own `SQL_PWD` a host venv might use for a
+different real Postgres server); `COMPOSE_PROFILES=mssql` is set as the
+`.env.example` default so a plain `docker compose up -d` with no
+`--profile` flag still behaves exactly like before profiles existed.
+
+Two real risks found during planning, not just copy-pasting the
+`sqlserver` service:
+- **Postgres has no built-in `dbo` schema** the way SQL Server does (its
+  own default is `public`), and every `cli.py` command defaults
+  `--schema` to `"dbo"` regardless of backend — without an explicit step,
+  the first real `replicate`/`bulkops` call against a fresh Postgres
+  container would have failed outright with "schema dbo does not
+  exist." `docker/init-db.sh` gained a `case "$SQL_BACKEND"` dispatch (the
+  mssql branch unchanged) with a new `postgresql` branch: retry
+  `psql`-based login (same 120s retry shape as the mssql branch), `CREATE
+  DATABASE` only if `pg_database` doesn't already list it (Postgres has
+  no `CREATE DATABASE IF NOT EXISTS`), then `CREATE SCHEMA IF NOT EXISTS
+  "dbo"` (Postgres does support this one natively).
+- **No `psql`/`pg_isready` in the `app` image** — `requirements.txt`'s
+  `psycopg2-binary` is Python-only. Added `postgresql-client` to the
+  existing apt-get layer that already installs `msodbcsql18`/
+  `mssql-tools18`.
+
+`postgres:16` was pinned to match `.github/workflows/tests.yml`'s own CI
+service exactly. Its healthcheck uses `pg_isready` — not a repeat of the
+`sqlserver` healthcheck's own "is this binary even bundled" uncertainty,
+since this repo's own CI already runs `--health-cmd pg_isready` against
+this exact image today, a real, already-observed precedent rather than a
+new guess.
+
+**Verified live, an 8-step check before spending any further time**: (1)
+`pg_isready --version`/`psql --version` confirmed present in the pinned
+image directly, not just trusted from the CI precedent; (2) clean-state
+`docker compose --profile postgres up -d --build` — `postgres` reached
+healthy, `app-postgres` started; (3) `docker compose logs app-postgres`
+confirmed `init-db.sh`'s postgres branch actually ran (`CREATE SCHEMA`
+in the log); (4) `psql ... -c '\dn'` confirmed the `dbo` schema
+genuinely exists — the concrete regression this pass existed to
+prevent; (5) `cli.py list-objects` confirmed `jwt`-mode Salesforce auth
+works identically to the mssql variant; (6) `cli.py replicate Account`
+— see the real bug this one caught, below; (7) `docker compose down`
+(no `-v`) then `up` again confirmed idempotent re-run (`"schema dbo
+already exists, skipping"`) with data intact; (8) `docker compose
+--profile mssql up -d` plus a real `list-objects`/`replicate Account`
+confirmed zero regression to the existing SQL Server path after the
+profiles refactor.
+
+**A real, previously-undiscovered bug, caught only by step 6 — running
+`replicate` through the actual compose network, not a throwaway
+container**: `replicate.py`'s boolean-field coercion mapped Salesforce's
+CSV `"true"`/`"false"` text to Python integers `1`/`0`
+(`chunk[c].map({"true": 1, "false": 0})`). SQL Server's `BIT` and
+SQLite's `INTEGER` both silently accept an integer for a boolean-ish
+column; Postgres's native `BOOLEAN` column does not — the very first
+`replicate Account` against the new container failed outright
+(`psycopg2.errors.DatatypeMismatch: column "IsDeleted" is of type
+boolean but expression is of type integer`). Fixed by mapping to real
+Python `True`/`False` instead — every backend's own driver (pyodbc/
+sqlite3/psycopg2) adapts a genuine Python bool to its own column type
+correctly, the same way `risk_analyzer.py`'s own `IsActive`/`DirectHit`
+`BIT` columns already do. Re-verified: `replicate Account` now writes 5
+rows correctly, `IsDeleted` stored as a real Postgres `f`/`t`, and the
+data survives the idempotent-restart check (step 7) unchanged.
+
+**What's genuinely still not built, stated plainly**: the actual
+migration *methodology* — Snowfakery mock data, a real Postgres-flavored
+transform, `bulkops` against a live org — hasn't been run through this
+new container yet. This is deliberately a separate, later piece of work,
+not scriptable straight through: Hard Rule 2 (Live-Org Write
+Confirmation) and Hard Rule 9 (Email Deliverability Attestation) both
+require a human, in that live session, to state the org/mode and what
+Setup's Deliverability page actually shows — neither has any code
+representation to pre-script past, and pre-filling either to make a
+pass "fully automated" would defeat the rule's actual purpose even
+though nothing in the code would catch it. The prior real dogfood pass
+(`_dogfood/brief.yaml` → discovery checklist → mapping → transforms →
+live `bulkops` insert against `D360_PLAYGROUND` → pass summary, commit
+`3314caf`) is this project's own working definition of "end to end," and
+its four existing transform scripts are hand-written T-SQL — not valid
+Postgres syntax, so a Postgres pass needs new transform scripts, not a
+rerun of the same artifacts.
 
 ## 70. FAQ: Fivetran / Apache Hop — why they're not part of this framework (researched — not pursued, out of scope)
 

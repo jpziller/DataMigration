@@ -1,8 +1,10 @@
-# Local dev environment (roadmap #68) -- packages the exact same
+# Local dev environment (roadmap #68/#69) -- packages the exact same
 # architecture documented in README.md's "One-time environment setup"
 # (Python + pyodbc + ODBC Driver 18 + sqlcmd + the Salesforce CLI), not a
 # different one. See docker-compose.yml and docs/DOCKER.md for how this
-# is actually run; this file only builds the `app` image.
+# is actually run; this file only builds the `app` image (shared by both
+# the mssql and postgres profiles -- one image, docker-compose.yml's own
+# environment: blocks pick which backend it actually talks to).
 FROM python:3.12-slim-bookworm
 
 # Prevents apt-get from ever blocking on an unexpected interactive prompt
@@ -22,8 +24,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # `gnupg2` -- Debian merged the two packages long ago, and the
 # transitional `gnupg2` package name is not reliably present across every
 # Debian release) provides `gpg` for the apt keyring step below.
+# postgresql-client (roadmap #69) provides `psql`/`pg_isready` for the
+# same reason -- docker/init-db.sh's postgres branch needs both, and
+# they let the same "look at the mirror DB directly" workflow work for a
+# Postgres-backed project too. requirements.txt's psycopg2-binary is
+# Python-only and provides neither binary.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates gnupg unixodbc-dev \
+        curl ca-certificates gnupg unixodbc-dev postgresql-client \
     && curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
     && curl -sSL https://packages.microsoft.com/config/debian/12/prod.list \

@@ -39,11 +39,13 @@ they differ. **Follow this order** — later steps depend on earlier ones
 (noted inline), so installing out of order means backtracking.
 
 **Using Docker instead?** `docker compose up -d` replaces steps 3–7 below
-(Python venv, SQL Server engine, SSMS, the ODBC driver, creating the
-database) with one command — same architecture, just containerized. See
-[`docs/DOCKER.md`](docs/DOCKER.md) — including a container-specific
-auth-mode caveat (`cli` mode doesn't work there; see "Auth modes" below
-and `docs/DOCKER.md`'s own auth-mode section for the full finding).
+(Python venv, SQL Server/PostgreSQL engine, SSMS/psql, the driver,
+creating the database) with one command — same architecture, just
+containerized, with a `postgres` profile alongside the default `mssql`
+one (roadmap #69). See [`docs/DOCKER.md`](docs/DOCKER.md) — including a
+container-specific auth-mode caveat (`cli` mode doesn't work there; see
+"Auth modes" below and `docs/DOCKER.md`'s own auth-mode section for the
+full finding).
 
 **Using SQLite instead (`SQL_BACKEND=sqlite`)?** Skip steps 4–7 entirely
 (SQL Server, SSMS, the ODBC driver, and creating a database) — SQLite needs
@@ -345,9 +347,10 @@ SQL_POSTGRES_SSLMODE=prefer        # disable/allow/prefer/require/verify-ca/veri
 Built via `sqlalchemy.engine.URL.create()` (`sql_client.py`'s
 `_make_postgres_engine()`), not a hand-rolled connection string, so the
 password is redacted by SQLAlchemy's own `repr()`/`str()` by default.
-`docker-compose.yml` doesn't have a `postgres` service yet (see
-`docs/DOCKER.md`) — point `SQL_SERVER`/`SQL_PORT` at any Postgres instance
-you already have running in the meantime.
+`docker-compose.yml` now has a real `postgres` profile too (`docker
+compose --profile postgres up -d`) alongside the default `mssql` one —
+see `docs/DOCKER.md` for the full quickstart; these values above are for
+a host-installed Postgres or one you're already running elsewhere.
 
 See `ROADMAP.md` #28 for the SQLite design writeup and what was found/fixed
 building it (a couple of real `bulk_op()` correctness bugs, unrelated to
