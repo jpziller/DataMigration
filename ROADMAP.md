@@ -4696,3 +4696,120 @@ documentation in sync.
 Nothing here is built. This entry exists so the proposal survives past
 the conversation that produced it, in the same "roadmap idea" spirit as
 every other not-yet-built entry in this file.
+
+## 73. dbt evaluation for the `sql/transformations/` layer (spike complete, recommendation made — not adopted, decision pending)
+
+Evaluated `dbt-core` as a candidate replacement for the numbered-script
+`sql/transformations/` convention, across all three `sql_dialect.py`
+backends. The full spike (8 commits, real dogfood data, all three
+backends) lives on a separate git worktree/branch,
+`worktree-spike-dbt-evaluation` — kept isolated from `main` per this
+project's own "genuinely exploratory/risky work gets a worktree" default,
+since it adds new dependencies (`dbt-core`, `dbt-sqlserver`, `dbt-postgres`,
+`dbt-sqlite`) and an unverified compatibility question (Python 3.14
+support) neither of which belong in the primary checkout until a real
+adopt/don't-adopt decision is made. Nothing here touched Salesforce or
+this project's real `Account_Load`/`Contact_Load` tables. This entry
+summarizes; `_spike/dbt_evaluation_findings.md` on that branch has the
+full command-level account, including exact error text, exact package
+versions, and exact commands to reproduce every finding below.
+
+**Environment**: this environment's only available Python (3.14) crashes
+every current *stable* `dbt-core` release at import time
+(`mashumaro.exceptions.UnserializableField`), root-caused to a real,
+already-fixed upstream issue (`dbt-labs/dbt-core#12828`, merged
+2026-05-12) that hasn't reached a stable release yet — only the `1.12.0`
+pre-release line. Confirmed clean (`dbt debug`/`run`/`test`/`docs
+generate` all pass) using `dbt-core==1.12.0rc2` with no forced version
+overrides, pip's own resolver pulling every compatible dependency
+automatically. This is an environment cost (which Python, which dbt-core
+line, wait for `1.12.0` stable or track the rc), not a design cost —
+doesn't change anything below.
+
+**What worked cleanly**:
+- **Model porting**: low friction — porting a real hand-written transform
+  (`010_account_load.sql`) needed exactly one line changed (`FROM
+  Account_Mock` → `FROM {{ source(...) }}`) plus a one-time `source()`
+  declaration; every column stayed character-for-character identical, and
+  the built table matched the real `Account_Load` table exactly (5/5 rows).
+- **DAG ordering vs. this project's own `load_order.py`**: dbt's `ref()`-
+  derived build order (Account → Contact → Opportunity → Task,
+  auto-derived from model references) matched `analyze-load-order`'s live,
+  `describe()`-derived order exactly — re-confirmed across a non-standard
+  primary-parent case (Opportunity's primary parent is Contact, not
+  Account) and a genuinely polymorphic one (`Task.WhatId` resolving to
+  either Account or Opportunity via three `ref()`'d models in one query).
+  Two independently-derived graphs (SQL structure vs. real Salesforce
+  object relationships) agreeing exactly is real, useful cross-validation.
+- **Hard Rule 7 stand-in**: dbt's native `unique`/`not_null` `schema.yml`
+  tests caught the same injected duplicate `check-load-table-duplicate-
+  keys` catches, on the same corrupted data, no gap found.
+- **Writeback boundary**: `bulkops.py`'s existing `_writeback_result_table()`
+  writes results into a genuinely separate `_Result` table, provably never
+  touching the dbt-owned table (`DataFrame.equals()` diff before/after) —
+  dbt and the load engine stay cleanly decoupled, as hoped.
+- **Lineage**: `dbt docs generate` produces a real, structured
+  `manifest.json` dependency graph — a concrete, low-effort future data
+  source for this project's own `generate-target-data-model`/
+  `generate-source-data-model` Mermaid generators to draw actual
+  transformation lineage, not just relationship ERDs. Not built in this
+  spike, just identified as a real follow-up.
+- **Incremental models**: genuinely closes a gap this project's own
+  `README.md` "Known limitations, honestly" section already admits exists
+  ("incremental refresh is not built... the hook is obvious in
+  `replicate.py`; it's just not written"). Verified against real
+  before/after data (unchanged rows untouched, an updated row merged in
+  place, new rows inserted) *and* against the actual compiled SQL (a real
+  `MERGE INTO`, not a full rebuild that happened to look right).
+
+**A real limit found, not just wins**: dbt's DAG-ordering advantage
+**stops exactly at the live-Salesforce-write boundary**. A synthetic
+self-referencing two-pass load (`Account.ParentId`, insert-then-update)
+built correctly, but `dbt list --select model+` showed dbt has **zero
+awareness** that the second pass depends on a real Salesforce write
+having happened in between the two dbt runs — structurally correct (that
+dependency isn't expressible in SQL `ref()`s at all), but it means a bare
+`dbt run` gives no ordering guarantee across that boundary, and could
+silently run pass 2 against a stale `_Result` table. This is precisely
+where this framework's own Hard Rules 2/6/7 already live — dbt doesn't
+remove the need for human-sequenced discipline there, it just relocates
+it from "script numbering" to "knowing which `--select` flags to run and
+in which order."
+
+**Backend-specific findings — not uniform across the 3-backend matrix**:
+- **Postgres**: works, with one real, recurring cost. dbt's own generic
+  test macros reference columns unquoted, which Postgres folds to
+  lowercase — the same case-folding bug class this project hit repeatedly
+  this session in hand-written SQL. Fix is real (`quote: true` per column
+  in `schema.yml`) but has no project-wide equivalent (confirmed against
+  dbt's current docs — `quoting:` in `dbt_project.yml` covers `database`/
+  `schema`/`identifier`, never `column`), so it's an ongoing per-column
+  tax on every Postgres model, forever, with nothing enforcing a future
+  column remembers it.
+- **SQLite: hard blocked, not just a workable gotcha.** `dbt-sqlite`
+  (the only maintained SQLite adapter) pins `dbt-adapters~=1.16.0`, which
+  predates the Python 3.14 fix above and is incompatible with it — the
+  only combination that makes `dbt --version` succeed at all stacks *two*
+  version overrides outside both packages' own declared ranges, and
+  confirmed live that installing `dbt-sqlite` into the already-validated-
+  clean sqlserver/postgres venv silently breaks it. No supported
+  combination currently exists for using dbt against this project's
+  SQLite backend.
+
+**Recommendation**: adopt dbt for the SQL Server and Postgres backends
+specifically — if adopted, replace the numbered-script convention
+outright rather than keep both paths supported forever (same reasoning as
+`sql_dialect.py` itself), since the porting friction measured here was
+genuinely low. **SQLite forces a real carve-out to that "outright
+replace" framing, though**: either SQLite-backed projects keep the
+hand-written path as a permanent third option (not a temporary "optional"
+one), or dbt adoption itself waits on `dbt-sqlite` publishing a
+`dbt-adapters` pin compatible with a working `dbt-core` line. This is a
+decision to make explicitly, not default into by omission.
+
+**Status: spike complete, not adopted.** This entry captures the
+recommendation for a real go/no-go decision; nothing in `sql/
+transformations/`, `cli.py`, or any shipped file has changed. The spike's
+own exploratory scaffolding (extra venvs, `models/`, `dbt_project.yml`,
+`.dbt-profiles/`) stays on `worktree-spike-dbt-evaluation`, not merged
+into `main`.
