@@ -4581,7 +4581,7 @@ account, `README.md`'s "Two `bulkops` load engines" section for the
 user-facing summary, and `CLAUDE.md`'s `bulkops` command entry for the
 `--engine` flag itself.
 
-## 72. Open Knowledge Format (OKF) adoption — pilot on `validators/` + a new industries/Data Cloud reference bundle (not built — proposed, researched and verified against the real spec)
+## 72. Open Knowledge Format (OKF) adoption — pilot on `validators/` + a new industries/Data Cloud reference bundle (IN PROGRESS — validators/ pilot built 2026-07-15, reference bundle pending)
 
 Evaluated the **Open Knowledge Format** (`GoogleCloudPlatform/knowledge-
 catalog`, `okf/SPEC.md`, v0.1 draft, Apache-2.0) as a candidate structure
@@ -4693,9 +4693,39 @@ documentation in sync.
    for this project's own tooling, not just for external OKF-aware
    consumers.
 
-Nothing here is built. This entry exists so the proposal survives past
-the conversation that produced it, in the same "roadmap idea" spirit as
-every other not-yet-built entry in this file.
+**What landed in the pilot (2026-07-15, step 1 of the plan above)**: the
+`validators/` bundle is now OKF v0.1 conformant — frontmatter
+(`type: SystemValidator`/`ObjectValidator`/`Guide`, plus
+title/description/tags/timestamp, `timestamp` taken from each file's real
+git last-commit date, `resource:` deliberately omitted since a validator
+is abstract knowledge) added to all six existing files with **zero body
+changes** to the five knowledge files (README.md gained one new
+"Frontmatter (OKF)" how-to subsection, which is that guide doing its
+job). `validators/index.md` (carrying the bundle's `okf_version: "0.1"`
+declaration, the only frontmatter the spec permits a reserved file) and
+`validators/log.md` (change history backfilled honestly from git) were
+created at the bundle root — deliberately **not** inside `system/`, where
+`list_system_validators()`'s `*.md` glob would have announced them as
+validators; the lookup now also excludes reserved names defensively.
+`validators_lookup.py` gained `parse_frontmatter()` (tolerant per the
+spec's own conformance rules — absent/malformed/unclosed/non-dict
+frontmatter all return `({}, original_text)` rather than an error), and
+`check-validators` now presents frontmatter as a compact structured
+Type/Tags/Resource header instead of raw YAML — the same
+parse-then-present pattern OKF's own reference consumer (the
+`knowledge-catalog` repo's bundled visualizer) uses, chosen after
+checking that repo's actual consumption model rather than guessing.
+`tests/test_okf_conformance.py` makes the spec's conformance rule an
+executable CI gate over the real committed tree — deliberately different
+from the suite's tmp_path-only convention, because shipped template
+content is the thing under test. Step 2 (the `okf/` reference bundle) is
+next; steps 3/4's boundaries (SQL stays SQL; reader stays bespoke beyond
+this one parse function) held as designed.
+
+The paragraph above supersedes the original "nothing here is built" note
+for step 1 only — the `okf/` reference bundle (step 2) remains unbuilt,
+and this entry still exists so the full proposal survives past the
+conversation that produced it.
 
 ## 73. dbt evaluation for the `sql/transformations/` layer (spike complete, recommendation made — not adopted, decision pending)
 

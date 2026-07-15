@@ -985,6 +985,21 @@ automating yet); others point at real executable code — both are equally
 valid, and a doc-only entry may graduate to executable later, same
 tool-proposes-human-commits principle as `reference/batch_size_heuristics.json`.
 
+The library is an **Open Knowledge Format (OKF) v0.1 bundle** (roadmap
+#72, the pilot): every non-reserved `.md` file carries YAML frontmatter
+with a `type:` field (`SystemValidator`, `ObjectValidator`, or `Guide`),
+plus recommended `title`/`description`/`tags`/`timestamp` —
+`validators/README.md`'s "Frontmatter (OKF)" section has the format. The
+OKF reserved filenames `index.md` (directory listing) and `log.md`
+(change history) live at the `validators/` root only, **never inside
+`system/`** (where they'd be mistaken for system validators —
+`validators_lookup.py` also excludes them defensively). A new validator
+entry needs its frontmatter, an `index.md` line, and a dated `log.md`
+entry; `tests/test_okf_conformance.py` enforces the frontmatter half in
+CI. `check-validators` parses the frontmatter and displays it as a
+compact structured header (Type/Tags/Resource) rather than raw YAML —
+the same parse-then-present pattern OKF's own reference consumer uses.
+
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
 don't jump straight to writing SQL:
@@ -1090,8 +1105,14 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   commit" link across the project is built the same way, from one place.
 - `validators_lookup.py` — `check-validators`'s read-only retrieval logic
   for the validators library (`validators/system/*.md`,
-  `validators/<Object>.md`). Purely a lookup convenience; writing a new
-  validator entry is always a deliberate manual edit, never automated.
+  `validators/<Object>.md`), plus `parse_frontmatter()` — the one
+  OKF-aware piece (roadmap #72): splits a file's YAML frontmatter from
+  its body, tolerating absent/malformed frontmatter per the OKF spec's
+  own conformance rules, and feeds `check-validators`' structured
+  Type/Tags/Resource header. OKF reserved filenames (`index.md`/`log.md`)
+  are excluded from the system-validator listing. Purely a lookup
+  convenience; writing a new validator entry is always a deliberate
+  manual edit, never automated.
 - `orchestrator.py` — `orchestrator-assess`'s logic (roadmap #53, Phase 1
   only): `assess_tier()`, the deterministic Tier 1 (Continue Silently)
   through Tier 4 (Full Stop) assessment `docs/ORCHESTRATOR_DESIGN.md`'s

@@ -1,3 +1,13 @@
+---
+type: SystemValidator
+title: Migration Key Integrity Rule (Hard Rule 7)
+description: Check every Load table's migration-key column for duplicates
+  and NULLs before bulkops -- a duplicate or NULL key silently breaks the
+  fingerprint-based result mapping, surfacing later as an unexplained
+  ambiguous count after a real Salesforce API call.
+tags: [system-validator, hard-rule-7, migration-key, fingerprint-mapping]
+timestamp: "2026-07-11"
+---
 # Migration Key Integrity Rule (System Validator)
 
 CLAUDE.md Hard Rule #7. Applies to **every object**, every `*_Load` table,

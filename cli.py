@@ -200,8 +200,20 @@ def check_validators_cmd(object_name):
         click.echo("If this build turns up something worth capturing, write it into "
                     f"validators/{object_name}.md -- see validators/README.md for the format.")
         return
+    # OKF frontmatter is displayed as a compact structured header, not raw
+    # YAML -- the same parse-then-present pattern OKF's own reference
+    # consumer uses (ROADMAP.md #72). A frontmatter-less file prints
+    # exactly as before, since parse_frontmatter returns it unchanged.
+    meta, body = vl.parse_frontmatter(content)
     click.echo(f"validators/{object_name}.md:")
-    click.echo(content)
+    if meta:
+        click.echo(f"  Type: {meta.get('type', '(none)')}")
+        if meta.get("tags"):
+            click.echo(f"  Tags: {', '.join(meta['tags'])}")
+        if meta.get("resource"):
+            click.echo(f"  Resource: {meta['resource']}")
+        click.echo("")
+    click.echo(body)
 
 
 @cli.command("record-counts")
