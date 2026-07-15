@@ -49,6 +49,26 @@ def _run_clean_load(engine, tmp_path, load_id=1, legacy_id="A1"):
     )
 
 
+def _pin_durations(engine, object_name="Account", seconds=10.0):
+    """Overwrite every BulkOpsLog row's real wall-clock DurationSeconds
+    with a fixed, equal value. assess_tier()'s elapsed-time-overrun check
+    (already covered deterministically in test_orchestrator.py via
+    hand-built dicts) has no safety margin against normal OS scheduling
+    jitter when the underlying runs are near-instant stub-driven inserts
+    (~10-20ms) -- found flaky live in CI: a run whose real duration
+    happened to be >3x the prior run's, purely from timing noise, was
+    enough to trip Tier 4 (Full Stop) in a test asserting Tier 1. Tests
+    that only care about tier/coarse-approval-eligibility logic unrelated
+    to elapsed time should call this after their real bulk_op() calls,
+    before assess_from_log(), so real wall-clock variance can never leak
+    into an assertion it isn't testing."""
+    with engine.begin() as cx:
+        cx.execute(
+            text("UPDATE dbo.BulkOpsLog SET DurationSeconds = :d WHERE ObjectName = :obj"),
+            {"d": seconds, "obj": object_name},
+        )
+
+
 def _seed_clean_automation_scan(engine, object_name="Account"):
     """A scanned-and-clean analyze-org-risk result -- assess_tier() reads
     "no ObjectAutomationRisk rows at all" as a tier-3 trigger (design doc
@@ -93,6 +113,7 @@ def test_assess_from_log_second_clean_run_is_coarse_approval_eligible(sqlite_eng
     _seed_clean_automation_scan(engine)
     _run_clean_load(engine, tmp_path, load_id=1, legacy_id="A1")
     _run_clean_load(engine, tmp_path, load_id=2, legacy_id="A2")
+    _pin_durations(engine)
 
     log_id, result = orch.assess_from_log(engine, "Account")
     assert log_id == 2
