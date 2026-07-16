@@ -4581,7 +4581,7 @@ account, `README.md`'s "Two `bulkops` load engines" section for the
 user-facing summary, and `CLAUDE.md`'s `bulkops` command entry for the
 `--engine` flag itself.
 
-## 72. Open Knowledge Format (OKF) adoption — pilot on `validators/` + a new industries/Data Cloud reference bundle (IN PROGRESS — validators/ pilot built 2026-07-15, reference bundle pending)
+## 72. Open Knowledge Format (OKF) adoption — pilot on `validators/` + a new `okf/` reference bundle (BUILT — validators/ pilot 2026-07-15, first okf/ subject area 2026-07-16)
 
 Evaluated the **Open Knowledge Format** (`GoogleCloudPlatform/knowledge-
 catalog`, `okf/SPEC.md`, v0.1 draft, Apache-2.0) as a candidate structure
@@ -4722,10 +4722,51 @@ content is the thing under test. Step 2 (the `okf/` reference bundle) is
 next; steps 3/4's boundaries (SQL stays SQL; reader stays bespoke beyond
 this one parse function) held as designed.
 
-The paragraph above supersedes the original "nothing here is built" note
-for step 1 only — the `okf/` reference bundle (step 2) remains unbuilt,
-and this entry still exists so the full proposal survives past the
-conversation that produced it.
+**What landed in step 2 (2026-07-16)**: `okf/` now exists, with its first
+subject area — **not** the Data Cloud bundle originally sketched above,
+superseded by a real, current opportunity: a Salesforce Nonprofit
+Success Pack (NPSP) → Nonprofit Cloud (Salesforce's own docs call the
+target "Agentforce Nonprofit"/AFNP) migration. 9 concept files under
+`okf/npsp-to-npc/`, built from a full review of Salesforce's own official
+78-page migration guide and its companion 33-sheet field-mapping
+workbook (both confirmed by direct extraction, not summarized
+secondhand) — a compact outline of the guide's real table of contents
+and ~35-step migration sequence (`migration-guide.md`); an index of all
+4 companion mapping workbooks, only one reviewed so far
+(`mapping-spreadsheets.md`); the reviewed workbook's real structure,
+`Type` taxonomy, and the Opportunity object's genuinely three-way
+routing rule as a worked example (`npsp-to-afnp-field-mapping.md`); the
+official platform-enforced validation rules for Gift Transaction, Gift
+Commitment, and Gift Commitment Schedule, transcribed verbatim from the
+guide's Appendix B — new `type: PlatformValidation`, deliberately kept
+separate from `validators/` since nothing has been discovered yet by
+building a real transform, only documented by Salesforce itself (three
+files); and two `type: MigrationPattern` write-ups of the most
+structurally significant conceptual changes (Households becoming Party
+Relationship Groups; the Opportunity/Payment routing to Gift
+Transaction/Gift Commitment/Opportunity). New `type: MappingReference`
+too, for a concept that describes and points at an external mapping
+asset without reproducing it. Confirmed directly (not assumed) that
+today's `mapping_doc.py`/`auto_mapper.py` both hard-require a real,
+already-profiled SQL source table — this Salesforce-object-to-
+Salesforce-object mapping data has no SQL table behind it at all, so
+those tools are the wrong shape for it, not merely missing an optional
+input; `load_order.py` is likewise strictly `describe()`-driven with no
+hook for a static prescribed sequence like the guide's own §7. OKF was
+the right home for all of it. Deliberately deferred: the other ~30 of
+the guide's individual migration-sequence steps as their own concept
+files, and the three sibling workbooks (PMM & Case Management, Outbound
+Funds & Grant Management, Volunteers for Salesforce) — noted as
+`(not yet reviewed)` rather than silently absent, real follow-up work
+once an actual project needs that specific piece. The raw PDF/Excel
+source files were deliberately **not** committed to the repo — they're
+Salesforce's own copyrighted documents, and this repo's own stated goal
+is to eventually be public; every concept file's `resource:` points at
+the live source instead. Steps 3/4's boundaries (SQL stays SQL; no
+reader built for `okf/` itself, since OKF's own design point is "no
+required tooling" and nothing has needed one yet) held as designed. This
+entry still exists so the full proposal, and its real build history,
+survives past the conversation that produced it.
 
 ## 73. dbt evaluation for the `sql/transformations/` layer (spike complete, recommendation made — not adopted, decision pending)
 
