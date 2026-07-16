@@ -200,8 +200,31 @@ def check_validators_cmd(object_name):
         click.echo("If this build turns up something worth capturing, write it into "
                     f"validators/{object_name}.md -- see validators/README.md for the format.")
         return
+    # OKF frontmatter is displayed as a compact structured header, not raw
+    # YAML -- the same parse-then-present pattern OKF's own reference
+    # consumer uses (ROADMAP.md #72). A frontmatter-less file prints
+    # exactly as before, since parse_frontmatter returns it unchanged.
+    meta, body = vl.parse_frontmatter(content)
     click.echo(f"validators/{object_name}.md:")
-    click.echo(content)
+    if meta:
+        # `meta.get('type') or '(none)'` rather than the two-arg form --
+        # found in review: dict.get(key, default) only substitutes
+        # default when the key is ABSENT, not when it's present with
+        # value None (a hand-written "type:" with nothing after the
+        # colon parses to None, not a missing key).
+        click.echo(f"  Type: {meta.get('type') or '(none)'}")
+        tags = meta.get("tags")
+        if isinstance(tags, list) and tags:
+            click.echo(f"  Tags: {', '.join(str(t) for t in tags)}")
+        elif tags:
+            # Found in review: a hand-authored "tags: sometag" (bare
+            # scalar, not a YAML list) used to either join the string's
+            # own characters or crash outright on a non-string scalar.
+            click.echo(f"  Tags: {tags}")
+        if meta.get("resource"):
+            click.echo(f"  Resource: {meta['resource']}")
+        click.echo("")
+    click.echo(body)
 
 
 @cli.command("record-counts")

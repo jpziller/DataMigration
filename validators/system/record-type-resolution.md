@@ -1,3 +1,13 @@
+---
+type: SystemValidator
+title: RecordType Resolution Rule (Hard Rule 15)
+description: Resolve the target org's real RecordTypes into
+  dbo.RecordTypeMap and JOIN by DeveloperName to populate RecordTypeId --
+  RecordType Ids are org-specific and never portable, so a hand-copied
+  source Id either fails or silently resolves to the wrong record type.
+tags: [system-validator, hard-rule-15, record-types]
+timestamp: "2026-07-11"
+---
 # RecordType Resolution Rule (System Validator)
 
 CLAUDE.md Hard Rule #15. Applies to any object whose Load table populates

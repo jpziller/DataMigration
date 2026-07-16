@@ -1,3 +1,12 @@
+---
+type: SystemValidator
+title: Parent-Batch Sort Rule (Hard Rule 6)
+description: Number Load-table rows by parent key into a [Sort] column so
+  same-parent children never split across concurrent Bulk API 2.0 batches
+  and lock-contend on the shared parent record.
+tags: [system-validator, hard-rule-6, bulk-api, row-locking]
+timestamp: "2026-07-11"
+---
 # Parent-Batch Sort Rule (System Validator)
 
 CLAUDE.md Hard Rule #6.

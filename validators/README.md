@@ -1,3 +1,12 @@
+---
+type: Guide
+title: Validators library -- how-to
+description: The practical convention guide for this bundle -- the two
+  kinds of validator (system vs object), when to check one, when to write
+  one, and the format a new entry should follow.
+tags: [guide, validators]
+timestamp: "2026-07-11"
+---
 # Validators library
 
 A git-tracked knowledge base of things to check **before** building a
@@ -44,10 +53,35 @@ rediscovery.
 
 ## Format
 
+### Frontmatter (OKF)
+
+This library is an Open Knowledge Format (OKF) v0.1 bundle (see
+ROADMAP.md #72) — every non-reserved `.md` file here starts with a YAML
+frontmatter block. `type` is the one required field
+(`SystemValidator`, `ObjectValidator`, or `Guide` for this file);
+`title`, `description`, `tags` (lowercase-kebab list), and `timestamp`
+(quoted `"YYYY-MM-DD"`, the date the knowledge last changed) are
+recommended. `resource:` is deliberately omitted across this bundle —
+a validator is abstract knowledge, and its executable check already
+lives in the body. `index.md` and `log.md` are OKF reserved filenames
+(directory listing / change history) and live at the `validators/` root
+only — never inside `system/`, where they'd be mistaken for validators.
+When adding a new validator, add a matching entry to `index.md` and a
+dated line to `log.md`.
+
+### Body
+
 Each object validator is free-form markdown, but a consistent shape helps
 skimming:
 
 ```markdown
+---
+type: ObjectValidator
+title: <Object> validator
+description: <one-sentence summary of the findings>
+tags: [object-validator, <object-name>]
+timestamp: "<YYYY-MM-DD>"
+---
 # <Object> validator
 
 ## <Short name for the gotcha>

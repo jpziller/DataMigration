@@ -1,3 +1,13 @@
+---
+type: SystemValidator
+title: Live Migration Key Validation Rule (Hard Rule 12)
+description: Confirm the migration-key field is genuinely flagged External
+  ID and Unique in the target org's live describe() before any load --
+  never assumed from the mapping doc's field name or the transform's
+  column name, since org state is the one side that can silently drift.
+tags: [system-validator, hard-rule-12, external-id, describe]
+timestamp: "2026-07-11"
+---
 # Live Migration Key Validation Rule (System Validator)
 
 CLAUDE.md Hard Rule #12. Applies to every object before its first

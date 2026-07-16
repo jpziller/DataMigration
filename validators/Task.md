@@ -1,3 +1,13 @@
+---
+type: ObjectValidator
+title: Task validator
+description: Object-specific findings for Task -- custom fields deploy on
+  Activity not Task, WhatId is genuinely polymorphic (~90 targets), the
+  IsRecurrence/Recurrence* cluster is one interdependent unit that can't
+  be mocked field-by-field, and Subject is type combobox not picklist.
+tags: [object-validator, task, activity, polymorphic-lookup]
+timestamp: "2026-07-13"
+---
 # Task validator
 
 ## Custom fields deploy on Activity, not Task
