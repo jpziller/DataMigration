@@ -4768,7 +4768,7 @@ required tooling" and nothing has needed one yet) held as designed. This
 entry still exists so the full proposal, and its real build history,
 survives past the conversation that produced it.
 
-## 73. dbt evaluation for the `sql/transformations/` layer (spike complete, recommendation made — not adopted, decision pending)
+## 73. dbt evaluation for the `sql/transformations/` layer (spike complete — decision: not adopting for now, see below)
 
 Evaluated `dbt-core` as a candidate replacement for the numbered-script
 `sql/transformations/` convention, across all three `sql_dialect.py`
@@ -4878,9 +4878,28 @@ one), or dbt adoption itself waits on `dbt-sqlite` publishing a
 `dbt-adapters` pin compatible with a working `dbt-core` line. This is a
 decision to make explicitly, not default into by omission.
 
-**Status: spike complete, not adopted.** This entry captures the
-recommendation for a real go/no-go decision; nothing in `sql/
-transformations/`, `cli.py`, or any shipped file has changed. The spike's
-own exploratory scaffolding (extra venvs, `models/`, `dbt_project.yml`,
-`.dbt-profiles/`) stays on `worktree-spike-dbt-evaluation`, not merged
-into `main`.
+**Decision (2026-07-16): not adopting, for now — the SQL Server/Postgres
+recommendation above is not the live plan.** Explicit reasoning, from the
+user directly: replacing `sql/transformations/` outright is a big shift
+for this framework, not something to half-commit to — no appetite for a
+"partial solution" where SQL Server/Postgres run on dbt while SQLite
+stays on the hand-written path indefinitely (or where SQL Server/Postgres
+themselves run on a still-prerelease `dbt-core` line rather than a
+genuinely stable one), and real doubt that the gains actually justify the
+disruption. This is a stricter bar than the recommendation above
+considered: not "adopt for two of three backends now," but "wait until
+all three backends could plausibly be clean at once" — i.e., revisit only
+once `dbt-core` 1.12.0 reaches a real stable release *and* `dbt-sqlite`
+(or an equivalent) publishes a `dbt-adapters` pin compatible with it. Even
+then, adoption isn't automatic — the ROI question raised here (does this
+genuinely gain enough over the numbered-script convention to justify
+replacing it project-wide) stays open and should be re-asked at that
+point, not assumed answered by this spike.
+
+**Status: spike complete, not adopted, not being pursued further right
+now.** Nothing in `sql/transformations/`, `cli.py`, or any shipped file
+has changed. The spike's own exploratory scaffolding (extra venvs,
+`models/`, `dbt_project.yml`, `.dbt-profiles/`) stays on
+`worktree-spike-dbt-evaluation`, not merged into `main` — left in place
+as a real, reproducible reference for whenever this gets revisited,
+rather than deleted.
