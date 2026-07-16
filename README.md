@@ -198,7 +198,11 @@ reference/field_synonyms.json                           auto-mapping synonym the
 sql/functions/                                          reusable T-SQL library
 validators/system/                                       named checks behind hard rules 6/7/12/15
                                                          (validators/<Object>.md grows per-project,
-                                                         same "grows via real corrections" principle)
+                                                         same "grows via real corrections" principle;
+                                                         OKF v0.1 bundle, roadmap #72)
+okf/                                                     second OKF v0.1 bundle -- external/industry
+                                                         knowledge (official Salesforce docs, migration
+                                                         patterns), describe-and-link not duplicated
 force-app/                                               reusable field metadata pattern
                                                          (MigrationID__c + its FLS grant)
 docs/, CLAUDE.md, README.md, ROADMAP.md                  documentation

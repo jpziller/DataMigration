@@ -1234,6 +1234,27 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   object files grow project-by-project, same "grows via real corrections"
   principle as the field-synonym thesaurus below — never rediscovered
   fresh on a second project once it's been written down once.
+- `okf/` — the second OKF v0.1 bundle (roadmap #72), for external/
+  industry knowledge that isn't a client engagement's own SQL mirror-DB
+  artifact: official Salesforce documentation, target-platform data
+  models, and migration patterns. Template content, always committed.
+  Describe-and-link, never duplicate wholesale — a concept's `resource:`
+  points at the real source document rather than copying it in, per the
+  OKF spec's own `resource:`/`# Citations` convention (confirmed against
+  `data_cloud.py`/ROADMAP #18-19's existing "link and summarize, don't
+  inline-copy" precedent for external Salesforce docs). First subject
+  area: `okf/npsp-to-npc/` — NPSP-to-Agentforce-Nonprofit (Nonprofit
+  Cloud) migration guidance, built from Salesforce's own official
+  migration guide and field-mapping workbook. Deliberately doesn't try to
+  force this Salesforce-object-to-Salesforce-object mapping data through
+  `mapping_doc.py`/`auto_mapper.py` (both hard-require a real, profiled
+  SQL source table — confirmed by reading their code, not assumed; this
+  content has no SQL table behind it at all) or `load_order.py` (strictly
+  `describe()`-driven against a live org, no static-sequence input hook)
+  — those tools do their real job correctly; this data just isn't their
+  input shape. No reader/CLI command for `okf/` itself yet, deliberately
+  — OKF's own design point is "no required tooling," and nothing has
+  needed one so far.
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always
