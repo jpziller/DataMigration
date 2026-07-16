@@ -10,8 +10,8 @@ Check validators for `$ARGUMENTS` (an object name).
 3. If nothing exists yet for this object and this build turns up a real,
    object-specific gotcha, write it into `validators/<Object>.md` before
    moving on — see `validators/README.md` for the format, including the
-   required OKF frontmatter (`type: ObjectValidator` plus
-   title/description/tags/timestamp) and the matching `index.md`/`log.md`
-   entries every new validator needs.
+   required OKF frontmatter (at minimum `type: ObjectValidator`;
+   title/description/tags/timestamp are recommended, not required) and
+   the matching `index.md`/`log.md` entries every new validator needs.
 
 Read-only, no confirmation needed.

@@ -18,13 +18,11 @@ import validators_lookup as vl
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BUNDLE_ROOTS = ("validators", "okf")
-_RESERVED = {"index.md", "log.md"}
-
-
-def _existing_bundles():
-    """Bundle roots that actually exist -- okf/ lands in a later PR than
-    validators/, and this test should pass at every commit in between."""
-    return [_REPO_ROOT / name for name in _BUNDLE_ROOTS if (_REPO_ROOT / name).is_dir()]
+# Reused from validators_lookup.py itself, not redefined -- found in
+# review: a second, independent copy here could drift silently if a
+# third reserved filename is ever added to the module this test is
+# supposed to be gating.
+_RESERVED = vl._RESERVED
 
 
 def _concept_files(bundle_root):
@@ -39,8 +37,8 @@ def _reserved_files(bundle_root):
     )
 
 
-def test_at_least_one_bundle_exists():
-    assert _existing_bundles(), "validators/ should always exist in this repo"
+def test_validators_bundle_always_exists():
+    assert (_REPO_ROOT / "validators").is_dir(), "validators/ should always exist in this repo"
 
 
 @pytest.mark.parametrize("bundle_name", _BUNDLE_ROOTS)

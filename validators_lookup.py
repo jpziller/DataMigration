@@ -38,7 +38,16 @@ def parse_frontmatter(text):
     if not text.startswith("---\n"):
         return {}, text
     end = text.find("\n---\n", len("---\n") - 1)
-    if end == -1:
+    if end != -1:
+        body = text[end + len("\n---\n"):]
+    elif text.endswith("\n---"):
+        # The closing fence is the very last thing in the file, with no
+        # trailing newline after it (found in review: the \n---\n search
+        # alone silently treated this as "no frontmatter at all" instead
+        # of a real, just-untrimmed closing fence).
+        end = len(text) - len("\n---")
+        body = ""
+    else:
         return {}, text
     try:
         meta = yaml.safe_load(text[len("---\n"):end])
@@ -46,7 +55,7 @@ def parse_frontmatter(text):
         return {}, text
     if not isinstance(meta, dict):
         return {}, text
-    return meta, text[end + len("\n---\n"):]
+    return meta, body
 
 
 def list_system_validators(validators_dir="validators"):
@@ -73,9 +82,16 @@ def object_validator_path(object_name, validators_dir="validators"):
     object_name="../../../etc/passwd" escape validators_dir via
     os.path.join(); low real-world severity today since every caller
     passes a CLI-argument object name, but cheap to close outright rather
-    than lean on that being true forever)."""
+    than lean on that being true forever). Also rejects a bare OKF
+    reserved filename (found in review: without this, "index"/"log" would
+    resolve to validators/index.md / validators/log.md -- the bundle
+    manifest and change log, not a real object validator -- and get
+    displayed by check-validators as if they were one; no real Salesforce
+    object is named "index" or "log")."""
     if not object_name or "/" in object_name or "\\" in object_name or ".." in object_name:
         raise ValueError(f"Invalid object name for validator lookup: {object_name!r}")
+    if f"{object_name.lower()}.md" in _RESERVED:
+        return None
     path = os.path.join(validators_dir, f"{object_name}.md")
     return path if os.path.isfile(path) else None
 

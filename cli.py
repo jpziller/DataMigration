@@ -207,9 +207,20 @@ def check_validators_cmd(object_name):
     meta, body = vl.parse_frontmatter(content)
     click.echo(f"validators/{object_name}.md:")
     if meta:
-        click.echo(f"  Type: {meta.get('type', '(none)')}")
-        if meta.get("tags"):
-            click.echo(f"  Tags: {', '.join(meta['tags'])}")
+        # `meta.get('type') or '(none)'` rather than the two-arg form --
+        # found in review: dict.get(key, default) only substitutes
+        # default when the key is ABSENT, not when it's present with
+        # value None (a hand-written "type:" with nothing after the
+        # colon parses to None, not a missing key).
+        click.echo(f"  Type: {meta.get('type') or '(none)'}")
+        tags = meta.get("tags")
+        if isinstance(tags, list) and tags:
+            click.echo(f"  Tags: {', '.join(str(t) for t in tags)}")
+        elif tags:
+            # Found in review: a hand-authored "tags: sometag" (bare
+            # scalar, not a YAML list) used to either join the string's
+            # own characters or crash outright on a non-string scalar.
+            click.echo(f"  Tags: {tags}")
         if meta.get("resource"):
             click.echo(f"  Resource: {meta['resource']}")
         click.echo("")
