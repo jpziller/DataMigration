@@ -34,6 +34,9 @@ constraints on the new fundraising objects.
 
 # Migration patterns
 
+* [New org, not an in-place upgrade](new-org-vs-in-place.md) - Salesforce
+  strongly recommends a brand-new target org, never an in-place NPSP
+  upgrade.
 * [Households to Party Relationship Groups](households-to-party-relationship-groups.md)
 * [Opportunity routing](opportunity-routing.md) - the Gift
   Transaction / Gift Commitment / Opportunity three-way split.

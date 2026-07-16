@@ -29,9 +29,11 @@ the same target platform throughout this bundle.
 1. Introduction (purpose, audience, document history)
 2. Migration Overview -- AFNP's design philosophy (built on the core
    Salesforce platform, like other Industry Clouds, rather than a
-   separate managed package), migration approach, assumptions (new org
-   vs. in-place, disregarded/omitted fields are deliberate, software-
-   agnostic, assumes current-version NPSP feature usage)
+   separate managed package), migration approach, assumptions (**new org
+   vs. in-place** -- see
+   [new-org-vs-in-place.md](new-org-vs-in-place.md), disregarded/omitted
+   fields are deliberate, software-agnostic, assumes current-version
+   NPSP feature usage)
 3. Business Process Audit -- user permissions/record access,
    integrations/customizations/third-party packages, objects/fields/
    record types
