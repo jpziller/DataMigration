@@ -304,6 +304,42 @@ keeping it in git per-object as you build it out.)
   including the Data-Cloud-specific `cdp_*` scopes if you need those too.
 - **`password`** — username + password + security token. Dev fallback only.
 
+### Two-org migrations: source and target without editing `.env`
+
+A real migration is a two-org problem — `replicate` reads from a source
+org, `bulkops` writes to a target org — but the settings above are a
+single flat set. Rather than hand-editing `SF_ORG_ALIAS` (or, for
+jwt/password mode, every credential field) on every flip between orgs, any
+`SF_*` setting can be overridden per-role by suffixing the key with
+`_SOURCE` or `_TARGET` in `.env`:
+
+```
+SF_ORG_ALIAS_SOURCE=NPSP_SOURCE
+SF_ORG_ALIAS_TARGET=NPC_TARGET
+```
+
+Only set the fields that actually differ between the two orgs — cli mode
+usually just needs the alias overridden; jwt/password mode can override
+`SF_USERNAME_*`/`SF_CONSUMER_KEY_*`/etc. too, if source and target use
+different connected apps or even different auth modes entirely. Anything
+left unsuffixed falls back to the plain value above, so an existing
+single-org `.env` needs no changes to keep working.
+
+Then swap which org a command targets per-invocation with a global `--org`
+flag, before the subcommand name:
+
+```
+.venv/Scripts/python.exe cli.py --org source replicate Contact
+.venv/Scripts/python.exe cli.py --org target bulkops Contact upsert Contact_Load --external-id Legacy_Id__c --email-deliverability system-email-only
+```
+
+`--org-alias <alias>` is a raw one-off override of just the alias (cli
+mode) — beats both `--org` and `.env`, for a quick ad hoc check against a
+third org without touching config at all. Omitting both flags is
+byte-for-byte the pre-existing behavior — plain, unsuffixed `.env`
+settings. See `resolve_org_settings()` in `config.py` and `_ctx()` in
+`cli.py`.
+
 ---
 
 ## SQL backend: SQL Server, SQLite, or PostgreSQL

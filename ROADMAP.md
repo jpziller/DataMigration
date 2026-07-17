@@ -4942,3 +4942,83 @@ has changed. The spike's own exploratory scaffolding (extra venvs,
 `worktree-spike-dbt-evaluation`, not merged into `main` — left in place
 as a real, reproducible reference for whenever this gets revisited,
 rather than deleted.
+
+## 75. Two-org config: source/target org overrides + `--org`/`--org-alias` (BUILT 2026-07-17)
+
+Discovered live during the NPSP-to-NPC proof-of-concept work: this
+framework's `.env` carries exactly one flat set of `SF_*` settings, so a
+genuine two-org migration (`replicate` reading a source org, `bulkops`
+writing a target org) meant hand-editing `SF_ORG_ALIAS` in `.env` on every
+flip between them — real friction, made worse by `.env` writes being
+consistently blocked at the tool-permission level in this session, forcing
+a manual edit every single time. The user framed this explicitly as a
+recurring need "for many clients," not a one-off, and proposed two
+concrete options: separate `SF_ORG1_ALIAS`/`SF_ORG2_ALIAS` variables, or
+some other swappable SOURCE/TARGET mechanism.
+
+**Design chosen**: a role-suffix overlay rather than a hardcoded pair of
+variables, since real projects will differ in which fields actually need
+overriding (cli mode only needs the alias; jwt/password mode may need the
+whole credential set if source and target use different connected apps, or
+even different auth modes — confirmed as a real possibility this same
+session, once NPSP_SOURCE's API-only user turned out to need different
+handling than a browser-authed cli session). Any existing `SF_*` key in
+`.env` can be suffixed `_SOURCE`/`_TARGET` (e.g. `SF_ORG_ALIAS_SOURCE`,
+`SF_AUTH_MODE_TARGET`) — only the fields that actually differ need setting;
+everything else falls back to the plain, unsuffixed value, so an existing
+single-org `.env` needs zero changes to keep working.
+
+**`config.py`**: new `resolve_org_settings(s: Settings, role: str) ->
+Settings` (role is `"source"` or `"target"`) — reads every
+`SF_<FIELD>_<ROLE>` env var live (not baked into `Settings`'s own
+class-definition-time defaults, since the role isn't known until a command
+actually runs) and returns a `dataclasses.replace()`'d copy with only the
+set fields overridden. `_SF_FIELD_ENV_KEYS` maps all eight `sf_*` fields
+(auth mode, alias, username, consumer key, private key file, domain,
+password, security token) — the overlay isn't alias-only.
+
+**`cli.py`**: the `cli` group gained two global options, usable before any
+subcommand name:
+- `--org {source,target}` — resolves via `resolve_org_settings()`.
+- `--org-alias <alias>` — a raw one-off override of just the alias (cli
+  mode), beating both `--org` and `.env`, for a quick ad hoc check against
+  a third org without touching config at all — exactly the "check this org,
+  no wait check that one" pattern this same session hit repeatedly while
+  scanning both orgs before any seeding work started.
+
+`_ctx()` (the one shared connection-establishing seam every command already
+routed through) reads both via `click.get_current_context().find_root().params`
+and applies them before calling `connect_salesforce()`/`make_engine()` —
+no per-command signature changes needed across the 50+ commands that call
+`_ctx()`, since the override lives at the group level, not the subcommand
+level. When either flag is used, `_ctx()` echoes which org is actually in
+effect to stderr (`[org: target -> alias NPC_TARGET_v2]`) — a real org
+mismatch (writing to the wrong org) is exactly the kind of mistake Hard
+Rule 2 exists to prevent, so this stays visible rather than silent. Neither
+flag given → byte-for-byte the pre-existing behavior.
+
+**Usage**:
+```
+.venv/Scripts/python.exe cli.py --org source replicate Contact
+.venv/Scripts/python.exe cli.py --org target bulkops Contact upsert Contact_Load --external-id Legacy_Id__c --email-deliverability system-email-only
+.venv/Scripts/python.exe cli.py --org-alias SCRATCH_ORG describe Account
+```
+
+**Tests**: `tests/test_config.py` (new) covers `resolve_org_settings()`
+directly — fallback to base when no role suffix is set, role-suffixed
+overrides applying independently for source vs. target, auth-mode +
+credential overrides together (not just the alias), the original `Settings`
+instance never being mutated, and an unknown role raising. `tests/test_cli.py`
+gained three `CliRunner`-based tests confirming `--org`/`--org-alias`
+actually thread through `_ctx()` into the `Settings` object passed to
+`connect_salesforce()`, and that omitting both flags leaves settings
+identical to `get_settings()`'s own plain result. Full suite: 383 passed, 6
+skipped (no regressions).
+
+**Docs**: `.env.example` and `README.md`'s Auth modes section both document
+the `_SOURCE`/`_TARGET` suffix convention and the `--org`/`--org-alias`
+flags.
+
+Numbered #75 rather than #74 since PR #9 (roadmap #74, the `bulk_op()`
+writeback race fix) was still open, unmerged, at the time this branch was
+cut from `main` — expected to land first.
