@@ -12,7 +12,17 @@ file and a scratch script) before being consolidated into this module.
 Only `insert` is implemented, since that's the only operation anything
 built on this so far has needed -- extend `StubBulkHandler` with
 update/upsert/delete simulation only once something actually exercises it.
+
+`StubBulkDownloadHandler`/`StubSF.download_mode` (bottom of this file)
+stub replicate.py's read side (`sf.bulk2.<Object>.download()`) instead --
+a previously-untested code path (found in review: replicate.py had zero
+test coverage at all before this), needed for a real, honest
+integration test of subset_replication.py (roadmap #34) rather than
+only unit-testing its pure WHERE-building logic.
 """
+import os
+import re
+
 import pandas as pd
 
 
@@ -201,3 +211,95 @@ class StubSF:
 
     def __getattr__(self, name):
         return StubObjectDescribe(self._describe_by_object[name])
+
+
+def _split_top_level(expr, delimiter):
+    """Split expr on delimiter, but only where paren-depth is 0 -- so a
+    delimiter inside a parenthesized group is never treated as a split
+    point. Minimal, built only to match this project's own generated
+    WHERE clauses (replicate.py's `where`, subset_replication.py's
+    _build_child_where/_in_clause) -- not a general SOQL parser."""
+    parts, depth, start = [], 0, 0
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and expr[i:i + len(delimiter)] == delimiter:
+            parts.append(expr[start:i])
+            i += len(delimiter)
+            start = i
+            continue
+        i += 1
+    parts.append(expr[start:])
+    return parts
+
+
+def _eval_soql_where(where_clause, row):
+    """True/False: does row (a dict of column -> string value) match
+    where_clause? Supports 'A AND B', 'A OR B' (top-level only -- this
+    project's own generators never mix precedence), redundant enclosing
+    parens, 'FIELD IN (...)', and 'FIELD = 'value''/'FIELD LIKE
+    'pattern%''. Raises on anything else, deliberately, rather than
+    silently matching or not matching an unsupported shape."""
+    expr = where_clause.strip()
+
+    or_parts = _split_top_level(expr, " OR ")
+    if len(or_parts) > 1:
+        return any(_eval_soql_where(p, row) for p in or_parts)
+    and_parts = _split_top_level(expr, " AND ")
+    if len(and_parts) > 1:
+        return all(_eval_soql_where(p, row) for p in and_parts)
+
+    atom = expr.strip()
+    while atom.startswith("(") and atom.endswith(")"):
+        atom = atom[1:-1].strip()
+
+    m = re.match(r"^(\w+)\s+IN\s+\((.*)\)$", atom)
+    if m:
+        field, raw_values = m.groups()
+        values = {v.strip().strip("'") for v in raw_values.split(",")}
+        return row.get(field) in values
+    m = re.match(r"^(\w+)\s*=\s*'(.*)'$", atom)
+    if m:
+        field, value = m.groups()
+        return row.get(field) == value
+    m = re.match(r"^(\w+)\s+LIKE\s+'(.*)'$", atom)
+    if m:
+        field, pattern = m.groups()
+        regex = "^" + re.escape(pattern).replace("%", ".*") + "$"
+        return bool(re.match(regex, row.get(field) or ""))
+    raise ValueError(f"Stub SOQL WHERE evaluator doesn't understand: {atom!r}")
+
+
+class StubBulkDownloadHandler:
+    """Stub for sf.bulk2.<Object>.download(soql, path, max_records) --
+    replicate.py's read side. Applies a minimal WHERE/LIMIT evaluator
+    (see _eval_soql_where/_split_top_level above) against a fixed
+    in-memory row set and writes the filtered/limited result as one CSV
+    part file into path, real Bulk-API-2.0-CSV-part shape (all values
+    strings). Not a general SOQL engine -- built only to understand the
+    shapes this project's own code actually generates."""
+    def __init__(self, rows):
+        # rows: list of dicts, e.g. [{"Id": "001A", "Name": "Acme", ...}]
+        self._rows = rows
+
+    def download(self, soql, path=None, max_records=None):
+        select_match = re.match(r"SELECT\s+(.*?)\s+FROM\s+\w+", soql, re.IGNORECASE)
+        columns = [c.strip() for c in select_match.group(1).split(",")]
+
+        where_match = re.search(r"\bWHERE\b(.*?)(\bLIMIT\b|$)", soql, re.IGNORECASE | re.DOTALL)
+        where_clause = where_match.group(1).strip() if where_match and where_match.group(1).strip() else None
+        limit_match = re.search(r"\bLIMIT\s+(\d+)\b", soql, re.IGNORECASE)
+        limit = int(limit_match.group(1)) if limit_match else None
+
+        matched = [r for r in self._rows if where_clause is None or _eval_soql_where(where_clause, r)]
+        if limit is not None:
+            matched = matched[:limit]
+
+        os.makedirs(path, exist_ok=True)
+        rows_out = [{c: r.get(c, "") for c in columns} for r in matched]
+        df = pd.DataFrame(rows_out, columns=columns)
+        df.to_csv(os.path.join(path, "part-0001.csv"), index=False)

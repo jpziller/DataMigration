@@ -69,7 +69,7 @@ summarizes.
 | 31 | Target-count/scaled mock data generation | Not built, builds on #6 | — | Idea: say "keep generating mock Accounts until the org has 50,000 total" instead of a fixed count every run — useful for realistic load/performance testing. |
 | 32 | Bulk test-data cleanup by filter | **Built** | `bulkops <Object> delete --where` (+ `--dry-run`) | "Delete every mock record I created for this test" as one command: a SOQL WHERE clause resolves the matching Ids into `<Object>_Purge` and deletes them through the normal `bulkops` path (batch sizing, logging, run-book sync all apply). `--dry-run` previews the matched count first; no delete-everything default; standard Recycle-Bin-recoverable delete only. |
 | 33 | Scratch org lifecycle + auto-seeded test data | Not built, deliberately deferred | — | Idea: let this framework spin up a disposable Salesforce scratch org and automatically fill it with mock data, instead of assuming an org already exists. |
-| 34 | Relationship-consistent subset replication | Not built, builds on #2 | — | Idea: pull a small, realistic *slice* of an org — e.g. 50 pilot Accounts and everything genuinely related to them — instead of either replicating everything or hand-coordinating a `--where` filter across every object yourself. |
+| 34 | Relationship-consistent subset replication | **Built** | `replicate-subset <Root> <Related...> [--where] [--limit] [--schema] [--raw]` | Pull a small, realistic *slice* of an org — e.g. 50 pilot Accounts and everything genuinely related to them — instead of either replicating everything or hand-coordinating a `--where` filter across every object yourself. Every related object is auto-constrained to rows whose in-scope parent lookup(s) point at Ids actually just replicated. |
 | 35 | Relative date shifting utility | Not built | — | Idea: a helper that shifts old dates forward so migrated data still makes sense relative to today — e.g. a contract end date that's already in the past wouldn't make sense to a Flow expecting a future date. |
 | 36 | RecordType DeveloperName resolution for cross-org migration | **Built**, hard rule 15 | `resolve-record-types <Object>` | Queries the target org's real RecordType rows and writes them into `dbo.RecordTypeMap`, a plain reference table the transform `JOIN`s against by `DeveloperName` to populate `RecordTypeId` — never a raw, org-specific Id hand-copied from the source. Deliberately a T-SQL reference table (chosen directly over automatic `bulkops` resolution), matching `AddBulkLoadSortColumn`'s convention. |
 | 37 | CLI alternative to Data Cloud's Profile Explorer | **Built** — same command as #18's Unified Profile finding | `data-cloud-profile` | Look up Unified Profile data (a specific person's attributes) via one command instead of Data Cloud Setup's own multi-click Profile Explorer (pick a Data Space, then an entity, then an attribute, repeatedly) — no Data Space parameter needed at all, confirmed live. |
@@ -2194,7 +2194,7 @@ single-org-assumed model without dedicated scoping. Revisit if/when
 disposable, pre-seeded test orgs become a real recurring need rather
 than a nice-to-have.
 
-## 34. Relationship-consistent subset replication (not built, builds on #2)
+## 34. Relationship-consistent subset replication (BUILT 2026-07-17)
 
 Problem: `replicate` pulls each object independently (optionally
 filtered by `--where`), with no way to say "pull a representative slice
@@ -2222,6 +2222,45 @@ real Ids>)` — one command producing a genuinely consistent,
 relationship-intact subset across the whole object graph, instead of
 manually-coordinated per-object `--where` clauses that are easy to get
 subtly wrong.
+
+**Built as `replicate-subset <RootObject> <RelatedObjects...> [--where]
+[--limit] [--schema] [--raw]`** (`subset_replication.py`), exactly the
+idea above — `load_order.build_dependency_edges()`/`compute_load_order()`
+reused in-memory only, the same way `snowfakery_data.py` already does (no
+`dbo.ObjectDependency` persistence needed for this either). Real design
+calls made along the way, not just "done":
+- The root object doesn't need to be topologically first — every object
+  is processed in `compute_load_order()`'s own parent-first sequence; the
+  root's `--where`/`--limit` apply wherever it naturally falls in that
+  order, everything else gets its dependency-derived constraint instead.
+- **Polymorphic lookups get correct OR semantics for free**: grouping a
+  child's edges by field first (not by parent) means a field with
+  multiple in-scope, already-replicated targets (e.g. `Task.WhatId` →
+  Account or Opportunity) naturally unions every target's real Ids under
+  that one field — no separate polymorphism-detection pass needed, unlike
+  `snowfakery_data.py`'s own generation path, which does need one.
+- **Distinct fields on the same child combine with AND** — a deliberate,
+  documented scope choice (a row must satisfy every named in-scope
+  relationship, not just one), not the only possible interpretation.
+- **An empty parent subset skips the child's API call entirely** (an
+  empty SOQL `IN ()` is invalid, and the result is already known to be
+  zero) rather than constructing a fake always-false condition — reported
+  as `"0 rows (parent subset empty)"`, not silent.
+- An object with no in-scope, already-replicated parent among the names
+  given replicates fully unconstrained, reported as `"no relationship
+  constraint applied"` — never a silent surprise.
+- `replicate.py` itself gained one small, backward-compatible addition:
+  a `limit` param on `replicate()`, appended as a SOQL `LIMIT`, mirroring
+  how `where` already worked — only the root's own call ever passes it.
+
+**Found and closed in the same pass**: `replicate.py` had **zero**
+existing test coverage before this — `tests/stub_salesforce.py` had no
+`.download()` stub at all, so the describe→SOQL→Bulk-API-2.0-CSV→`to_sql`
+pipeline was never exercised by anything. Added `StubBulkDownloadHandler`
+plus a minimal (not general-purpose) SOQL WHERE/LIMIT evaluator good
+enough for the shapes this project's own code actually generates, so this
+feature — and `replicate.py`'s own read side — got a real SQLite
+integration test, not just unit tests of the pure WHERE-building logic.
 
 ## 35. Relative date shifting utility (not built)
 

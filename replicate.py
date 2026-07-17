@@ -48,7 +48,7 @@ def create_table(engine, object_name, desc, schema="dbo", raw=False):
 
 
 def replicate(sf, engine, object_name, stage_dir, schema="dbo",
-              where=None, raw=False, chunksize=50000):
+              where=None, limit=None, raw=False, chunksize=50000):
     desc = getattr(sf, object_name).describe()
     cols = _query_columns(desc)
     bool_cols = _boolean_columns(desc)
@@ -59,6 +59,8 @@ def replicate(sf, engine, object_name, stage_dir, schema="dbo",
     soql = f"SELECT {', '.join(cols)} FROM {object_name}"
     if where:
         soql += f" WHERE {where}"
+    if limit is not None:
+        soql += f" LIMIT {int(limit)}"
 
     out_dir = os.path.join(stage_dir, object_name)
     os.makedirs(out_dir, exist_ok=True)

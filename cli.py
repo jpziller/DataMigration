@@ -6,6 +6,7 @@ Examples:
     python cli.py dump-describe Account
     python cli.py replicate Account
     python cli.py replicate Contact --where "CreatedDate = LAST_N_DAYS:30" --raw
+    python cli.py replicate-subset Account Contact Opportunity Case --where "Name LIKE 'Pilot%'" --limit 50
     python cli.py bulkops Account insert Account_Load --key-column LoadId
     python cli.py bulkops Contact upsert Contact_Load --external-id Legacy_Id__c
     python cli.py bulkops-retry Contact_Load  # copies failed rows into Contact_Load_Retry for resubmission
@@ -37,6 +38,7 @@ from sf_client import connect_salesforce
 from sql_client import make_engine
 import metadata as md
 import replicate as rep
+import subset_replication as subrep
 import bulkops as bo
 import sfdmu_bridge as sfdmu
 import batch_advisor as ba
@@ -251,6 +253,33 @@ def replicate_cmd(object_name, where, schema, raw):
     n = rep.replicate(sf, engine, object_name, s.stage_dir,
                       schema=schema, where=where, raw=raw)
     click.echo(f"Replicated {n} rows into {schema}.{object_name}")
+
+
+@cli.command("replicate-subset")
+@click.argument("root_object")
+@click.argument("related_objects", nargs=-1)
+@click.option("--where", default=None, help="SOQL WHERE clause for root_object only (no 'WHERE').")
+@click.option("--limit", default=None, type=int, help="Row-count cap for root_object only.")
+@click.option("--schema", default="dbo")
+@click.option("--raw", is_flag=True, help="All columns NVARCHAR(MAX); CAST later in T-SQL.")
+def replicate_subset_cmd(root_object, related_objects, where, limit, schema, raw):
+    """Replicate ROOT_OBJECT (filtered by --where/--limit) plus every object
+    in RELATED_OBJECTS, each automatically constrained to rows related to
+    what was actually replicated -- a relationship-consistent subset across
+    the whole object graph instead of independently hand-filtered pulls
+    that risk an orphaned child row (roadmap #34). ROOT_OBJECT doesn't need
+    to be a topological root; the dependency graph among every named object
+    is computed the same way analyze-load-order does. An object with no
+    in-scope, already-replicated parent among the names given replicates
+    unconstrained -- reported below, not a silent surprise."""
+    s, sf, engine = _ctx()
+    counts, notes = subrep.replicate_subset(
+        sf, engine, root_object, list(related_objects), s.stage_dir,
+        schema=schema, where=where, limit=limit, raw=raw,
+    )
+    for object_name, n in counts.items():
+        note = f" ({notes[object_name]})" if object_name in notes else ""
+        click.echo(f"Replicated {n} rows into {schema}.{object_name}{note}")
 
 
 @cli.command("import-parquet")

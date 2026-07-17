@@ -176,6 +176,24 @@ venv may not be active in a fresh shell:
                 configured yet; querying a specific Data Graph's data is written in `data_cloud.py`
                 but not yet live-verified, no CLI command wired up for it until it is.)
 - Replicate:    `.venv/Scripts/python.exe cli.py replicate Account [--where "..."] [--raw]`
+- Relationship-consistent subset replicate (roadmap #34): `.venv/Scripts/python.exe cli.py
+                replicate-subset Account Contact Opportunity Case --where "Name LIKE 'Pilot%'" --limit 50`
+                (a scoped/phased migration rehearsal — "the first 50 pilot Accounts and everything
+                genuinely related to them" — without hand-writing matching `--where` clauses across
+                every object, which risks an orphaned child row if the filters don't line up exactly.
+                First positional is the root object, gets `--where`/`--limit`; every other named object
+                is automatically constrained to rows whose in-scope parent lookup(s) point at real Ids
+                this same run actually just replicated — read back from the mirror table itself, not a
+                second live-org round-trip. Reuses `load_order.py`'s own dependency graph in-memory only
+                (the same one `analyze-load-order`/`snowfakery_data.py` already reuse — no
+                `dbo.ObjectDependency` persistence needed here). A polymorphic lookup (e.g. `Task.WhatId`)
+                naturally gets OR semantics — every in-scope, already-replicated parent's Ids get unioned
+                under that one field, no separate detection step needed. Two distinct lookup fields on the
+                same child (e.g. a hypothetical `AccountId` + `OwnerId` both in scope) combine with AND — a
+                deliberate scope choice, not the only possible interpretation. The root doesn't need to be
+                topologically first; every other object just gets its dependency-derived constraint (or
+                none, reported clearly, if no in-scope parent was named/replicated). See
+                `subset_replication.py` for the full design account.)
 - Import file:  `.venv/Scripts/python.exe cli.py import-parquet path/to/file.parquet SourceAccounts [--append]`
                 (Parquet -> typed SQL Server table, column types inferred from the file's own
                 schema via `pyarrow` — no coercion step needed since Parquet is already typed,
@@ -799,6 +817,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/generate-mock-data`, `/generate-related-mock-data`, `/generate-mapping-doc`,
 `/check-mapping-balance`, `/auto-map`, `/generate-solution-doc`,
 `/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
+`/replicate-subset`,
 `/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
 `/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
@@ -1127,6 +1146,20 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
 - `replicate.py`, `bulkops.py`, `type_map.py`, `metadata.py` — org ↔ SQL
   movement and SF type mapping. `type_map.py` is the SQL Server flavor;
   `sql_dialect.py`'s `SqliteDialect.sf_type_to_sql()` is SQLite's.
+- `subset_replication.py` — `replicate-subset`'s logic (roadmap #34):
+  reuses `load_order.build_dependency_edges()`/`compute_load_order()` the
+  same in-memory-only way `snowfakery_data.py` already does (no
+  `dbo.ObjectDependency` persistence) to replicate a root object's subset
+  first, then automatically constrain every other named object's
+  `replicate.replicate()` call to rows whose in-scope parent lookup(s)
+  point at Ids actually just replicated — read back from the mirror table
+  itself via `_read_replicated_ids()`, not a second live-org round-trip.
+  `_build_child_where()` groups a child's edges by field first, so a
+  polymorphic lookup naturally unions every in-scope parent's Ids under
+  one field (correct OR semantics, no separate detection pass); distinct
+  fields on the same child combine with AND. `replicate.py` itself gained
+  one small addition for this — a `limit` param on `replicate()`,
+  appended as a SOQL `LIMIT`, mirroring how `where` already worked.
 - `sfdmu_bridge.py` — the `--engine sfdmu` alternate load engine (opt-in,
   `bulkops` defaults to `python`/`bulk_op()` unchanged). Reuses
   `bulkops.py`'s own `_derive_sent_columns()`/`_preflight_check()`/
