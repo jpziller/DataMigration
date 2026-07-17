@@ -60,6 +60,21 @@ for you, and it'll stick for future sessions too.
   `add-migration-run-book-pass` rather than a fresh `generate-migration-run-book`, so the
   recipe (Items/Script names/dependencies/Critical flags) carries forward
   instead of being retyped. See `ROADMAP.md` #16 and `migration_run_book.py`.
+- **Offer a post-mortem once a migration project reaches a real
+  completion milestone** — a full pass built, loaded, and verified, not
+  necessarily final production cutover; a proof-of-concept or a completed
+  Dev/UAT pass both count. Copy `docs/MIGRATION_POSTMORTEM_TEMPLATE.md`
+  to `postmortems/<YYYY-MM-DD>-<short-slug>.md` and fill it in for real —
+  what went well/poorly, reusable artifacts produced (and where they now
+  live), target-platform-only knowledge extracted into its own OKF
+  subject area if one doesn't exist yet, process/tooling gaps written
+  into `ROADMAP.md`. The point is durability, not ceremony: a finding
+  that stays only in this one file hasn't finished its job — it should
+  end up cross-referenced into `validators/`, `okf/`, or `ROADMAP.md`,
+  the same homes every other real finding in this repo already uses, so
+  the next project (or the next pass of this one) doesn't rediscover it
+  from scratch. See `postmortems/2026-07-17-npsp-to-npc-poc.md` for a
+  real, filled-in example.
 - **Real work happens on a branch, not `main` — not just a fixed rule, a
   practice adopted deliberately once the project outgrew always-direct
   pushes.** Anything that changes behavior, adds a feature, or fixes a bug
@@ -1301,7 +1316,20 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   — those tools do their real job correctly; this data just isn't their
   input shape. No reader/CLI command for `okf/` itself yet, deliberately
   — OKF's own design point is "no required tooling," and nothing has
-  needed one so far.
+  needed one so far. Second subject area: `okf/nonprofit-cloud/` — split
+  out of `okf/npsp-to-npc/` once that bundle's own platform-validation
+  docs turned out to have zero NPSP-specific content. Deliberately
+  source-agnostic: knowledge true of the Nonprofit Cloud/AFNP target
+  platform itself, regardless of which system a client migrates *from* —
+  a future "Raiser's Edge to NPC" or "Bloomerang to NPC" bundle reuses it
+  directly instead of re-deriving the same platform facts.
+- `postmortems/` — dated, filled-in migration post-mortems (see the
+  "Offer a post-mortem" behavior default above and
+  `docs/MIGRATION_POSTMORTEM_TEMPLATE.md`). Plain narrative Markdown, not
+  an OKF bundle — no frontmatter ceremony, since a post-mortem is a
+  retrospective account, not a structured lookup entry. Its job is to be
+  the prompt that produces new `validators/`/`okf/`/`ROADMAP.md` entries,
+  not a standalone archive.
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always
@@ -1433,7 +1461,11 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
 - `metadata/*.json`, `mapping/*.xlsx` — generated, org-specific artifacts.
   Gitignored by default (every org's schema/mappings differ, so these
   aren't template content) — commit your own deliberately if a real
-  engagement wants a versioned copy.
+  engagement wants a versioned copy. `mapping/npc_*.xlsx` is one such
+  deliberate exception, carved out in `.gitignore` — the NPSP-to-NPC
+  migration proof-of-concept's own mapping workbooks, kept as a real
+  reference implementation rather than disposable single-project output
+  (see `okf/npsp-to-npc/reference-implementation.md`).
 - A project's Migration Run Book workbook (`generate-migration-run-book`/`add-migration-run-book-pass`
   output — path is up to the caller, same as `generate-solution-doc`) is
   likewise project-specific, real operational history — not gitignored by

@@ -24,13 +24,13 @@ outline for what's already mapped out but not yet written up in full.
 
 # Platform validations
 
-Official, target-platform-enforced business rules — not migration
-gotchas this framework discovered, but Salesforce's own documented
-constraints on the new fundraising objects.
-
-* [Gift Transaction validations](gift-transaction-validations.md)
-* [Gift Commitment validations](gift-commitment-validations.md)
-* [Gift Commitment Schedule validations](gift-commitment-schedule-validations.md)
+Official, target-platform-enforced business rules on the fundraising
+objects. Moved to [okf/nonprofit-cloud/](../nonprofit-cloud/index.md) —
+these are pure Nonprofit Cloud platform facts, true regardless of
+migration source, not NPSP-specific — see that bundle's own index for
+the Gift Transaction/Commitment/Commitment Schedule validation docs and
+other target-platform-only findings (Person Accounts, RecordTypes, the
+`Name`-field `createable` quirk).
 
 # Migration patterns
 
@@ -45,3 +45,12 @@ constraints on the new fundraising objects.
   to attach to once its Opportunity fans out into more than one (the
   multi-Payment routing branch) -- confirmed live, not addressed
   explicitly in the official guide.
+
+# This repo's own reference implementation
+
+* [NPSP-to-NPC reference implementation](reference-implementation.md) -
+  this repo ran the full sequence above as a real, live proof-of-concept
+  (`sql/transformations/090-220`, `mapping/npc_*.xlsx`, a Migration Run
+  Book tab) — what a future real engagement can reuse directly vs. what
+  must be redone per client. Full narrative account:
+  `postmortems/2026-07-17-npsp-to-npc-poc.md`.

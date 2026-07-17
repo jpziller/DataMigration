@@ -52,7 +52,7 @@ $1,000 + $500 = $1,500, matching the Opportunity's own `Amount`).
 `GiftTransactionDesignation` also requires `Percent` alongside `Amount`
 (a real cross-field `INVALID_INPUT` validation, confirmed live, not
 documented in the Appendix B tables reviewed for
-[the platform validations](gift-transaction-validations.md)) — computed
+[the platform validations](../nonprofit-cloud/gift-transaction-validations.md)) — computed
 against each row's own Gift Transaction's amount so a plain 1:1
 Allocation always lands at exactly 100%.
 

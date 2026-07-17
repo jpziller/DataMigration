@@ -35,4 +35,4 @@ downstream Gift Transactions/Schedules are created.
 # Citations
 
 1. Migration guide, Appendix B - Fundraising Validations, "Gift
-   Commitment Validations" (see [migration-guide.md](migration-guide.md))
+   Commitment Validations" (see [migration-guide.md](../npsp-to-npc/migration-guide.md))
