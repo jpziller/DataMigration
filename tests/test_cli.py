@@ -5,8 +5,10 @@ utility with no Salesforce/SQL dependency, so it's worth testing in
 isolation rather than only through a live command invocation.
 """
 import pytest
+from click.testing import CliRunner
 
-from cli import _parse_object_value_pairs
+import cli as cli_module
+from cli import _parse_object_value_pairs, cli
 
 
 def test_parse_object_value_pairs_basic():
@@ -35,3 +37,61 @@ def test_parse_object_value_pairs_rejects_duplicate_object():
 def test_parse_object_value_pairs_uses_option_name_in_error():
     with pytest.raises(Exception, match="--migration-key must be Object=Value"):
         _parse_object_value_pairs(["BadEntry"], "--migration-key")
+
+
+def _stub_connect_and_engine(monkeypatch, captured):
+    """Replaces the two live-connection calls _ctx() makes with stubs that
+    record the Settings actually passed, and stubs list-objects' own
+    metadata.list_objects() call so the command runs end-to-end under
+    CliRunner without a real Salesforce/SQL connection."""
+    def fake_connect_salesforce(s):
+        captured["settings"] = s
+        return object()
+
+    monkeypatch.setattr(cli_module, "connect_salesforce", fake_connect_salesforce)
+    monkeypatch.setattr(cli_module, "make_engine", lambda s: object())
+    monkeypatch.setattr(cli_module.md, "list_objects", lambda sf, queryable_only=True: [])
+
+
+def test_global_org_flag_resolves_source_role(monkeypatch):
+    """--org source threads through _ctx() into resolve_org_settings(),
+    picking up SF_ORG_ALIAS_SOURCE instead of the plain .env SF_ORG_ALIAS --
+    the actual fix for the two-org (source -> target) config friction."""
+    monkeypatch.setenv("SF_ORG_ALIAS_SOURCE", "NPSP_SOURCE")
+    captured = {}
+    _stub_connect_and_engine(monkeypatch, captured)
+
+    result = CliRunner().invoke(cli, ["--org", "source", "list-objects"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["settings"].sf_org_alias == "NPSP_SOURCE"
+
+
+def test_global_org_alias_flag_overrides_everything(monkeypatch):
+    """--org-alias is a raw one-off override -- beats both --org and .env,
+    for a quick check against a third org without touching config at all."""
+    monkeypatch.setenv("SF_ORG_ALIAS_SOURCE", "NPSP_SOURCE")
+    captured = {}
+    _stub_connect_and_engine(monkeypatch, captured)
+
+    result = CliRunner().invoke(
+        cli, ["--org", "source", "--org-alias", "SCRATCH_ORG", "list-objects"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["settings"].sf_org_alias == "SCRATCH_ORG"
+
+
+def test_no_org_flag_leaves_settings_unchanged(monkeypatch):
+    """Omitting --org/--org-alias entirely must behave exactly as before
+    this feature existed -- plain .env settings, no role resolution."""
+    monkeypatch.delenv("SF_ORG_ALIAS_SOURCE", raising=False)
+    monkeypatch.delenv("SF_ORG_ALIAS_TARGET", raising=False)
+    captured = {}
+    _stub_connect_and_engine(monkeypatch, captured)
+
+    result = CliRunner().invoke(cli, ["list-objects"])
+
+    assert result.exit_code == 0, result.output
+    from config import get_settings
+    assert captured["settings"].sf_org_alias == get_settings().sf_org_alias

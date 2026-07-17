@@ -33,7 +33,8 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import text
 
-from config import get_settings
+from config import get_settings, resolve_org_settings
+from dataclasses import replace as _dc_replace
 from sf_client import connect_salesforce
 from sql_client import make_engine
 import metadata as md
@@ -73,7 +74,22 @@ import discovery_checklist as dch
 
 
 def _ctx():
+    """Single connection-establishing seam every command calls through.
+    Layers the global --org/--org-alias options (see the `cli` group below)
+    on top of the plain .env settings -- a two-org migration (source ->
+    target) can then flip which org a command targets per-invocation
+    instead of hand-editing SF_ORG_ALIAS in .env on every switch. Neither
+    flag given -> identical to pre-existing behavior."""
     s = get_settings()
+    root = click.get_current_context().find_root()
+    org_role = root.params.get("org")
+    org_alias = root.params.get("org_alias")
+    if org_role:
+        s = resolve_org_settings(s, org_role)
+        click.echo(f"[org: {org_role} -> alias {s.sf_org_alias or '(unset)'}]", err=True)
+    if org_alias:
+        s = _dc_replace(s, sf_org_alias=org_alias)
+        click.echo(f"[org: alias override -> {org_alias}]", err=True)
     return s, connect_salesforce(s), make_engine(s)
 
 
@@ -111,7 +127,15 @@ def _print_table(df, max_rows=50):
 
 
 @click.group()
-def cli():
+@click.option("--org", type=click.Choice(["source", "target"]), default=None,
+              help="Use the SOURCE or TARGET org for this call, per SF_*_SOURCE/"
+                   "SF_*_TARGET overrides in .env (see resolve_org_settings() in "
+                   "config.py), instead of editing SF_ORG_ALIAS by hand. Omit for "
+                   "the plain, unsuffixed .env settings (unchanged default behavior).")
+@click.option("--org-alias", default=None,
+              help="One-off override of just the cli-mode org alias (e.g. for a "
+                   "quick check against a third org) -- beats both --org and .env.")
+def cli(org, org_alias):
     pass
 
 
