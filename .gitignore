@@ -17,3 +17,6 @@ metadata/*.json
 mapping/*.xlsx
 !metadata/.gitkeep
 !mapping/.gitkeep
+
+# Local `sf` CLI source-tracking state, per-org, per-machine -- not project source.
+.sf/
