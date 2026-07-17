@@ -20,10 +20,21 @@ test coverage at all before this), needed for a real, honest
 integration test of subset_replication.py (roadmap #34) rather than
 only unit-testing its pure WHERE-building logic.
 """
+import io
 import os
 import re
 
 import pandas as pd
+
+
+def _csv_row_count(csv_text):
+    """Data-row count of a result CSV string (header excluded) -- used to
+    populate numberRecordsProcessed/numberRecordsFailed on stub job dicts,
+    matching real simple_salesforce's own _upload_data() return shape."""
+    if not csv_text or not csv_text.strip():
+        return 0
+    return len(pd.read_csv(io.StringIO(csv_text), dtype=str,
+                           keep_default_na=False, na_values=[""]))
 
 
 class StubObjectDescribe:
@@ -95,7 +106,8 @@ class StubBulkHandler:
     """
     def __init__(self, success_csv=None, failure_csv=None, jobs=None,
                  echo_cols=None, fail_every_n=None, job_count=1, id_prefix="001",
-                 failure_message="DUPLICATE_VALUE:deliberately failed for this test"):
+                 failure_message="DUPLICATE_VALUE:deliberately failed for this test",
+                 results_ready_after_calls=1):
         if jobs is not None and (success_csv is not None or failure_csv is not None):
             raise ValueError("Pass either jobs=[...] or success_csv/failure_csv, not both.")
         if success_csv is not None or failure_csv is not None:
@@ -115,6 +127,18 @@ class StubBulkHandler:
         self._failure_message = failure_message
         self._next_id = 1
         self._results_by_job = None  # set by insert(); reuse guard
+        # Simulates the real Bulk API 2.0 race bulkops.py's
+        # _fetch_job_results() retries against: the job's own status can
+        # report JobComplete before get_successful_records()/
+        # get_failed_records() actually have anything to serve. 1 (default)
+        # means no simulated delay -- real data from the first call, same
+        # as this stub's behavior before this existed. >1 means the first
+        # N-1 calls to EITHER method for a given job_id return "" (empty),
+        # real data from call N on -- tracked per (job_id, kind) so success
+        # and failure reads for the same job become ready together, since
+        # _fetch_job_results() always calls both once per retry attempt.
+        self._results_ready_after_calls = results_ready_after_calls
+        self._read_call_counts = {}
 
     def insert(self, csv_file=None, batch_size=None):
         return self._submit(csv_file)
@@ -157,14 +181,21 @@ class StubBulkHandler:
 
         if self._fixed_jobs is not None:
             job_ids = []
+            job_dicts = []
             for i, (succ, fail) in enumerate(self._fixed_jobs):
                 job_id = f"JOB{i + 1}"
                 self._results_by_job[job_id] = (succ, fail)
                 job_ids.append(job_id)
-            return [{"job_id": j} for j in job_ids]
+                job_dicts.append({
+                    "job_id": job_id,
+                    "numberRecordsProcessed": _csv_row_count(succ) + _csv_row_count(fail),
+                    "numberRecordsFailed": _csv_row_count(fail),
+                })
+            return job_dicts
 
         df = pd.read_csv(csv_path, dtype=str, keep_default_na=False, na_values=[""])
         job_ids = []
+        job_dicts = []
         for i, chunk_df in enumerate(_chunk_dataframe(df, self._job_count)):
             job_id = f"JOB{i + 1}"
             succ_rows, fail_rows = [], []
@@ -180,12 +211,26 @@ class StubBulkHandler:
             fail_df = pd.DataFrame(fail_rows, columns=list(self._echo_cols) + ["sf__Error"])
             self._results_by_job[job_id] = (succ_df.to_csv(index=False), fail_df.to_csv(index=False))
             job_ids.append(job_id)
-        return [{"job_id": j} for j in job_ids]
+            job_dicts.append({
+                "job_id": job_id,
+                "numberRecordsProcessed": len(succ_rows) + len(fail_rows),
+                "numberRecordsFailed": len(fail_rows),
+            })
+        return job_dicts
+
+    def _read_call_ready(self, job_id, kind):
+        key = (job_id, kind)
+        self._read_call_counts[key] = self._read_call_counts.get(key, 0) + 1
+        return self._read_call_counts[key] >= self._results_ready_after_calls
 
     def get_successful_records(self, job_id):
+        if not self._read_call_ready(job_id, "success"):
+            return ""
         return self._results_by_job[job_id][0] or ""
 
     def get_failed_records(self, job_id):
+        if not self._read_call_ready(job_id, "failure"):
+            return ""
         return self._results_by_job[job_id][1] or ""
 
 

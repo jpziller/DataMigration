@@ -40,7 +40,50 @@ def test_stub_bulk_handler_fixed_mode_ignores_csv_content(tmp_path):
     csv_path.write_text("Name\nWhatever\n")
     handler = StubBulkHandler(success_csv="Name,sf__Id\nA,001X\n", failure_csv="")
     jobs = handler.insert(str(csv_path))
-    assert jobs == [{"job_id": "JOB1"}]
+    # numberRecordsProcessed/Failed match real simple_salesforce's own
+    # _upload_data() return shape -- bulkops.py's _fetch_job_results()
+    # relies on these being present and accurate (roadmap #74).
+    assert jobs == [{"job_id": "JOB1", "numberRecordsProcessed": 1, "numberRecordsFailed": 0}]
+    assert handler.get_successful_records("JOB1") == "Name,sf__Id\nA,001X\n"
+    assert handler.get_failed_records("JOB1") == ""
+
+
+def test_stub_bulk_handler_job_dict_counts_include_failures_in_processed(tmp_path):
+    """numberRecordsProcessed is successes + failures combined (real Bulk
+    API 2.0 semantics -- numberRecordsFailed is the failed subset WITHIN
+    it, not additional to it). Getting this backwards in bulkops.py's own
+    expected_total calculation once made every job with any failure at
+    all retry its full backoff budget for real, found live when the test
+    suite's own runtime ballooned from ~10s to ~265s."""
+    csv_path = tmp_path / "payload.csv"
+    csv_path.write_text("Name\nWhatever\n")
+    handler = StubBulkHandler(
+        success_csv="Name,sf__Id\nA,001X\n",
+        failure_csv="Name,sf__Error\nB,SOME_ERROR:bad\n",
+    )
+    jobs = handler.insert(str(csv_path))
+    assert jobs == [{"job_id": "JOB1", "numberRecordsProcessed": 2, "numberRecordsFailed": 1}]
+
+
+def test_stub_bulk_handler_results_ready_after_calls_delays_both_reads(tmp_path):
+    """Simulates the real Bulk API 2.0 race bulkops.py's _fetch_job_results()
+    retries against: the first N-1 calls to EITHER get_successful_records()
+    or get_failed_records() for a job return empty, real data from call N
+    on -- tracked per (job_id, kind) so success and failure become ready
+    together, matching how _fetch_job_results() always calls both once per
+    retry attempt."""
+    csv_path = tmp_path / "payload.csv"
+    csv_path.write_text("Name\nWhatever\n")
+    handler = StubBulkHandler(
+        success_csv="Name,sf__Id\nA,001X\n", failure_csv="",
+        results_ready_after_calls=3,
+    )
+    handler.insert(str(csv_path))
+
+    assert handler.get_successful_records("JOB1") == ""
+    assert handler.get_failed_records("JOB1") == ""
+    assert handler.get_successful_records("JOB1") == ""
+    assert handler.get_failed_records("JOB1") == ""
     assert handler.get_successful_records("JOB1") == "Name,sf__Id\nA,001X\n"
     assert handler.get_failed_records("JOB1") == ""
 

@@ -4942,3 +4942,79 @@ has changed. The spike's own exploratory scaffolding (extra venvs,
 `worktree-spike-dbt-evaluation`, not merged into `main` — left in place
 as a real, reproducible reference for whenever this gets revisited,
 rather than deleted.
+
+## 74. Fix: `bulk_op()` writeback race on Bulk API 2.0 results-file readiness (BUILT 2026-07-17)
+
+Discovered live while seeding a real NPSP org (`NPSP_SOURCE`) with
+proof-of-concept data for the NPSP→Nonprofit Cloud migration work: 5 of 7
+`bulkops insert` calls (General Accounting Unit, Recurring Donation,
+Opportunity, Payment, Allocation) reported `submitted: N, succeeded: 0,
+failed: 0` — neither success nor failure — even though every one of those
+jobs genuinely succeeded at the Salesforce end. Verified directly, every
+time, via `jobs/ingest/{id}` (`state: JobComplete, numberRecordsProcessed:
+N, numberRecordsFailed: 0`) and a manual, slightly-later call to
+`jobs/ingest/{id}/successfulResults`, which returned the real rows every
+single time. Contact and CampaignMember writeback worked correctly both
+times they ran during the same session. This was never a data-loss bug —
+every record landed correctly — only a writeback/reporting one, worked
+around live by patching the mirror table with Ids pulled directly from
+the job results API rather than trusting `bulk_op()`'s own summary.
+
+**Root cause, confirmed by reading `simple_salesforce`'s own source, not
+guessed**: `.venv/Lib/site-packages/simple_salesforce/bulk2.py`'s
+`_upload_data()` (called by `insert()`/`update()`/`upsert()`/`delete()`)
+calls `wait_for_job()`, which polls the **job status** endpoint until
+`state == JobComplete`, then returns immediately.
+`get_successful_records()`/`get_failed_records()` are each a **single,
+un-retried GET** — no polling, no readiness check of their own. So the
+library's own `JobComplete` signal (job status/row-count metadata)
+becomes accurate before the underlying results **files** are necessarily
+ready to serve — a real, known-class Salesforce Bulk API 2.0 propagation
+gap, more likely on objects with heavier synchronous trigger/rollup
+cascades (matches exactly what happened: every affected object carries
+real NPSP automation; Contact/CampaignMember, which never hit it, don't
+trigger that same cascade depth). `bulk_op()` had no retry around this
+specific read, so it silently treated "results file not ready yet" the
+same as "zero rows were ever submitted."
+
+**Fix, in `bulkops.py`**: new `_fetch_job_results(handler, job_id,
+expected_total, sleep_fn=time.sleep)` — retries
+`get_successful_records()`/`get_failed_records()` with backoff `[0, 1, 2,
+4, 8]` (5 attempts, ~15s worst case, only ever paid when the race
+actually fires) until the combined success+failure row count reaches
+`expected_total`, or gives up and returns the last (possibly still-
+incomplete) read rather than hanging or raising. `expected_total` is
+`job["numberRecordsProcessed"]` alone — real Bulk API 2.0 semantics
+already include failures within "processed" (`numberRecordsFailed` is the
+subset within it, not additional to it). The existing per-job collection
+loop calls this instead of the two direct methods.
+
+**A second real bug found building the fix, not just the one that
+prompted it**: the first working version of `_fetch_job_results()` added
+`numberRecordsProcessed + numberRecordsFailed` together for
+`expected_total` — double-counting failures, making the target
+unreachable on any job with even one failure, and silently burning the
+full real-sleep retry budget (~15s) on every such call. Not caught by
+reasoning about the fix — caught by the full test suite's own runtime
+ballooning from ~10s to ~265s on a routine post-change run, which is
+exactly the kind of symptom worth actually noticing rather than
+shrugging off as "tests got a bit slower."
+
+**`tests/stub_salesforce.py`**: `StubBulkHandler._submit()`'s returned
+job dicts (both fixed- and dynamic-mode) now carry real
+`numberRecordsProcessed`/`numberRecordsFailed` keys, matching real
+simple_salesforce's actual shape — the same class of stub/reality drift
+this file's own docstring already flags as a real risk (the `upsert()`
+positional-arg incident from an earlier session). New opt-in constructor
+param `results_ready_after_calls` (default 1 = no simulated delay) makes
+the race itself reproducible in a test: the first N-1 calls to either
+result-reading method for a job return empty, real data from call N on.
+
+**New tests**: `tests/test_stub_salesforce.py` gains direct coverage of
+the corrected job-dict shape and the delay simulation itself;
+`tests/test_bulkops_sqlite_integration.py` gains two real `bulk_op()`
+integration tests — results initially empty then real on a later read
+(the actual bug), and results that never become ready within the retry
+budget (must return a best-effort empty summary, never hang or raise).
+Full suite: 379 passed, 6 skipped, ~30s (confirmed back to normal after
+fixing the double-counting bug above) — zero regressions.
