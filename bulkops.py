@@ -106,6 +106,7 @@ import io
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -150,6 +151,62 @@ def _read_result_csv(csv_text):
         return pd.DataFrame()
     return pd.read_csv(io.StringIO(csv_text), dtype=str,
                        keep_default_na=False, na_values=[""])
+
+
+# Backoff schedule for _fetch_job_results() -- 5 attempts, ~15s worst case,
+# only ever paid on the rare job that actually hits the race described
+# there. Not a tunable CLI flag: this is an internal robustness fix, not a
+# feature, same "hardcode a sane default" altitude as _resolve_external_ids
+# _to_sf_id()'s own chunk_size=200 a few lines below.
+_RESULTS_RETRY_BACKOFF_SECONDS = (0, 1, 2, 4, 8)
+
+
+def _fetch_job_results(handler, job_id, expected_total, sleep_fn=time.sleep):
+    """(successes_df, failures_df) for one completed Bulk API 2.0 job --
+    retries get_successful_records()/get_failed_records() with backoff
+    instead of a single unretried read.
+
+    Found live (roadmap #74, an NPSP org-seeding session): simple_salesforce's
+    own wait_for_job() polls the JOB STATUS endpoint until state ==
+    JobComplete and returns immediately -- confirmed by reading
+    simple_salesforce/bulk2.py directly. get_successful_records()/
+    get_failed_records() are each a single, un-retried GET with no
+    readiness check of their own. Salesforce's job-complete signal
+    (state, numberRecordsProcessed/Failed) can become accurate before the
+    underlying result FILES are actually ready to serve -- reproduced live
+    5 times in one session, always on objects with heavier synchronous
+    trigger/rollup cascades (General Accounting Unit, Recurring Donation,
+    Opportunity, Payment, Allocation all hit it; Contact and CampaignMember,
+    lighter automation, never did) -- every time, a job that had already
+    genuinely succeeded (confirmed via a direct, slightly-later call to the
+    same results endpoint) came back from get_successful_records()/
+    get_failed_records() completely empty on the first read, indistinguishable
+    from "zero rows were ever submitted" without this check.
+
+    expected_total: numberRecordsProcessed alone from the job's own
+    already-reliable status metadata -- real Bulk API 2.0 semantics:
+    "processed" already INCLUDES failures (numberRecordsFailed is the
+    failed subset within it, not an addition to it -- adding both together
+    here once double-counted and made expected_total unreachable on any
+    job with failures, silently burning the full retry budget in real
+    sleeps on every such call; caught by the test suite's own runtime
+    ballooning from ~10s to ~265s, not by reasoning alone). 0 always
+    short-circuits immediately (nothing was ever submitted to this job,
+    not a readiness question). Gives up after the backoff schedule and
+    returns its last, possibly-still-incomplete read rather than hanging
+    or raising -- a genuinely unrecoverable read should surface as an
+    accurate but disappointing summary, not an exception that hides the
+    real work the job already did.
+    """
+    succ = fail = pd.DataFrame()
+    for delay in _RESULTS_RETRY_BACKOFF_SECONDS:
+        if delay:
+            sleep_fn(delay)
+        succ = _read_result_csv(handler.get_successful_records(job_id))
+        fail = _read_result_csv(handler.get_failed_records(job_id))
+        if expected_total == 0 or len(succ) + len(fail) >= expected_total:
+            return succ, fail
+    return succ, fail
 
 
 _SF_ID_TOKEN_RE = re.compile(r"\b[a-zA-Z0-9]{15}\b|\b[a-zA-Z0-9]{18}\b")
@@ -608,12 +665,24 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             results = handler.delete(csv_file=csv_path, batch_size=resolved_batch_size)
         job_count = len(results)
 
-        # Collect per-job successful + failed records.
+        # Collect per-job successful + failed records. _fetch_job_results()
+        # retries with backoff against a real Bulk API 2.0 race -- see its
+        # own docstring for the live incident that found it.
         succ_frames, fail_frames = [], []
         for job in results:
             job_id = job["job_id"]
-            succ_frames.append(_read_result_csv(handler.get_successful_records(job_id)))
-            fail_frames.append(_read_result_csv(handler.get_failed_records(job_id)))
+            # numberRecordsProcessed already INCLUDES failures (real Bulk
+            # API 2.0 semantics: processed = successes + failures combined,
+            # numberRecordsFailed is the failed subset within it) -- adding
+            # them again here double-counted and made expected_total
+            # unreachable on every job with any failures at all, silently
+            # burning the full retry budget (real sleeps) on every such
+            # test. Caught by the full suite ballooning from ~10s to ~265s
+            # before this was fixed, not by reasoning alone.
+            expected = job.get("numberRecordsProcessed", 0)
+            succ, fail = _fetch_job_results(handler, job_id, expected)
+            succ_frames.append(succ)
+            fail_frames.append(fail)
         successes = pd.concat([f for f in succ_frames if not f.empty],
                               ignore_index=True) if any(not f.empty for f in succ_frames) else pd.DataFrame()
         failures = pd.concat([f for f in fail_frames if not f.empty],
