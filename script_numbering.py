@@ -85,7 +85,34 @@ def matches_token(object_name, text_value):
     match inside "sbqq__quote__c_load.sql" since custom-object suffixes
     are underscore-delimited too. Shared by script_filename_for() below
     and migration_run_book.py's own row-matching logic, so the fix for
-    one naturally covers the other instead of drifting apart again."""
+    one naturally covers the other instead of drifting apart again.
+
+    A second, still-open residual edge (found live, NPSP-to-NPC migration
+    proof-of-concept, not yet fixed here): a script filename for a
+    COMPOUND object name that embeds another real object's name as its
+    own delimiter-bounded word collides the same way. A file named
+    "110_account_contact_relation_load.sql" (for AccountContactRelation)
+    still matches a bare "Account" or "Contact" lookup, and -- since
+    script_filename_for() below picks the highest-numbered match -- can
+    silently outrank the real, unrelated "020_contact_load.sql" once its
+    own number is higher. This surfaced as a real, silent bug: it broke
+    migration_run_book.py's Load-phase Object-cell resolution for three
+    different bare object names in one pass (Account, Contact, Campaign),
+    caught only by the existing test suite failing, not by reasoning.
+    Worked around in that project by removing the internal delimiter
+    ("accountcontactrelation", "campaignmember", "giftcommitmentschedule",
+    "gifttransactiondesignation") so the compound name can't accidentally
+    match a shorter, unrelated object as a substring -- but that's a
+    naming-convention workaround, not a fix to this matcher itself. A
+    real fix would need script_filename_for() to know the full set of
+    object names in play (not just the one it's currently resolving) so
+    it can prefer a filename that matches ONLY the requested object over
+    one that also matches a different, longer compound name -- not yet
+    built. See ROADMAP.md for the full write-up. If you're naming a new
+    script for an object whose name contains another real object's name
+    as a whole word (AccountContactRelation, CampaignMember,
+    GiftCommitmentSchedule, GiftTransactionDesignation, etc.), don't put
+    an underscore between the embedded segments in the filename."""
     text_value = str(text_value)
     if object_name.lower() == text_value.strip().lower():
         return True

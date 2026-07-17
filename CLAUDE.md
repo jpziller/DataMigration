@@ -1056,7 +1056,21 @@ don't jump straight to writing SQL:
    committed; pass `--after <NNN> --before <MMM>` for that insertion case.
    Same command, `--dir source_ingestion`, for `sql/source_ingestion/`.
    Read-only/advisory — it suggests a number, never creates or renames a
-   file itself. Once the script is real, run `set-mapping-script` against
+   file itself. **Naming pitfall, found live** (NPSP-to-NPC migration
+   proof-of-concept): if the object's name itself contains another real
+   object's name as a whole word (`AccountContactRelation`,
+   `CampaignMember`, `GiftCommitmentSchedule`,
+   `GiftTransactionDesignation`, etc.), don't put an underscore between
+   the embedded segments in the filename (`accountcontactrelation_load.sql`,
+   not `account_contact_relation_load.sql`) — `script_numbering.matches_token()`'s
+   whole-token matching means an underscore-separated compound name still
+   matches the shorter, unrelated object as a substring, and since
+   `script_filename_for()` picks the highest-numbered match, a later
+   compound-name script can silently outrank the real script for that
+   shorter object everywhere `migration_run_book.py`/`set-mapping-script`
+   resolve it. See `matches_token()`'s own docstring in
+   `script_numbering.py` and `ROADMAP.md` for the full account. Once the
+   script is real, run `set-mapping-script` against
    the mapping doc so its header records which script actually implements
    this object — never before, since the script doesn't exist yet earlier
    in this workflow. If this build turned up a new object-specific

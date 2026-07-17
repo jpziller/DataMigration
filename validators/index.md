@@ -39,3 +39,9 @@ discovered the hard way — nothing exists preemptively.
 * [Task validator](Task.md) - Activity-level field deployment, WhatId
   polymorphism, the Recurrence* interdependent cluster, Subject's
   combobox type.
+* [GiftCommitment validator](GiftCommitment.md) - Name required despite
+  createable=false, ScheduleType must match its Schedule's TransactionPeriod.
+* [GiftTransaction validator](GiftTransaction.md) - Name required despite
+  createable=false, GiftCommitmentId links back to an originating commitment.
+* [PartyRelationshipGroup validator](PartyRelationshipGroup.md) - Name
+  required despite createable=false, no exact "Household" Category value.

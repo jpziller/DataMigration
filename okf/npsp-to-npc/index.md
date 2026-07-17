@@ -40,3 +40,8 @@ constraints on the new fundraising objects.
 * [Households to Party Relationship Groups](households-to-party-relationship-groups.md)
 * [Opportunity routing](opportunity-routing.md) - the Gift
   Transaction / Gift Commitment / Opportunity three-way split.
+* [Allocation vs. Gift Transaction Designation granularity](allocation-to-gift-transaction-designation.md) -
+  an Opportunity-level Allocation has no single correct Gift Transaction
+  to attach to once its Opportunity fans out into more than one (the
+  multi-Payment routing branch) -- confirmed live, not addressed
+  explicitly in the official guide.

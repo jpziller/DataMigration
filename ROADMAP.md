@@ -5094,3 +5094,121 @@ skipped (no regressions).
 **Docs**: `.env.example` and `README.md`'s Auth modes section both document
 the `_SOURCE`/`_TARGET` suffix convention and the `--org`/`--org-alias`
 flags.
+
+## 76. Found live: `script_filename_for()` mis-resolves compound object names (documented, not yet fixed)
+
+Discovered during the NPSP-to-NPC migration proof-of-concept: adding
+`sql/transformations/110_account_contact_relation_load.sql` (for
+`AccountContactRelation`) and `140_campaign_member_load.sql` (for
+`CampaignMember`) silently broke `migration_run_book.py`'s Load-phase
+Object-cell resolution for the bare object names `Account`, `Contact`,
+and `Campaign` — each started resolving to the wrong, unrelated script.
+Not caught by reasoning about the new scripts at all; caught only because
+the pre-existing test suite (`tests/test_migration_run_book_sqlite_integration.py`)
+happened to assert on exactly this resolution and started failing.
+
+**Root cause, confirmed by direct reproduction**:
+`script_numbering.matches_token(object_name, filename)` is a correct,
+deliberate whole-token (delimiter-bounded) match — "Account" matching
+inside "010_account_load.sql" but not inside "030_orderitem_load.sql" is
+exactly the fix an earlier review already made (naive substring matching
+used to conflate Order/OrderItem). The gap: it has no way to tell that a
+COMPOUND object name's filename (`account_contact_relation_load.sql`,
+for `AccountContactRelation`) also happens to satisfy a match for a
+*different*, shorter real object name (`Account`, `Contact`) that's
+merely embedded as one of its underscore-delimited words.
+`script_filename_for()` then makes it worse by picking the
+highest-numbered match among everything that satisfies `matches_token()`
+— so a later-numbered compound-name script can silently outrank the
+real, correct script for the shorter object it happens to contain as a
+substring. Reproduced directly:
+
+```
+>>> script_numbering.script_filename_for("Account", "sql/transformations")
+'110_npc_account_contact_relation_load.sql'   # wrong -- should resolve
+                                                # to the real Account script
+```
+
+**Workaround applied** (not a fix to the matcher itself): renamed the
+colliding scripts to remove the internal delimiter between the compound
+name's segments — `accountcontactrelation_load.sql`,
+`campaignmember_load.sql`, and (proactively, before they could hit the
+same issue) `giftcommitmentschedule_load.sql`,
+`gifttransactiondesignation_load.sql`. A merged compound word has letters
+immediately adjacent to the embedded object name on both sides, so
+`matches_token()`'s own delimiter-boundary requirement can no longer
+match it as a standalone token. Confirmed live: `Account`/`Contact`/
+`Campaign` all resolve correctly again after the rename, and the full
+suite (387 passed, 6 skipped) is green.
+
+**Not yet fixed**: the underlying ambiguity in `matches_token()`/
+`script_filename_for()` is still there for the next person who doesn't
+know this convention and reintroduces an underscore-delimited compound
+name. A real fix needs `script_filename_for()` to be aware of the *full*
+set of real object names in play (not just the one it's currently
+resolving), so it can prefer a filename that matches only the requested
+object over one that also matches a different, longer compound name as a
+substring — that's a signature change touching both call sites
+(`migration_run_book.py`'s `_load_order_rows()`, `mapping_doc.py`'s
+`set-mapping-script`), not attempted here since it needs its own design
+and test coverage rather than a rushed fix mid-migration. Documented in
+`matches_token()`'s own docstring and CLAUDE.md's Standard Workflow step
+6 in the meantime, so the naming convention is at least discoverable
+before it bites again.
+
+## 77. NPSP-to-NPC migration proof-of-concept: full pipeline built and loaded live (2026-07-17)
+
+The first real end-to-end test of this framework's whole methodology on
+a genuine two-org migration — not a single object, the full sequence:
+discovery → migration-key deployment → replicate → mapping docs →
+transform → sort/dedup → load → verify, against the real seeded NPSP
+proof-of-concept data (roadmap #74's own discovery context) and a real
+Nonprofit Cloud (AFNP) target org, following Salesforce's own official
+migration guide (`okf/npsp-to-npc/`) rather than an invented sequence.
+
+**Result**: all 14 object families loaded successfully — Household
+Account (8/8), Person Account (8/8), AccountContactRelation (8/8),
+PartyRelationshipGroup (8/8), Campaign (2/2), CampaignMember (4/4), Gift
+Designation (2/2), Gift Commitment from Recurring Donation (4/4) and from
+multi-Payment Opportunity (2/2), Gift Commitment Schedule from both same
+sources (4/4, 2/2), Gift Transaction from single-Payment Opportunity
+(4/4, including the Recurring-Donation-linked one correctly carrying
+`GiftCommitmentId` back to its RD's own commitment) and from Payment
+under a multi-Payment Opportunity (5/5), and Gift Transaction Designation
+from Allocation (8/8, see below). Every count verified live via direct
+SOQL query against the target org, not just trusted from `bulk_op()`'s
+own summary. Dollar amounts reconciled exactly (a split multi-Payment
+Allocation's parts summed back to its original total).
+
+**Real findings from this pass**, each written up in its own durable
+home rather than left as one-off session knowledge:
+- `Name` required on insert despite `describe()` reporting
+  `createable: False`, hit independently on `GiftCommitment`,
+  `GiftTransaction`, and `PartyRelationshipGroup` — see the three new
+  object validators (`validators/GiftCommitment.md`,
+  `validators/GiftTransaction.md`, `validators/PartyRelationshipGroup.md`).
+- The `script_filename_for()` compound-name collision — roadmap #76
+  above.
+- Allocation's Opportunity-level granularity doesn't map cleanly onto
+  Gift Transaction Designation's per-transaction granularity whenever an
+  Opportunity fans out into more than one Gift Transaction — see
+  `okf/npsp-to-npc/allocation-to-gift-transaction-designation.md`, a new
+  migration-pattern doc alongside `opportunity-routing.md` since this
+  will recur on any real client engagement, not just this proof-of-concept.
+- The roadmap #74 writeback-race fix needed a bigger retry budget in
+  practice (~15s → ~61s) than its original, mock-tuned budget covered —
+  hit on 3 of 9 loads in the first half of this pass alone.
+- A static seed-tracking table (`NPSPSeed_Payment_Load`, hand-built
+  during the original data-seeding session) silently undercounted real
+  Payment records once NPSP's own automation was accounted for — 3 of 6
+  Opportunities carry an auto-generated Payment never present in that
+  table. Caught only by re-`replicate`-ing fresh immediately before
+  building the Opportunity-routing transform rather than trusting the
+  older table — the framework's existing "replicate is meant to be
+  re-run" philosophy, demonstrated concretely rather than just stated.
+
+No changes to `bulkops.py`'s pre-flight check itself in this pass beyond
+the backoff extension (roadmap #74) — the `Name`-field ambiguity is
+recorded as a known pattern in the validators library rather than a new
+automated guard, consistent with this library's own stated scope
+("advisory, not a reimplementation of the real checks").
