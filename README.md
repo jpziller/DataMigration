@@ -200,9 +200,18 @@ validators/system/                                       named checks behind har
                                                          (validators/<Object>.md grows per-project,
                                                          same "grows via real corrections" principle;
                                                          OKF v0.1 bundle, roadmap #72)
-okf/                                                     second OKF v0.1 bundle -- external/industry
+okf/                                                     OKF v0.1 bundles -- external/industry
                                                          knowledge (official Salesforce docs, migration
-                                                         patterns), describe-and-link not duplicated
+                                                         patterns), describe-and-link not duplicated.
+                                                         okf/npsp-to-npc/ (source-specific migration
+                                                         guidance) and okf/nonprofit-cloud/ (the target
+                                                         platform's own facts, source-agnostic) are kept
+                                                         as separate subject areas deliberately -- a
+                                                         future different-source-to-NPC bundle reuses
+                                                         the latter directly.
+postmortems/                                             dated migration post-mortems (see CLAUDE.md's
+                                                         "Offer a post-mortem" behavior default) --
+                                                         plain narrative Markdown, not an OKF bundle
 force-app/                                               reusable field metadata pattern
                                                          (MigrationID__c + its FLS grant)
 docs/, CLAUDE.md, README.md, ROADMAP.md                  documentation
@@ -226,12 +235,27 @@ practice run back to a clean slate) erases every numbered script; a real
 client project's scripts persist and are never erased without explicit
 approval, even to remove just one.
 
+One deliberate exception to "not this framework's shared template repo":
+scripts that are themselves this framework's own dogfooding/reference
+examples rather than a real client's real work -- the Snowfakery mock
+scripts (`010`-`040`), their Postgres-flavored siblings (`050`-`080`), and
+the NPSP-to-NPC migration proof-of-concept (`090`-`220`) all stay in this
+shared repo on purpose, as live-verified, reusable starting points (see
+`okf/npsp-to-npc/reference-implementation.md` for how a future NPSP→NPC
+engagement should treat the latter). The line is real client data vs.
+this framework's own demonstration data, not "numbered script" vs.
+something else.
+
 **Generated, org-specific artifacts** — gitignored by default, because every
 org's schema and every project's field mappings are different:
 ```
 metadata/*.json          dump-describe output -- one specific org's schema
 mapping/*.xlsx           generate-mapping-doc/auto-map output -- one specific
-                         project's field-mapping decisions
+                         project's field-mapping decisions. mapping/npc_*.xlsx
+                         is a deliberate .gitignore exception -- the
+                         NPSP-to-NPC proof-of-concept's own mapping
+                         workbooks, kept as reference material rather than
+                         disposable single-project output.
 *.docx (wherever you point generate-solution-doc)  one specific project's
                          solution document -- put your own copy under
                          version control deliberately if you want one

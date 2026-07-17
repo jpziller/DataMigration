@@ -47,4 +47,4 @@ heuristics if a real project builds this object.
 
 1. Migration guide, Appendix B - Fundraising Validations, "Gift
    Commitment Schedule Validations" (see
-   [migration-guide.md](migration-guide.md))
+   [migration-guide.md](../npsp-to-npc/migration-guide.md))

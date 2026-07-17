@@ -34,7 +34,7 @@ This is the single most structurally complex mapping in the whole
 migration -- see [npsp-to-afnp-field-mapping.md](npsp-to-afnp-field-mapping.md)
 for the field-mapping workbook's own worked-example version of this same
 routing rule, and the three
-[Fundraising Validations](gift-transaction-validations.md) files for
+[Fundraising Validations](../nonprofit-cloud/gift-transaction-validations.md) files for
 what the target objects then enforce once records land in them.
 
 # Citations

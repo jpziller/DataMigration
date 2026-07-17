@@ -153,12 +153,19 @@ def _read_result_csv(csv_text):
                        keep_default_na=False, na_values=[""])
 
 
-# Backoff schedule for _fetch_job_results() -- 5 attempts, ~15s worst case,
+# Backoff schedule for _fetch_job_results() -- 7 attempts, ~61s worst case,
 # only ever paid on the rare job that actually hits the race described
-# there. Not a tunable CLI flag: this is an internal robustness fix, not a
-# feature, same "hardcode a sane default" altitude as _resolve_external_ids
-# _to_sf_id()'s own chunk_size=200 a few lines below.
-_RESULTS_RETRY_BACKOFF_SECONDS = (0, 1, 2, 4, 8)
+# there. Extended from the original (0, 1, 2, 4, 8) = ~15s budget live
+# during the NPSP-to-NPC migration proof-of-concept (roadmap #75 follow-up):
+# that budget, tuned against a mocked/simulated delay in tests, wasn't
+# generous enough for this target org's real propagation tail -- hit on
+# 3 of 9 loads (AccountContactRelation, Campaign, GiftDesignation), each
+# confirmed genuinely successful via a direct, much-later successfulResults
+# call, well past the old 15s window. Not a tunable CLI flag: this is an
+# internal robustness fix, not a feature, same "hardcode a sane default"
+# altitude as _resolve_external_ids_to_sf_id()'s own chunk_size=200 a few
+# lines below.
+_RESULTS_RETRY_BACKOFF_SECONDS = (0, 1, 2, 4, 8, 16, 30)
 
 
 def _fetch_job_results(handler, job_id, expected_total, sleep_fn=time.sleep):

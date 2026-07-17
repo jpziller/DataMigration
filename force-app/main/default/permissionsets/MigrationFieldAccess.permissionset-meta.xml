@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
     <label>Migration Field Access</label>
-    <description>Read+Edit on MigrationID__c (Account/Contact/Opportunity/Task). Assign
+    <description>Read+Edit on MigrationID__c across migration objects. Assign
         directly -- profile-name-based FLS grants miss non-standard admin
         profiles (e.g. "Modified Admin User" on OrgFarm orgs). See hard rule 8.</description>
     <hasActivationRequired>false</hasActivationRequired>
@@ -22,6 +22,51 @@
     </fieldPermissions>
     <fieldPermissions>
         <field>Task.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>Campaign.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>GiftDesignation.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>GiftCommitment.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>GiftCommitmentSchedule.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>GiftTransaction.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>GiftTransactionDesignation.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>PartyRelationshipGroup.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>AccountContactRelation.MigrationID__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <field>CampaignMember.MigrationID__c</field>
         <readable>true</readable>
         <editable>true</editable>
     </fieldPermissions>

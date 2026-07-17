@@ -57,4 +57,4 @@ Accounting Subledger confirmed off first).
 # Citations
 
 1. Migration guide, Appendix B - Fundraising Validations, "Gift
-   Transaction Validations" (see [migration-guide.md](migration-guide.md))
+   Transaction Validations" (see [migration-guide.md](../npsp-to-npc/migration-guide.md))

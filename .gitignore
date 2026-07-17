@@ -17,3 +17,12 @@ metadata/*.json
 mapping/*.xlsx
 !metadata/.gitkeep
 !mapping/.gitkeep
+
+# Deliberate exception: the NPSP-to-NPC migration proof-of-concept's own
+# mapping workbooks ARE the versioned copy this repo wants -- a real
+# reference implementation for a future NPSP->NPC engagement, not
+# disposable single-project output. See okf/npsp-to-npc/reference-implementation.md.
+!mapping/npc_*.xlsx
+
+# Local `sf` CLI source-tracking state, per-org, per-machine -- not project source.
+.sf/
