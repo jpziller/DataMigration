@@ -530,6 +530,60 @@ def test_bulk_op_failure_error_counts_empty_on_a_fully_clean_run(sqlite_engine, 
     assert summary["failure_error_counts"] == {}
 
 
+def test_bulk_op_retries_when_results_initially_empty(sqlite_engine, tmp_path, monkeypatch):
+    """Regression test for a real bug found live during an NPSP org-seeding
+    session (roadmap #74): simple_salesforce's own JobComplete signal can
+    become accurate before get_successful_records()/get_failed_records()
+    actually have anything to serve, and bulk_op() used to read them
+    exactly once -- an empty read was indistinguishable from "zero rows
+    were ever submitted." StubBulkHandler's results_ready_after_calls=3
+    simulates that race directly; monkeypatching bulkops.time.sleep to a
+    no-op keeps this test instant despite the real backoff schedule."""
+    monkeypatch.setattr("bulkops.time.sleep", lambda seconds: None)
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({"LoadId": [1], "LegacyId__c": ["A1"], "Name": ["Row1"]})
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    sf = _stub_sf(StubBulkHandler(
+        "LegacyId__c,Name,sf__Id\nA1,Row1,001XXXXXXXXXXXAAA\n", "",
+        results_ready_after_calls=3,
+    ))
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["succeeded"] == 1
+    assert summary["failed"] == 0
+
+    result = pd.read_sql('SELECT * FROM "dbo"."Account_Load"', engine)
+    assert result.loc[0, "Id"] == "001XXXXXXXXXXXAAA"
+
+
+def test_bulk_op_gives_up_gracefully_after_max_retries(sqlite_engine, tmp_path, monkeypatch):
+    """If results never become ready within the retry budget, bulk_op()
+    must return its best-effort (empty) read rather than hang or raise --
+    an unrecoverable read should surface as a disappointing but accurate
+    summary, not an exception that hides the real work the job already
+    did on Salesforce's side."""
+    monkeypatch.setattr("bulkops.time.sleep", lambda seconds: None)
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({"LoadId": [1], "LegacyId__c": ["A1"], "Name": ["Row1"]})
+    df.to_sql("Account_Load", engine, schema="dbo", if_exists="replace", index=False)
+
+    sf = _stub_sf(StubBulkHandler(
+        "LegacyId__c,Name,sf__Id\nA1,Row1,001XXXXXXXXXXXAAA\n", "",
+        results_ready_after_calls=100,  # never ready within the 5-attempt budget
+    ))
+    summary = bo.bulk_op(
+        sf, engine, "Account", "insert", "Account_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+    assert summary["succeeded"] == 0
+    assert summary["failed"] == 0
+
+
 def test_bulk_op_logs_failure_error_counts_as_json_into_bulkopslog(sqlite_engine, tmp_path):
     """failure_error_counts must round-trip through the real BulkOpsLog
     INSERT (JSON-serialized), not just live in bulk_op()'s in-memory
