@@ -2,30 +2,25 @@
 type: ObjectValidator
 title: GiftTransaction validator
 description: Object-specific findings for GiftTransaction (Nonprofit
-  Cloud/AFNP) -- Name is required on insert despite describe() reporting
-  createable=false, same pattern as GiftCommitment/PartyRelationshipGroup.
+  Cloud/AFNP) -- Name is a genuinely required field with no default, same
+  pattern as GiftCommitment/PartyRelationshipGroup.
 tags: [object-validator, gift-transaction, nonprofit-cloud, afnp, npsp-to-npc]
 timestamp: "2026-07-17"
 ---
 # GiftTransaction validator
 
-## Name is required on insert despite describe() reporting createable=false
-**Found:** 2026-07-17, NPSP-to-NPC migration proof-of-concept.
-**What happens:** same signature as [GiftCommitment](GiftCommitment.md)'s
-own finding -- `describe('GiftTransaction')` reports `Name` as
-`createable: False`, the pre-flight check only warns, and the real Bulk
-API call fails with `REQUIRED_FIELD_MISSING: Required fields are missing:
-[Name]`.
-**Why:** see GiftCommitment.md's write-up -- this is the same
-describe()/API mismatch, confirmed independently on a third object
-([PartyRelationshipGroup](PartyRelationshipGroup.md) also hit it), strong
-enough evidence now to treat it as a real characteristic of this whole
-AFNP fundraising object family rather than a one-off.
+## Name is a genuinely required field with no default
+**Found:** 2026-07-17, NPSP-to-NPC migration proof-of-concept -- omitted
+initially, real Bulk API call failed with `REQUIRED_FIELD_MISSING:
+Required fields are missing: [Name]`.
+**Correction (2026-07-18):** see [GiftCommitment](GiftCommitment.md)'s
+own corrected write-up -- this is an ordinary required field
+(`createable: True, nillable: False, defaultedOnCreate: False`), not a
+`describe()`/API mismatch as originally (incorrectly) claimed here.
+`bulk_op()`'s pre-flight check already warned about this correctly
+before the failure; the mistake was proceeding past the warning.
 **What to do:** always send a real `Name` value. This migration reused
 the source Opportunity's/Payment's own `Name`.
-**Executable check:** none yet -- see GiftCommitment.md's own note on a
-possible pre-flight enhancement (escalate required=true + createable=false
-to a louder warning).
 
 ## GiftCommitmentId links a Gift Transaction back to its originating Gift Commitment
 **Found/confirmed:** 2026-07-17 -- not a gotcha, a design note worth
