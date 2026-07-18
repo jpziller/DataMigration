@@ -82,6 +82,34 @@ def test_global_org_alias_flag_overrides_everything(monkeypatch):
     assert captured["settings"].sf_org_alias == "SCRATCH_ORG"
 
 
+def test_global_org_flag_warns_on_partial_jwt_override(monkeypatch):
+    """Found in review: a role-suffixed auth-mode override without its
+    own full credential set silently falls back to the base org's
+    credentials -- _ctx() now surfaces this instead of staying silent."""
+    monkeypatch.setenv("SF_AUTH_MODE_TARGET", "jwt")
+    monkeypatch.setenv("SF_USERNAME_TARGET", "target_user@example.com")
+    monkeypatch.setenv("SF_CONSUMER_KEY_TARGET", "3MVG9...")
+    captured = {}
+    _stub_connect_and_engine(monkeypatch, captured)
+
+    result = CliRunner().invoke(cli, ["--org", "target", "list-objects"])
+
+    assert result.exit_code == 0, result.output
+    assert "sf_private_key_file" in result.output
+    assert "not set for this role" in result.output
+
+
+def test_global_org_flag_no_warning_when_fully_overridden(monkeypatch):
+    monkeypatch.setenv("SF_ORG_ALIAS_TARGET", "NPC_TARGET_v2")
+    captured = {}
+    _stub_connect_and_engine(monkeypatch, captured)
+
+    result = CliRunner().invoke(cli, ["--org", "target", "list-objects"])
+
+    assert result.exit_code == 0, result.output
+    assert "not set for this role" not in result.output
+
+
 def test_no_org_flag_leaves_settings_unchanged(monkeypatch):
     """Omitting --org/--org-alias entirely must behave exactly as before
     this feature existed -- plain .env settings, no role resolution."""

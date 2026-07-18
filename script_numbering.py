@@ -128,13 +128,32 @@ def _disqualifying_match(other_object_name, text_value):
     the compound name against its own delimited filename (only the
     merged, no-delimiter naming convention matches_token()'s docstring
     recommends). This strips every non-alphanumeric character from
-    text_value before comparing, so "AccountContactRelation" correctly
+    BOTH sides before comparing, so "AccountContactRelation" correctly
     matches either filename style. Deliberately looser than
     matches_token() -- safe here because this is only ever used to decide
     whether to EXCLUDE a candidate; failing toward "don't disqualify" is
-    the unsafe direction, not this one."""
-    normalized = re.sub(r"[^A-Za-z0-9]", "", text_value)
-    return other_object_name.lower() in normalized.lower()
+    the unsafe direction, not this one.
+
+    Found in review: an earlier version only stripped text_value, not
+    other_object_name, so any object name containing an underscore --
+    trivially true for a real custom-object API name ending in "__c" --
+    could never disqualify anything, since an underscore-containing
+    string can never be a substring of one with every underscore already
+    stripped. Confirmed live: `_disqualifying_match("Payment_Method",
+    "090_payment_method_load.sql")` returned False before this fix. One
+    residual edge remains even now, matching matches_token()'s own
+    already-disclosed limitation for the identical reason: a real custom
+    object's "__c" suffix has no counterpart in a conventionally-named
+    filename (nobody names a script "..._method_c_load.sql"), so
+    "Payment_Method__c" still won't disqualify a file named
+    "090_payment_method_load.sql" -- normalizing strips the suffix's
+    underscores but leaves a trailing "c" with nothing in the filename to
+    match against. Not fixed here; a caller with a custom object in
+    known_objects should pass its name without the "__c" suffix if this
+    matters for a specific case."""
+    normalized_text = re.sub(r"[^A-Za-z0-9]", "", text_value).lower()
+    normalized_other = re.sub(r"[^A-Za-z0-9]", "", other_object_name).lower()
+    return normalized_other in normalized_text
 
 
 def script_filename_for(object_name, directory, known_objects=None):
@@ -166,9 +185,43 @@ def script_filename_for(object_name, directory, known_objects=None):
     known_objects set (or none at all) can still hit the original
     ambiguity. The naming-convention workaround in matches_token()'s own
     docstring (no delimiter between a compound name's embedded segments)
-    remains the safest choice regardless."""
+    remains the safest choice regardless.
+
+    Only ever returns the single highest-numbered survivor -- silent when
+    more than one genuinely different, real script both legitimately
+    implement object_name (e.g. this project's own GiftCommitment, built
+    from two different source routing branches as
+    160_npc_giftcommitment_from_rd_load.sql and
+    180_npc_giftcommitment_from_opportunity_load.sql). known_objects
+    can't disambiguate that case at all -- it only ever excludes a
+    candidate that belongs to a different, longer object name, not one
+    that belongs to the SAME object name as a second, equally-valid
+    script. A caller where picking the wrong one of several real
+    candidates is actively harmful (not just "no link shown") should call
+    script_candidates_for() directly and decide how to handle more than
+    one survivor, rather than silently trust this function's own
+    highest-number-wins tiebreak -- see mapping_doc.py's
+    set_transform_script() for the pattern."""
+    candidates = script_candidates_for(object_name, directory, known_objects=known_objects)
+    return candidates[-1] if candidates else ""
+
+
+def script_candidates_for(object_name, directory, known_objects=None):
+    """Every real script filename matching object_name in directory,
+    sorted ascending (so the highest-numbered -- "most recent"/"actually
+    used" -- is last), after known_objects disqualification (see
+    script_filename_for()'s own docstring for exactly what that does and
+    its real limits). Empty list if directory doesn't exist or nothing
+    matches. script_filename_for() is a thin convenience wrapper around
+    this that just returns the last candidate (or "") -- call this
+    directly instead when a caller needs to know whether MORE THAN ONE
+    real, distinct script matched, since script_filename_for()'s own
+    highest-number tiebreak can silently pick the wrong one of two
+    equally-valid scripts for the same object name (a real gap found in
+    review -- known_objects only ever disqualifies a DIFFERENT, longer
+    object name's file, never a second file for the SAME object name)."""
     if not os.path.isdir(directory):
-        return ""
+        return []
     candidates = sorted(
         f for f in os.listdir(directory)
         if f.lower().endswith(".sql") and matches_token(object_name, f)
@@ -179,4 +232,4 @@ def script_filename_for(object_name, directory, known_objects=None):
             f for f in candidates
             if not any(len(o) > len(object_name) and _disqualifying_match(o, f) for o in others)
         ]
-    return candidates[-1] if candidates else ""
+    return candidates

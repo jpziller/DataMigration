@@ -8,7 +8,7 @@ role-suffixed lookups are read live, via monkeypatch.
 """
 import pytest
 
-from config import Settings, resolve_org_settings
+from config import Settings, resolve_org_settings, partial_override_warnings
 
 
 def _base_settings(**overrides):
@@ -69,3 +69,42 @@ def test_resolve_org_settings_rejects_unknown_role():
     s = _base_settings()
     with pytest.raises(ValueError, match="Unknown org role"):
         resolve_org_settings(s, "staging")
+
+
+def test_partial_override_warnings_empty_when_cli_alias_fully_overridden(monkeypatch):
+    monkeypatch.setenv("SF_ORG_ALIAS_TARGET", "NPC_TARGET_v2")
+    s = _base_settings()
+    resolved = resolve_org_settings(s, "target")
+    assert partial_override_warnings(resolved, "target") == []
+
+
+def test_partial_override_warnings_flags_incomplete_jwt_override(monkeypatch):
+    """Found in review: this is the exact real scenario
+    test_resolve_org_settings_can_override_auth_mode_and_credentials above
+    already exercises -- SF_AUTH_MODE_TARGET=jwt plus username/consumer
+    key, but no SF_PRIVATE_KEY_FILE_TARGET/SF_DOMAIN_TARGET -- silently
+    falling back to the base (likely source-org) private key file and
+    domain."""
+    monkeypatch.setenv("SF_AUTH_MODE_TARGET", "jwt")
+    monkeypatch.setenv("SF_USERNAME_TARGET", "target_user@example.com")
+    monkeypatch.setenv("SF_CONSUMER_KEY_TARGET", "3MVG9...")
+    s = _base_settings()
+    resolved = resolve_org_settings(s, "target")
+    assert partial_override_warnings(resolved, "target") == ["sf_private_key_file", "sf_domain"]
+
+
+def test_partial_override_warnings_empty_when_jwt_fully_overridden(monkeypatch):
+    monkeypatch.setenv("SF_AUTH_MODE_TARGET", "jwt")
+    monkeypatch.setenv("SF_USERNAME_TARGET", "target_user@example.com")
+    monkeypatch.setenv("SF_CONSUMER_KEY_TARGET", "3MVG9...")
+    monkeypatch.setenv("SF_PRIVATE_KEY_FILE_TARGET", "./target-server.key")
+    monkeypatch.setenv("SF_DOMAIN_TARGET", "login")
+    s = _base_settings()
+    resolved = resolve_org_settings(s, "target")
+    assert partial_override_warnings(resolved, "target") == []
+
+
+def test_partial_override_warnings_unrecognized_auth_mode_returns_empty(monkeypatch):
+    s = _base_settings(sf_auth_mode="sso")
+    resolved = resolve_org_settings(s, "target")
+    assert partial_override_warnings(resolved, "target") == []

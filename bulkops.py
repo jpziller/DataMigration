@@ -168,10 +168,22 @@ def _read_result_csv(csv_text):
 _RESULTS_RETRY_BACKOFF_SECONDS = (0, 1, 2, 4, 8, 16, 30)
 
 
-def _fetch_job_results(handler, job_id, expected_total, sleep_fn=time.sleep):
+def _fetch_job_results(handler, job_id, expected_total, sleep_fn=None):
     """(successes_df, failures_df) for one completed Bulk API 2.0 job --
     retries get_successful_records()/get_failed_records() with backoff
     instead of a single unretried read.
+
+    sleep_fn defaults to None, resolved to time.sleep inside the function
+    body rather than bound as a literal default value at def-time --
+    found in review: `sleep_fn=time.sleep` in the signature captures the
+    function object once, at import time, so a test's
+    `monkeypatch.setattr("bulkops.time.sleep", ...)` never reaches this
+    already-bound reference. Confirmed live: the two retry tests in
+    tests/test_bulkops_sqlite_integration.py silently slept for real
+    (3s/61s, matching the real backoff schedule exactly) instead of
+    running instantly as their own comments claimed -- the same class of
+    hidden-real-sleep problem this file's own #74 fix was built to catch,
+    reintroduced by the fix's own test-injection seam.
 
     Found live (roadmap #74, an NPSP org-seeding session): simple_salesforce's
     own wait_for_job() polls the JOB STATUS endpoint until state ==
@@ -205,6 +217,7 @@ def _fetch_job_results(handler, job_id, expected_total, sleep_fn=time.sleep):
     accurate but disappointing summary, not an exception that hides the
     real work the job already did.
     """
+    sleep_fn = sleep_fn or time.sleep
     succ = fail = pd.DataFrame()
     for delay in _RESULTS_RETRY_BACKOFF_SECONDS:
         if delay:

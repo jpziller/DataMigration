@@ -24,10 +24,13 @@
    npsp__Payment_Acknowledgment_Status__c (To Be Acknowledged/Acknowledged/
    Do Not Acknowledge -> To Be Sent/Sent/Don't Send).
 
-   Name required on insert despite describe() reporting createable=false
-   -- same real describe()/API mismatch as PartyRelationshipGroup.Name
-   (120) and GiftCommitment.Name (160), confirmed live via
-   REQUIRED_FIELD_MISSING. Reuses the Opportunity's own Name. */
+   Name is a genuinely required field with no platform default (confirmed
+   live via REQUIRED_FIELD_MISSING when omitted -- describe() shows
+   createable: True, nillable: False, defaultedOnCreate: False, same as
+   PartyRelationshipGroup.Name (120) and GiftCommitment.Name (160); not a
+   describe()/API mismatch as an earlier version of this comment claimed,
+   see validators/GiftTransaction.md's own correction). Reuses the
+   Opportunity's own Name. */
 
 DROP TABLE IF EXISTS [dbo].[GiftTransactionFromOpp_Load];
 

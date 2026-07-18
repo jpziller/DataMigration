@@ -113,3 +113,47 @@ def resolve_org_settings(s: Settings, role: str) -> Settings:
         if role_value:
             overrides[field] = role_value
     return replace(s, **overrides)
+
+
+# Which sf_* fields actually matter for each auth mode -- used only by
+# partial_override_warnings() below, never by resolve_org_settings()
+# itself (connect_salesforce() in sf_client.py is the real source of
+# truth for which fields each mode reads; this is a lighter-weight,
+# advisory-only mirror of that, not a duplicate enforcement point).
+_AUTH_MODE_RELEVANT_FIELDS = {
+    "cli": ["sf_org_alias"],
+    "jwt": ["sf_username", "sf_consumer_key", "sf_private_key_file", "sf_domain"],
+    "password": ["sf_username", "sf_password", "sf_security_token", "sf_domain"],
+}
+
+
+def partial_override_warnings(resolved: Settings, role: str) -> list:
+    """Field names relevant to resolved's own (possibly role-overridden)
+    sf_auth_mode that this role left falling back to the base,
+    unsuffixed value instead of a role-specific SF_<FIELD>_<ROLE>
+    override -- found in review: resolve_org_settings()'s per-field
+    fallback means a partially-configured role override (e.g.
+    SF_ORG_ALIAS_TARGET and SF_AUTH_MODE_TARGET=jwt set, but
+    SF_CONSUMER_KEY_TARGET/SF_PRIVATE_KEY_FILE_TARGET left unset) can
+    silently produce an internally-inconsistent credential hybrid --
+    still pointed at source's own connected app -- with no error and
+    nothing in cli.py's own `[org: ...]` echo to reveal it.
+
+    Deliberately advisory, not a hard gate, and deliberately not folded
+    into resolve_org_settings() itself (whose own return type and every
+    existing caller/test stays exactly as it was) -- call this
+    separately, after resolving, only where a human-facing warning
+    actually helps (see cli.py's _ctx()). A field showing up here isn't
+    necessarily wrong -- e.g. two orgs might deliberately share one
+    connected app -- so word any surfaced warning as "confirm this is
+    intentional," not "this is broken." Returns [] when every field
+    relevant to the resolved auth mode has its own role-specific
+    override, or when the resolved auth mode isn't one of "cli"/"jwt"/
+    "password" (an unrecognized mode is connect_salesforce()'s own error
+    to raise, not this function's job to flag)."""
+    role_suffix = role.upper()
+    relevant = _AUTH_MODE_RELEVANT_FIELDS.get(resolved.sf_auth_mode, [])
+    return [
+        field for field in relevant
+        if not _get(f"{_SF_FIELD_ENV_KEYS[field]}_{role_suffix}")
+    ]
