@@ -162,6 +162,34 @@ venv may not be active in a fresh shell:
 - Inspect org:  `.venv/Scripts/python.exe cli.py list-objects`
 -               `.venv/Scripts/python.exe cli.py describe Account`
 -               `.venv/Scripts/python.exe cli.py dump-describe Account`
+-               `.venv/Scripts/python.exe cli.py sample-reference-records Account --ids <id1,id2,...>`
+                (roadmap #78: `describe()` and page layouts don't show the full picture of what a
+                *working* record actually looks like — especially on complex packaged/managed
+                objects, where the platform's own automation populates fields never exposed in the
+                UI (a pattern familiar from CPQ migrations, confirmed again live on Nonprofit
+                Cloud's fundraising objects — see `ROADMAP.md` #78). Queries a small, ideally
+                human-identified set of real records (`--ids`, the recommended input — only a human
+                knows which records are genuinely good examples, especially for a package object
+                with no real data yet that needs one hand-created through the real UI flow first;
+                `--where "<SOQL WHERE>"` when you know a filter but not specific Ids; neither given
+                falls back to the `--limit` most-recently-created records, not the recommended
+                path) and reports every field's real shape across them — populated-N-of-M count,
+                sample values, and the `describe()` flags (`createable`/`nillable`/
+                `defaultedOnCreate`) side by side with what the sample actually shows, since those
+                flags alone can't always be trusted (confirmed both directions live: a field can
+                report required when it isn't practically enforced, and reachable when it's
+                genuinely required with no default). Also reports an object-level automation
+                summary (active validation-rule/trigger/Flow counts) from `dbo.ObjectAutomationRisk`
+                if `analyze-org-risk` has already been run — `--schema` controls where that's read
+                from, reported as "not checked" rather than a silently misleading zero if that table
+                doesn't exist yet. Deliberately **not** gated to before a transform exists — reach
+                for it at any point in a project (before building, mid-sprint, after a UAT finding
+                reveals a gap), the same way `query`/`describe` themselves are used, not a one-time
+                Standard Workflow step. Complements `compare-reference-record` below rather than
+                replacing it — that one needs a `*_Load` table to already exist and can only diff
+                fields a transform already populates; this one needs neither, and exists
+                specifically to surface a field nobody thought to include yet. Read-only, safe
+                without confirmation.)
 -               `.venv/Scripts/python.exe cli.py record-counts Account Contact [--all-objects]`
                 (one HTTP call for many objects' record counts via `/limits/recordCount` —
                 much cheaper than a SOQL `COUNT()` per object, but an **approximate, cached**
@@ -838,7 +866,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
 `/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
 `/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
-`/compare-reference-record`, `/resolve-record-types`, `/generate-target-data-model`,
+`/compare-reference-record`, `/sample-reference-records`, `/resolve-record-types`, `/generate-target-data-model`,
 `/generate-source-data-model`, `/add-bulk-load-sort-column`,
 `/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
@@ -1119,6 +1147,16 @@ don't jump straight to writing SQL:
     norm every established migration tool uses, just with a smarter
     starting point (see `ROADMAP.md` #15).
 
+**`sample-reference-records` isn't one of the numbered steps above on
+purpose** (roadmap #78) — real migration work happens in sprints, and the
+true shape of a target object is often not fully understood until UAT
+surfaces it, so this is meant to be reached for at any point, not gated
+to a single step. Genuinely useful before step 6 (learning an unfamiliar
+object's real shape before writing the transform), but just as useful
+mid-sprint when refining, or after a UAT finding reveals a field nobody
+thought to include — the same way `query`/`describe` themselves get used
+throughout a project, not just once.
+
 ## Licensing
 MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,
 and redistribute (including commercially), provided the copyright notice is
@@ -1285,15 +1323,17 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
 - `load_order.py`, `profiling.py`, `query_tool.py`, `mock_data.py`,
   `snowfakery_data.py`, `mapping_doc.py`, `auto_mapper.py`, `solution_doc.py`,
   `risk_analyzer.py`, `data_cloud.py`, `batch_advisor.py`, `migration_run_book.py`,
-  `reference_record.py`, `record_types.py`, `data_model_diagram.py`
+  `reference_record.py`, `sample_reference_records.py`, `record_types.py`,
+  `data_model_diagram.py`
   — the Data Architect toolbelt (load-order analysis, profiling, ad hoc
   query, single-object and relationship-aware mock data, mapping doc,
   auto-mapping, solution document generation, org automation risk analysis,
   Data Cloud/D360 query and status tooling, dynamic batch-size recommendations,
   the Migration Run Book, reference-record pull/compare — roadmap #51,
-  RecordType DeveloperName resolution — roadmap #36, SDMN-style Mermaid
-  data model ERDs — roadmap #57, Mermaid process-flow diagrams from a
-  Migration Run Book tab — roadmap #52).
+  reference-record sampling to learn a target object's real field-level
+  shape — roadmap #78, RecordType DeveloperName resolution — roadmap #36,
+  SDMN-style Mermaid data model ERDs — roadmap #57, Mermaid process-flow
+  diagrams from a Migration Run Book tab — roadmap #52).
 - `validators/` — the validators library (see its own section above and
   `validators/README.md`): `validators/system/*.md` formalizes Hard Rules
   6/7/12/15 as named, retrievable checks; `validators/<Object>.md` (e.g.
