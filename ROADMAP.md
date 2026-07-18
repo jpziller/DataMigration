@@ -5255,6 +5255,55 @@ recorded as a known pattern in the validators library rather than a new
 automated guard, consistent with this library's own stated scope
 ("advisory, not a reimplementation of the real checks").
 
+**Follow-up (2026-07-18): real data-shape gaps found by a second
+architect's live review, fixed using roadmap #78's own new skill.** A
+second architect reviewed the migrated data in `NPC_TARGET_v2` and flagged
+a `GiftTransaction` missing its `GiftCommitmentSchedule` link and no
+visible household grouping. Diagnosed with `sample-reference-records`
+against real, non-migrated reference records in the same org (exactly
+roadmap #78's intended use, on its first real application beyond the
+session that built it):
+- `GiftTransaction.GiftCommitmentScheduleId` was never populated by either
+  routing branch — genuinely missing, not by design. Fixed for the
+  Recurring-Donation branch (`200`) only; the multi-Payment-Opportunity
+  branch (`210`) can't get the same fix without violating AFNP's own
+  "Single Transaction for Custom Schedule" validation, discovered while
+  designing the fix.
+- The 8 migrated `PartyRelationshipGroup` records do exist and link
+  correctly — but `Category` was invented on every one
+  (`'Staying under same roof'`) when real reference data leaves it unset
+  0 of 10 sampled times. Now left unset; address fields added instead
+  (sourced from the household Account's own Billing address, evidenced
+  2-3/10 in real data).
+- **Real root cause**: `AccountContactRelation` (the object that actually
+  flags a person as "in" a household group) only ever set
+  `AccountId`/`ContactId`/`IsActive`. Real reference data consistently
+  populates `IsIncludedInGroup`/`IsPrimaryMember`; without them a migrated
+  household doesn't visually group its members even with valid Account/
+  PartyRelationshipGroup records on file. New
+  `validators/AccountContactRelation.md` documents this.
+- **A deeper root cause under the GiftCommitmentScheduleId gap**: 3 of the
+  4 original RD-derived `GiftCommitmentSchedule` inserts had actually
+  failed live all along (`FIELD_INTEGRITY_EXCEPTION: ...doesn't overlap
+  with an existing schedule`), unnoticed since the original pass. Root
+  cause, confirmed on 6 of 6 real records: Nonprofit Cloud auto-creates a
+  `GiftCommitmentSchedule` the moment a `GiftCommitment` is inserted with
+  `ScheduleType = 'Recurring'` — an explicit second insert collides with
+  it. Fixed by no longer attempting that insert for Recurring-type
+  commitments, and by deriving `GiftCommitmentScheduleId` downstream from a
+  fresh live replicate joined by the real `GiftCommitmentId`, not local
+  Load-table bookkeeping. New `validators/GiftCommitmentSchedule.md` and
+  `okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md`.
+- **General process lesson**: a corrective reload can't safely filter
+  cleanup on `MigrationID__c != null` alone — an auto-generated child
+  record like the one above carries no migration key, only a real
+  relationship back to a tagged parent. Written up as a reusable
+  `<Object>_Delete` staging-table pattern in `docs/MIGRATION_PLAYBOOK.md`'s
+  new "Corrective reload" section.
+
+Full account: `postmortems/2026-07-17-npsp-to-npc-poc.md`'s own
+2026-07-18 follow-up section.
+
 ## 78. `sample-reference-records`: learn a target object's real shape from real records (BUILT 2026-07-18)
 
 Motivated directly by roadmap #77's own `Name`-field finding, and the

@@ -13,7 +13,20 @@
    Name-required-on-insert) -- see that script's header for the full
    picklist-mapping rationale, not repeated here. DonorId still resolves
    through the parent Opportunity's npsp__Primary_Contact__c (Payment
-   itself carries no independent donor reference). */
+   itself carries no independent donor reference).
+
+   GiftCommitmentScheduleId is deliberately NOT populated here (checked
+   2026-07-18, architect review pass alongside 200's own fix). 190 builds
+   exactly one Custom-type GiftCommitmentSchedule per Opportunity, but this
+   script fans out to multiple Gift Transactions per Opportunity (one per
+   real Payment -- 2 for Opp #5, 3 for Opp #6). AFNP's own "Single
+   Transaction for Custom Schedule" validation (Appendix B --
+   okf/nonprofit-cloud/gift-transaction-validations.md) forbids linking
+   more than one Gift Transaction to the same Custom schedule, so linking
+   every Payment's transaction to that one shared schedule would fail live.
+   These Gift Transactions still correctly carry GiftCommitmentId (the
+   parent commitment, not the per-installment schedule) -- see
+   validators/GiftTransaction.md. */
 
 DROP TABLE IF EXISTS [dbo].[GiftTransactionFromPayment_Load];
 

@@ -7,7 +7,7 @@ description: Official, platform-enforced validation rules on the
   discovered; a documented target-platform business rule.
 resource: https://resources.docs.salesforce.com/rel1/doc/en-us/static/pdf/Agentforce_Nonprofit_Migration_Guide_v2.pdf
 tags: [npsp, npc, afnp, gift-transaction, validation, fundraising]
-timestamp: "2026-07-16"
+timestamp: "2026-07-18"
 ---
 # Gift Transaction validations (AFNP)
 
@@ -52,7 +52,24 @@ Gift Commitment/Gift Commitment Schedule lookups. A migration loading
 historical Paid transactions must get these fields right on **insert**,
 since a post-load correction pass can't touch them without first
 disabling the toggle-able ones (and the two marked `Yes*` need
-Accounting Subledger confirmed off first).
+Accounting Subledger confirmed off first). **Confirmed live** (this
+framework's own NPSP-to-NPC proof-of-concept, 2026-07-18): a migration
+that forgets `GiftCommitmentScheduleId` on insert and only notices later
+cannot fix it with a plain `bulkops upsert` once the transaction is
+already `Paid` -- "Updating the Gift Commitment Schedule" locks it. The
+correction needed a delete-then-reinsert, not an in-place update.
+
+**"Single Transaction for Custom Schedule" in a real fan-out migration
+branch**: also confirmed live in the same proof-of-concept. A
+multi-Payment Opportunity naturally produces one Custom-type Gift
+Commitment Schedule but several Gift Transactions (one per Payment) --
+linking all of them to that one shared schedule violates this rule.
+Practical effect: a fan-out routing branch like this can carry
+`GiftCommitmentId` (the parent commitment) on every resulting
+transaction, but not `GiftCommitmentScheduleId`, unless the design
+builds a schedule per transaction instead of per parent. See
+`validators/GiftTransaction.md` and
+`okf/npsp-to-npc/opportunity-routing.md`.
 
 # Citations
 

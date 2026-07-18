@@ -136,6 +136,90 @@ The 3 official Appendix B validation-rule docs (previously inside
   two-org config. Not fixed this pass; low urgency, easy workaround
   (`--org` on any command).
 
+## Follow-up: architect review of the live migrated data (2026-07-18)
+
+A second architect (not this framework) reviewed the real migrated data in
+`NPC_TARGET_v2` and flagged two concerns: a specific `GiftTransaction` not
+connected to its `GiftCommitmentSchedule`, and no visible household
+grouping ("PartyRelationshipGroup") for data that came from an NPSP
+household. Per explicit instruction, diagnosed using `sample-reference-records`
+(built earlier the same session) against real, non-migrated reference
+records in the same org — comparing what a genuine, human-created record
+looks like against what this migration produced, rather than guessing.
+
+**Confirmed findings:**
+- `GiftTransaction.GiftCommitmentScheduleId` was genuinely never populated
+  by either routing branch (`200`/`210`) — a real gap, not a deliberate
+  omission. Fixed for the Recurring-Donation branch (`200`) only; the
+  multi-Payment-Opportunity branch (`210`) can't get the same fix without
+  violating AFNP's own "Single Transaction for Custom Schedule" validation
+  (discovered while designing the fix, not previously surfaced by this
+  project even though it was already sitting in the extracted Appendix B
+  table).
+- The 8 migrated `PartyRelationshipGroup` records do genuinely exist,
+  correctly linked — the "no PRGs" claim wasn't about record existence.
+  But `PartyRelationshipGroup.Category` was invented
+  (`'Staying under same roof'`) on every one of them, when real reference
+  data in the same org leaves it unset 0 of 10 sampled times — exactly the
+  kind of self-inflicted shape defect this project's own postmortem
+  (below) had already flagged as an open question worth revisiting, now
+  confirmed with real evidence and fixed (left unset).
+- **The real likely root cause**: `AccountContactRelation` — the object
+  that actually flags a person as "in" a household group for UI purposes —
+  only ever set `AccountId`/`ContactId`/`IsActive`. Real reference data
+  populates `IsIncludedInGroup`/`IsPrimaryMember` consistently; without
+  them, a migrated household can have a perfectly valid Account and
+  PartyRelationshipGroup and still not visually group its members the way
+  a real household does. `Account` has no direct lookup back to
+  `PartyRelationshipGroup` at all, confirming the grouping signal lives on
+  `AccountContactRelation`, not the group record itself.
+
+**What this confirms about the methodology**: this is the second time this
+project's own tooling (built specifically because of the CPQ-migration
+lesson about `describe()`/page-layouts not showing a working record's real
+shape) caught a real defect that structural correctness checks alone
+missed — every affected record loaded successfully and passed every hard
+rule; the gap was in field-level shape, only visible by comparing against
+real reference records.
+
+**Deeper root cause found while designing the GiftCommitmentScheduleId
+fix**: fixing `200`'s missing field turned up something bigger than a
+missing column. Querying the live org for the schedule tied to the
+architect-flagged record's own `GiftCommitment` found a real schedule
+Id (`6csfn000000E5MSAA0`) that had never been captured anywhere in the
+local mirror DB. Tracing why led to `GiftCommitmentSchedule_Load`'s own
+`Error` column — 3 of this project's 4 original Recurring-Donation-derived
+schedule inserts had actually **failed live** with
+`FIELD_INTEGRITY_EXCEPTION: ...doesn't overlap with an existing schedule`,
+silently, since the original migration pass, never investigated until now.
+Root cause, confirmed on 6 of 6 real records: Nonprofit Cloud auto-creates
+a `GiftCommitmentSchedule` the moment a `GiftCommitment` is inserted with
+`ScheduleType = 'Recurring'` — this project's own explicit insert for
+those 3 was redundant and rejected by the platform's own validation. Fixed
+by (a) `170` no longer attempting an explicit insert for Recurring-type
+commitments at all, and (b) `200` deriving `GiftCommitmentScheduleId` from
+a fresh, live replicate of `GiftCommitmentSchedule` joined by the real
+`GiftCommitmentId`, not from the local Load table's own bookkeeping (which
+only ever reflects what this migration explicitly tried to insert). See
+`okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md` and
+`validators/GiftCommitmentSchedule.md`.
+
+**Process lesson, captured for the next corrective pass**: this also
+surfaced a gap in how a corrective reload should work. A cleanup filtered
+only on `MigrationID__c != null` would silently miss any auto-generated
+child record like this — it carries no migration key of its own, only a
+real relationship back to a migration-key-tagged parent. Written up as a
+general, reusable pattern (the `<Object>_Delete` staging-table technique,
+built from both migration-key-tagged records **and** relationship-traced
+child records, unioned) in `docs/MIGRATION_PLAYBOOK.md`'s new "Corrective
+reload" section — not NPSP/NPC-specific, since any migration doing a
+second pass over an org that already has data can hit this same gap.
+
+See `validators/GiftTransaction.md`, `validators/PartyRelationshipGroup.md`,
+`validators/GiftCommitmentSchedule.md`, and the new
+`validators/AccountContactRelation.md` for the full technical write-ups,
+and `ROADMAP.md` #77 for the tracking entry.
+
 ## Open questions for next time
 
 - **The Allocation proportional-split default** (this project's own
@@ -145,11 +229,13 @@ The 3 official Appendix B validation-rule docs (previously inside
   split, would want a different rule. See
   `okf/npsp-to-npc/allocation-to-gift-transaction-designation.md`'s own
   closing note.
-- **`PartyRelationshipGroup.Category = 'Staying under same roof'`** was
-  this project's own default for a migrated NPSP household — not a
-  perfect semantic match (no exact "Household" `Category` value exists).
-  Worth a real client conversation, not an assumed default, on a real
-  engagement.
+- **`PartyRelationshipGroup.Category`** — resolved 2026-07-18 (see the
+  follow-up above): real reference-record evidence showed the
+  `'Staying under same roof'` default didn't match actual usage at all
+  (0/10 real records populate `Category`), so it's now left unset by
+  default. Still worth a real client conversation on a real engagement if
+  there's a specific reason to populate it — just not an assumed default
+  anymore.
 - **The `matches_token()` fix itself** (ROADMAP #76) is scoped but not
   built — worth doing before a third compound-object-name collision
   happens on some future project that doesn't have this post-mortem's

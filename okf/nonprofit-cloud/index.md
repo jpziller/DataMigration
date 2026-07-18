@@ -41,3 +41,7 @@ migration's source data in any way.
   `GiftCommitment`/`GiftTransaction`/`PartyRelationshipGroup` all need a
   real `Name` value on insert, with no natural 1:1 source field —
   confirmed on 3 separate objects.
+* [GiftCommitmentSchedule auto-creation](gift-commitment-schedule-auto-creation.md) -
+  a Recurring-type GiftCommitment gets its GiftCommitmentSchedule
+  auto-created by the platform; an explicit insert for one collides with
+  it. Confirmed on 6 of 6 real records.
