@@ -207,6 +207,59 @@ def test_sync_run_book_from_log_inserts_new_row_for_a_retry_with_no_placeholder(
     assert result["inserted"] == 1
 
 
+def test_sync_run_book_from_log_disambiguates_same_object_different_scripts_via_source_table(
+    sqlite_engine, tmp_path, monkeypatch,
+):
+    """Reproduces the real, live bug found 2026-07-18 syncing this
+    project's own Migration Run Book after a corrective reload: two real
+    scripts both implement GiftTransaction from different source-routing
+    branches (200 from Opportunity, 210 from Payment) -- the higher-
+    numbered one, 210, would silently win via script_filename_for()'s own
+    tiebreak even for a log row that actually ran 200. SourceTable (each
+    script's own real SELECT INTO target) is the disambiguating signal;
+    without it, this test's own lower-numbered script would never be
+    picked, matching the exact wrong-link bug found live."""
+    engine, _ = sqlite_engine
+    scripts_dir = tmp_path / "transforms"
+    scripts_dir.mkdir()
+    (scripts_dir / "200_npc_gifttransaction_from_opportunity_load.sql").write_text(
+        "SELECT Id AS LoadId INTO [dbo].[GiftTransactionFromOpp_Load] FROM [dbo].[Opportunity];"
+    )
+    (scripts_dir / "210_npc_gifttransaction_from_payment_load.sql").write_text(
+        "SELECT Id AS LoadId INTO [dbo].[GiftTransactionFromPayment_Load] FROM [dbo].[Payment];"
+    )
+    monkeypatch.setattr(mrb, "_TRANSFORMS_DIR", str(scripts_dir))
+
+    _seed_load_order(engine, rows=[("GiftTransaction", 0, 1)])
+    output_path = str(tmp_path / "run_book.xlsx")
+    mrb.generate_migration_run_book(
+        output_path, "Dev1", engine=engine, object_names=["GiftTransaction"], schema="dbo",
+    )
+
+    bo.enable_bulkops_logging(engine, schema="dbo")
+    df = pd.DataFrame({"LoadId": [1], "LegacyId__c": ["A1"], "Name": ["Row1"]})
+    df.to_sql("GiftTransactionFromOpp_Load", engine, schema="dbo", if_exists="replace", index=False)
+    sf = StubSF({"GiftTransaction": _FIELDS}, {"GiftTransaction": StubBulkHandler(
+        "LegacyId__c,Name,sf__Id\nA1,Row1,001X001\n", "",
+    )})
+    bo.bulk_op(
+        sf, engine, "GiftTransaction", "insert", "GiftTransactionFromOpp_Load",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        email_deliverability="no-access",
+    )
+
+    mrb.sync_run_book_from_log(engine, output_path, "Dev1", schema="dbo")
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["Dev1"]
+    objects = [
+        row[1].value for row in ws.iter_rows(min_row=mrb._FIRST_DATA_ROW)
+        if row[1].value
+    ]
+    assert "200_npc_gifttransaction_from_opportunity_load.sql" in objects
+    assert "210_npc_gifttransaction_from_payment_load.sql" not in objects
+
+
 def test_sync_source_ingestion_to_run_book_via_import_directory(sqlite_engine, tmp_path):
     engine, _ = sqlite_engine
     _seed_load_order(engine, rows=[("Account", 0, 1)])

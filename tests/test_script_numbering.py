@@ -221,3 +221,53 @@ def test_script_filename_for_disqualifies_using_underscored_known_object(tmp_pat
     (tmp_path / "090_payment_method_load.sql").write_text("")
     known = {"Payment", "Payment_Method"}
     assert sn.script_filename_for("Payment", str(tmp_path), known_objects=known) == "020_payment_load.sql"
+
+
+def test_script_filename_for_source_table_picks_the_matching_candidate(tmp_path):
+    """The real, live bug this was built for (2026-07-18): two genuinely
+    different scripts both implement GiftTransaction from different
+    source branches -- script_filename_for()'s own highest-number-wins
+    tiebreak always picks 210, silently wrong for a log row that actually
+    ran 200. SourceTable (each script's own real SELECT INTO target)
+    disambiguates correctly regardless of number order."""
+    (tmp_path / "200_npc_gifttransaction_from_opportunity_load.sql").write_text(
+        "SELECT Id INTO [dbo].[GiftTransactionFromOpp_Load] FROM [dbo].[Opportunity];"
+    )
+    (tmp_path / "210_npc_gifttransaction_from_payment_load.sql").write_text(
+        "SELECT Id INTO [dbo].[GiftTransactionFromPayment_Load] FROM [dbo].[Payment];"
+    )
+    candidates = sn.script_candidates_for("GiftTransaction", str(tmp_path))
+    assert candidates == [
+        "200_npc_gifttransaction_from_opportunity_load.sql",
+        "210_npc_gifttransaction_from_payment_load.sql",
+    ]
+    assert sn.script_filename_for_source_table(
+        candidates, str(tmp_path), "GiftTransactionFromOpp_Load"
+    ) == "200_npc_gifttransaction_from_opportunity_load.sql"
+    assert sn.script_filename_for_source_table(
+        candidates, str(tmp_path), "GiftTransactionFromPayment_Load"
+    ) == "210_npc_gifttransaction_from_payment_load.sql"
+
+
+def test_script_filename_for_source_table_returns_empty_when_no_match():
+    assert sn.script_filename_for_source_table(
+        ["200_foo.sql"], "irrelevant", "SomeOtherTable_Load"
+    ) == ""
+
+
+def test_script_filename_for_source_table_returns_empty_when_source_table_falsy(tmp_path):
+    (tmp_path / "200_foo.sql").write_text("SELECT 1 INTO [dbo].[Foo_Load];")
+    assert sn.script_filename_for_source_table(["200_foo.sql"], str(tmp_path), None) == ""
+    assert sn.script_filename_for_source_table(["200_foo.sql"], str(tmp_path), "") == ""
+
+
+def test_script_filename_for_source_table_does_not_prefix_match_a_longer_table_name(tmp_path):
+    """SourceTable matching must be a real boundary match, not a bare
+    substring -- "GiftTransactionFromOpp_Load" must not match a script
+    whose INTO target is "GiftTransactionFromOpp_Load_v2" or similar."""
+    (tmp_path / "200_foo.sql").write_text(
+        "SELECT Id INTO [dbo].[GiftTransactionFromOpp_LoadV2] FROM [dbo].[Opportunity];"
+    )
+    assert sn.script_filename_for_source_table(
+        ["200_foo.sql"], str(tmp_path), "GiftTransactionFromOpp_Load"
+    ) == ""

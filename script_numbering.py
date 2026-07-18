@@ -206,6 +206,46 @@ def script_filename_for(object_name, directory, known_objects=None):
     return candidates[-1] if candidates else ""
 
 
+def script_filename_for_source_table(candidates, directory, source_table):
+    """Disambiguate among more than one real script_candidates_for()
+    result using a known SourceTable value (e.g. a BulkOpsLog row's own
+    SourceTable column) -- the one real, unambiguous signal available
+    when two genuinely different scripts both implement the same object
+    name from different source-routing branches (this project's own
+    GiftTransaction: 200_npc_gifttransaction_from_opportunity_load.sql
+    building GiftTransactionFromOpp_Load, and
+    210_npc_gifttransaction_from_payment_load.sql building
+    GiftTransactionFromPayment_Load -- script_filename_for()'s own
+    highest-number-wins tiebreak always picks 210, silently wrong for a
+    log row that actually ran 200). Matches by finding which candidate's
+    own `INTO [dbo].[SourceTable]` clause (or bare `INTO dbo.SourceTable`,
+    brackets optional, case-insensitive) names source_table exactly --
+    real, not guessed, since every transformation script's own SELECT
+    INTO target is exactly what a real bulk_op() call records as
+    SourceTable.
+
+    Returns "" if source_table is falsy, no candidate's file can be read,
+    or none match -- callers should fall back to their own
+    highest-number-wins default in that case, same as
+    script_filename_for() already does when disambiguation isn't
+    possible."""
+    if not source_table:
+        return ""
+    pattern = re.compile(
+        rf"INTO\s+\[?dbo\]?\.\[?{re.escape(source_table)}\]?(?![A-Za-z0-9_])",
+        re.IGNORECASE,
+    )
+    for f in candidates:
+        try:
+            with open(os.path.join(directory, f), "r", encoding="utf-8") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        if pattern.search(content):
+            return f
+    return ""
+
+
 def script_candidates_for(object_name, directory, known_objects=None):
     """Every real script filename matching object_name in directory,
     sorted ascending (so the highest-numbered -- "most recent"/"actually
