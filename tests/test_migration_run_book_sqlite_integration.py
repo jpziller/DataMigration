@@ -94,6 +94,50 @@ def test_generate_migration_run_book_autofills_load_phase_from_load_order(sqlite
     assert "Account" in contact_dependency
 
 
+def test_generate_migration_run_book_resolves_compound_object_name_collision(sqlite_engine, tmp_path, monkeypatch):
+    """Reproduces the real, live NPSP-to-NPC migration bug (ROADMAP #76)
+    through the real generate_migration_run_book() call path, not just
+    script_numbering.py in isolation: someone named AccountContactRelation's
+    script with a delimiter between its embedded segments (the original
+    mistake, not the recommended no-delimiter convention) -- Account's own
+    Load-phase row must still resolve to the real, unrelated Account
+    script rather than being silently hijacked, now that _load_order_rows()
+    passes known_objects through. (AccountContactRelation's own row
+    resolving to nothing is a separate, known limitation of this same
+    delimited naming mistake -- matches_token() itself never matches a
+    compound CamelCase name against its own delimited filename, only
+    against the no-delimiter convention; not what this fix addresses.)"""
+    engine, _ = sqlite_engine
+    scripts_dir = tmp_path / "transforms"
+    scripts_dir.mkdir()
+    (scripts_dir / "010_account_load.sql").write_text("")
+    (scripts_dir / "110_account_contact_relation_load.sql").write_text("")
+    monkeypatch.setattr(mrb, "_TRANSFORMS_DIR", str(scripts_dir))
+
+    _seed_load_order(
+        engine,
+        rows=[("Account", 0, 1), ("AccountContactRelation", 1, 2)],
+        edges=[("AccountContactRelation", "Account")],
+    )
+    output_path = str(tmp_path / "run_book.xlsx")
+
+    mrb.generate_migration_run_book(
+        output_path, "Dev1", engine=engine,
+        object_names=["Account", "AccountContactRelation"], schema="dbo",
+    )
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["Dev1"]
+    load_rows = [
+        (row[1].value, row[2].value) for row in ws.iter_rows(min_row=mrb._FIRST_DATA_ROW)
+        if row[0].value == "Load" or (row[0].value is None and row[1].value)
+    ]
+    objects = [obj for obj, _ in load_rows]
+    assert "010_account_load.sql" in objects
+    # The buggy pre-fix behavior would have put the compound file here instead:
+    assert "110_account_contact_relation_load.sql" not in objects
+
+
 def test_generate_migration_run_book_refuses_to_overwrite_existing_tab(sqlite_engine, tmp_path):
     engine, _ = sqlite_engine
     _seed_load_order(engine, rows=[("Account", 0, 1)])

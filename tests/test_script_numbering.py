@@ -104,3 +104,92 @@ def test_format_number_zero_pads_to_three_digits():
 
 def test_format_number_widens_past_three_digits():
     assert sn.format_number(1000) == "1000"
+
+
+def test_matches_token_whole_token_only():
+    assert sn.matches_token("Account", "010_account_load.sql")
+    assert not sn.matches_token("Order", "030_orderitem_load.sql")
+
+
+def test_matches_token_case_insensitive():
+    assert sn.matches_token("account", "010_Account_Load.sql")
+
+
+def test_script_filename_for_returns_empty_when_directory_missing(tmp_path):
+    assert sn.script_filename_for("Account", str(tmp_path / "nope")) == ""
+
+
+def test_script_filename_for_returns_empty_when_nothing_matches(tmp_path):
+    (tmp_path / "010_account_load.sql").write_text("")
+    assert sn.script_filename_for("Contact", str(tmp_path)) == ""
+
+
+def test_script_filename_for_picks_highest_numbered_match(tmp_path):
+    (tmp_path / "010_account_load.sql").write_text("")
+    (tmp_path / "090_account_load_v2.sql").write_text("")
+    assert sn.script_filename_for("Account", str(tmp_path)) == "090_account_load_v2.sql"
+
+
+def test_script_filename_for_without_known_objects_keeps_original_ambiguous_behavior(tmp_path):
+    """Regression guard on the documented default: omitting known_objects
+    (or passing None) must reproduce the original, real bug this project
+    hit live (ROADMAP #76) -- a higher-numbered compound-name script
+    still silently outranks the real, unrelated shorter-object script.
+    Existing callers that don't pass known_objects must see zero
+    behavior change."""
+    (tmp_path / "020_contact_load.sql").write_text("")
+    (tmp_path / "110_account_contact_relation_load.sql").write_text("")
+    assert sn.script_filename_for("Contact", str(tmp_path)) == "110_account_contact_relation_load.sql"
+    assert sn.script_filename_for("Contact", str(tmp_path), known_objects=None) == "110_account_contact_relation_load.sql"
+
+
+def test_script_filename_for_known_objects_disqualifies_shorter_embedded_match(tmp_path):
+    """The real fix: reproduces the exact live collision (a compound
+    AccountContactRelation script also matching a bare Account lookup)
+    and confirms known_objects resolves it correctly to the real,
+    unrelated Account script instead."""
+    (tmp_path / "010_account_load.sql").write_text("")
+    (tmp_path / "110_account_contact_relation_load.sql").write_text("")
+    known = {"Account", "AccountContactRelation"}
+    assert sn.script_filename_for("Account", str(tmp_path), known_objects=known) == "010_account_load.sql"
+
+
+def test_script_filename_for_known_objects_only_helps_when_disqualifying_name_is_known(tmp_path):
+    """Honest limitation, not silently 'fixed for everyone': if the
+    caller's known_objects set doesn't happen to include the longer,
+    disqualifying name, the original ambiguity still applies -- this is
+    a real but partial fix, not a blanket guarantee."""
+    (tmp_path / "010_account_load.sql").write_text("")
+    (tmp_path / "110_account_contact_relation_load.sql").write_text("")
+    # known_objects given, but WITHOUT the disqualifying longer name
+    result = sn.script_filename_for("Account", str(tmp_path), known_objects={"Account"})
+    assert result == "110_account_contact_relation_load.sql"
+
+
+def test_script_filename_for_known_objects_never_disqualifies_a_shorter_or_equal_length_name(tmp_path):
+    """A known object that's shorter than or equal in length to
+    object_name itself must never disqualify a real match -- only a
+    strictly longer name can be more specific than object_name."""
+    (tmp_path / "010_account_load.sql").write_text("")
+    known = {"Account", "Acct"}
+    assert sn.script_filename_for("Account", str(tmp_path), known_objects=known) == "010_account_load.sql"
+
+
+def test_disqualifying_match_matches_delimited_compound_filename():
+    """The real gap matches_token() itself can't cover: a compound
+    CamelCase object name has no internal delimiters, but its
+    conventional snake_case filename does -- _disqualifying_match() has
+    to strip delimiters to compare the two at all."""
+    assert sn._disqualifying_match("AccountContactRelation", "110_account_contact_relation_load.sql")
+
+
+def test_disqualifying_match_matches_merged_compound_filename():
+    assert sn._disqualifying_match("AccountContactRelation", "110_accountcontactrelation_load.sql")
+
+
+def test_disqualifying_match_case_insensitive():
+    assert sn._disqualifying_match("giftcommitmentschedule", "170_GiftCommitmentSchedule_Load.sql")
+
+
+def test_disqualifying_match_false_for_unrelated_name():
+    assert not sn._disqualifying_match("GiftTransactionDesignation", "010_account_load.sql")

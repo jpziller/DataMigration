@@ -1083,8 +1083,14 @@ don't jump straight to writing SQL:
    `script_filename_for()` picks the highest-numbered match, a later
    compound-name script can silently outrank the real script for that
    shorter object everywhere `migration_run_book.py`/`set-mapping-script`
-   resolve it. See `matches_token()`'s own docstring in
-   `script_numbering.py` and `ROADMAP.md` for the full account. Once the
+   resolve it. `script_filename_for()`'s own optional `known_objects`
+   parameter now defends against this too (ROADMAP #76's real fix,
+   built after the workaround) — every caller in this repo that has a
+   natural object-name set already passes it — but this naming
+   convention is still the safest default when writing a new script by
+   hand, since a caller without `known_objects` gets no protection. See
+   `matches_token()`'s own docstring in `script_numbering.py` and
+   `ROADMAP.md` for the full account. Once the
    script is real, run `set-mapping-script` against
    the mapping doc so its header records which script actually implements
    this object — never before, since the script doesn't exist yet earlier

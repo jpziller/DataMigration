@@ -120,10 +120,10 @@ def _org_risk_gate(engine, d, schema, object_name):
     return {"ok": bool(count), "detail": "Scanned." if count else "Never scanned -- run analyze-org-risk."}
 
 
-def _mapping_balance_gate(sf, mapping_path, object_name, load_table):
+def _mapping_balance_gate(sf, mapping_path, object_name, load_table, known_objects=None):
     if not mapping_path:
         return {"ok": None, "detail": "Not checked -- no --mapping-path given."}
-    script_filename = script_numbering.script_filename_for(object_name, _TRANSFORMS_DIR)
+    script_filename = script_numbering.script_filename_for(object_name, _TRANSFORMS_DIR, known_objects=known_objects)
     if not script_filename:
         return {"ok": None, "detail": "No transform script found for this object yet."}
     script_path = os.path.join(_TRANSFORMS_DIR, script_filename)
@@ -231,6 +231,7 @@ def assess_migration_readiness(sf, engine, object_names, schema="dbo",
     migration_keys = migration_keys or {}
     load_tables = load_tables or {}
     d = sql_dialect.for_engine(engine)
+    known_objects = set(object_names)
 
     results = []
     for object_name in object_names:
@@ -242,7 +243,7 @@ def assess_migration_readiness(sf, engine, object_names, schema="dbo",
             "migration_key_integrity": _duplicate_key_gate(engine, d, schema, load_table, migration_key),
             "live_migration_key_validation": _external_id_gate(sf, object_name, migration_key),
             "org_risk_scanned": _org_risk_gate(engine, d, schema, object_name),
-            "mapping_balance": _mapping_balance_gate(sf, mapping_path, object_name, load_table),
+            "mapping_balance": _mapping_balance_gate(sf, mapping_path, object_name, load_table, known_objects=known_objects),
             "email_deliverability_attested": _email_deliverability_gate(engine, d, schema, object_name),
             "row_count_reconciliation": _reconciliation_gate(engine, object_name, schema, mapping_path, load_table),
         }
