@@ -5254,3 +5254,89 @@ the backoff extension (roadmap #74) — the `Name`-field ambiguity is
 recorded as a known pattern in the validators library rather than a new
 automated guard, consistent with this library's own stated scope
 ("advisory, not a reimplementation of the real checks").
+
+## 78. `sample-reference-records`: learn a target object's real shape from real records (BUILT 2026-07-18)
+
+Motivated directly by roadmap #77's own `Name`-field finding, and the
+correction that followed it (2026-07-18): three Nonprofit Cloud objects
+needed a `Name` value with no natural source field, discovered only by
+trial-and-error against three separate live `bulkops` inserts. While
+planning what looked like a pre-flight-check fix for that finding, the
+premise turned out to be wrong — there was no code gap, `bulk_op()`'s own
+warning already caught it correctly, the real mistake was proceeding past
+it. The user's actual point, raised independently: this is a much
+broader, recurring gap than one field — `describe()` and page layouts
+don't show the full picture of what a *working* record actually looks
+like, especially on complex packaged/managed objects, where the
+platform's own automation needs fields the UI never exposes (a pattern
+confirmed live here, and familiar from real CPQ migration work). The only
+reliable way to learn that shape is to look at real records — ideally
+ones a human created through the platform's own guided flow, so its
+automation has already shaped them correctly.
+
+**Explicitly not a pre-build-only gate.** Migration work happens in
+sprints; the true shape of a target object is often not fully understood
+until UAT surfaces it. This needed to be a standing, always-available
+capability — reach for it before building, mid-sprint when refining, or
+after a UAT finding — the same way `query`/`describe` themselves are
+used, not a one-time Standard Workflow step.
+
+**The closest existing tool, `compare-reference-record` (roadmap #51,
+`reference_record.py`), doesn't cover this** — confirmed by reading its
+real implementation before building anything new: it requires a
+`*_Load` table to already exist and restricts its field list to exactly
+that table's own columns, so it can only diff fields a transform
+*already* populates. Structurally unable to surface a field nobody
+thought to include yet. Kept as-is; this is a different, earlier-and-
+ongoing capability, not a replacement.
+
+**Built**: `sample_reference_records.py` — `sample_reference_records(sf,
+object_name, record_ids=None, where=None, limit=5, engine=None,
+schema="dbo", show_all=False)`. Three input modes: `--ids` (explicit,
+human-provided record Ids — the recommended path, since only a human
+knows which records are genuinely good examples), `--where` (a SOQL
+filter for when a human knows a criterion but not specific Ids), or a
+recency fallback (most-recently-created `--limit` records) when neither
+is given. Excludes compound fields (address/location) from the SOQL
+`SELECT` via `type_map.is_compound()` — reused directly from
+`replicate.py`, which already needed the identical exclusion for the
+identical reason. Reports every field's real shape across the sample:
+populated-N-of-M count, up to 3 distinct sample values, and `describe()`'s
+own `createable`/`nillable`/`defaultedOnCreate` flags shown side by side
+with what the sample actually demonstrates — directly useful after
+roadmap #77's own correction confirmed those flags can be misleading in
+*either* direction (a field reporting required when Salesforce doesn't
+actually enforce it, seen on `Campaign`'s own rollup fields; a field
+reporting optional when it's genuinely required with no default, seen on
+`Account.Name`).
+
+**Automation context deliberately scoped to the object level, not
+per-field**: reports active validation-rule/trigger/Flow counts from
+`dbo.ObjectAutomationRisk` (`analyze-org-risk`'s own output) if that
+schema has already been scanned — "not checked" rather than a silently
+misleading empty result if not. A per-field cross-reference was
+considered and rejected: `ObjectAutomationRisk`'s own `Detail` column is
+free validation-rule error-message text, not a structured field
+reference, and regex-guessing a field name out of it would be exactly
+the kind of invented, unconfirmed text-matching `failure_triage.py`'s own
+docstring already warns against (it only ever extracts a field name from
+one specific, confirmed-reliable error-message shape — anything else
+gets guidance text only, never a guessed field-position regex).
+
+**New skill**: `/sample-reference-records`, matching this repo's
+established convention of a slash-command wrapper for every read-only
+CLI verb. `CLAUDE.md`'s Standard Workflow section explicitly notes this
+one is *not* gated to a numbered step, unlike the object-validators-first/
+profile-first/mapping-before-transform sequence the rest of that section
+lays out.
+
+**Tests**: `tests/test_sample_reference_records.py` (new) — a local
+`_StubSF` supporting `.query()` (the shared `stub_salesforce.py`'s own
+`StubSF` only covers `describe()`/`bulk2()`, not `.query()` — followed
+the same local-stub precedent `tests/test_discovery_checklist.py`
+already established for this exact gap rather than extending shared
+infrastructure for one caller). Covers all three input modes, compound-
+field exclusion, populated-count accuracy, `--show-all` vs. the default
+populated-only filter, sample-value deduplication/capping, field sort
+order, and the automation summary both present and absent (including
+active-only counting). Full suite green throughout implementation.

@@ -57,6 +57,7 @@ import parquet_import as pqi
 import migration_run_book as mrb
 import source_ingestion as si
 import reference_record as rr
+import sample_reference_records as srr
 import record_types as rt
 import data_model_diagram as dmd
 import load_table_prep as ltp
@@ -1341,6 +1342,43 @@ def compare_reference_record_cmd(object_name, load_table, record_id, migration_k
         click.echo(f"\n{len(mismatches)} of {len(result['fields'])} field(s) differ -- see '!' rows above.")
     else:
         click.echo(f"\nAll {len(result['fields'])} field(s) match.")
+
+
+@cli.command("sample-reference-records")
+@click.argument("object_name")
+@click.option("--ids", default=None, help="Comma-separated record Ids -- explicit, human-provided reference records (recommended; only a human knows which records are genuinely good examples).")
+@click.option("--where", default=None, help="SOQL WHERE clause (no 'WHERE') -- for when you know a filtering criterion (RecordType, a date range) but not specific Ids.")
+@click.option("--limit", default=srr.DEFAULT_LIMIT, help="Sample size when neither --ids nor --where is given (falls back to the N most-recently-created records) or as the LIMIT for --where.")
+@click.option("--schema", default="dbo", help="Enables the object-level automation summary via dbo.ObjectAutomationRisk, if analyze-org-risk has already been run.")
+@click.option("--show-all", is_flag=True, help="Include fields that are blank across every sampled record too (default: only fields populated in at least one).")
+def sample_reference_records_cmd(object_name, ids, where, limit, schema, show_all):
+    """Sample a small set of real object_name records and report every
+    field's real shape -- what's actually populated, not just what
+    describe() or a page layout shows. Complements compare-reference-record
+    (a later-stage, targeted diff against an existing Load table); this
+    is for learning or re-learning the shape at any point in a project --
+    before building a transform, mid-sprint, or after a UAT finding."""
+    _, sf, engine = _ctx()
+    record_ids = [i.strip() for i in ids.split(",")] if ids else None
+    result = srr.sample_reference_records(
+        sf, object_name, record_ids=record_ids, where=where, limit=limit,
+        engine=engine, schema=schema, show_all=show_all,
+    )
+    click.echo(f"Sampled {result['sample_size']} record(s) of {object_name}: {', '.join(result['record_ids']) or '(none found)'}")
+    if result["automation"] is None:
+        click.echo("Automation: not checked -- run analyze-org-risk against this object first.")
+    elif result["automation"]:
+        summary = ", ".join(f"{v} active {k}" for k, v in result["automation"].items())
+        click.echo(f"Automation: {summary}")
+    else:
+        click.echo("Automation: analyze-org-risk found nothing active for this object.")
+    click.echo()
+    click.echo(f"{'FIELD':30} {'TYPE':12} {'POPULATED':11} C U DEFLT  SAMPLE VALUE(S)")
+    for f in result["fields"]:
+        flags = f"{'Y' if f['createable'] else '-'} {'Y' if not f['nillable'] else '-'} {'Y' if f['defaulted_on_create'] else '-'}"
+        pop = f"{f['populated_count']}/{result['sample_size']}"
+        samples = ", ".join(f["sample_values"])
+        click.echo(f"{f['field']:30} {str(f['type']):12} {pop:11} {flags}  {samples}")
 
 
 @cli.command("auto-map")
