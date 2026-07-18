@@ -70,15 +70,26 @@ commitments genuinely need an explicit `GiftCommitmentSchedule` insert.
   get real child records the platform creates on its own, and a migration
   that only ever inserts and never reads back will silently miss them.
 
-**Executable check:** none yet -- worth a future pre-flight check that
-warns before attempting an explicit child-object insert whose parent's own
-field values (`ScheduleType = 'Recurring'` here) are known to trigger
-platform auto-creation, the same category of check `analyze-org-risk`
-already does for validation rules/triggers/Flows, just for a *declarative*
-automation rule instead of Apex/Flow metadata (which this specific
-behavior doesn't appear to be -- no matching Flow/trigger found via
-`analyze-org-risk` against `GiftCommitment`, consistent with this being
-core managed-package platform behavior, not client-configured automation).
+**Executable check:** built 2026-07-18, same day this was found —
+`child_record_risk.py`'s `detect_auto_generated_children()`, run
+automatically by `analyze-org-risk` (`--skip-child-shape-check` to opt
+out). Since this behavior genuinely isn't visible via the Tooling API (no
+matching Flow/trigger found against `GiftCommitment`, confirmed live —
+this is core managed-package platform behavior, not client-configured
+automation), the check infers it empirically instead: sample real,
+non-migrated `GiftCommitment` records and see what fraction already have a
+real `GiftCommitmentSchedule`.
+Live dogfooding this against `NPC_TARGET_v2` found a real calibration gap
+before it found the right answer: this org's broader real `GiftCommitment`
+population mixes `Recurring`/`Custom` types together, so only 6 of 10
+sampled real records showed a real schedule (60%) — below the tool's
+original 80% default threshold, which missed this exact relationship on
+the first live run (it caught a different real one instead,
+`GiftCommitmentSchedule -> GiftTransaction`, 100%). Recalibrated the
+default to 50% based on this real evidence; re-running the same live
+command now correctly flags `GiftCommitment -> GiftCommitmentSchedule` at
+60% — confirmed directly, not assumed. See `ROADMAP.md` #79 for the full
+account.
 
 # Citations
 

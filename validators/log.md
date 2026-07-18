@@ -1,5 +1,13 @@
 # Validators bundle update log
 
+## 2026-07-18 (4)
+* **Update**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md)
+  -- "Executable check: none yet" replaced with a real one. New
+  `child_record_risk.py`, run by default from `analyze-org-risk`, detects
+  this exact auto-generation pattern by diffing real reference data
+  instead of introspecting metadata the Tooling API can't see. See
+  `ROADMAP.md` #79.
+
 ## 2026-07-18 (3)
 * **New**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) --
   never explicitly insert a schedule for a Recurring-type parent

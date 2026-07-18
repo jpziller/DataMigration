@@ -1581,11 +1581,15 @@ def generate_pass_summary_cmd(path, tab_name, output_path, schema, load_tables):
 @click.argument("object_names", nargs=-1, required=True)
 @click.option("--mapping-path", default=None, help="Mapping workbook -- cross-references active validation rules' ErrorDisplayField against fields actually being migrated (Migrate Data == Yes).")
 @click.option("--schema", default="dbo")
-def analyze_org_risk_cmd(object_names, mapping_path, schema):
+@click.option("--skip-child-shape-check", is_flag=True, help="Skip the auto-generated-child-record check (one extra live query per real dependency edge among object_names) -- on by default since it's the main gap this command has against managed-package-internal automation (e.g. GiftCommitmentSchedule auto-created for a Recurring GiftCommitment). Skip for a large object list where the extra queries matter.")
+def analyze_org_risk_cmd(object_names, mapping_path, schema, skip_child_shape_check):
     _, sf, engine = _ctx()
     object_names = list(object_names)
     fields_in_scope = ra.fields_in_scope_from_mapping(mapping_path, object_names)
-    results = ra.analyze_migration_risk(sf, object_names, fields_in_scope_by_object=fields_in_scope)
+    results = ra.analyze_migration_risk(
+        sf, object_names, fields_in_scope_by_object=fields_in_scope,
+        check_child_shape=not skip_child_shape_check,
+    )
     ra.write_to_sql(engine, results, schema=schema)
 
     for r in results:
@@ -1601,6 +1605,14 @@ def analyze_org_risk_cmd(object_names, mapping_path, schema):
                 click.echo(f"    - {name}: {vr.get('ErrorMessage')}{hit}")
         for w in r["warnings"]:
             click.echo(f"    Warning: {w}")
+        for f in r.get("auto_generated_child_findings", []):
+            if not f["likely_auto_generated"]:
+                continue
+            click.echo(
+                f"    Possible auto-generated child record -- {f['child']} "
+                f"({f['with_child_count']}/{f['sample_size']} real records already have one, "
+                f"{f['rate']:.0%}) -- verify before assuming an explicit insert is needed."
+            )
 
     click.echo(f"\nResults in {schema}.ObjectAutomationRisk")
 
