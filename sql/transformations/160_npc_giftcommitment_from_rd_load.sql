@@ -26,9 +26,12 @@
    to also be 'Custom', not 'Recurring'. The CASE below mirrors 170's own
    TransactionPeriod mapping so the two never drift apart.
 
-   Name required on insert despite describe() reporting createable=false
-   -- same real describe()/API mismatch as PartyRelationshipGroup.Name
-   (120), confirmed live via REQUIRED_FIELD_MISSING. Reuses the RD's own
+   Name is a genuinely required field with no platform default (confirmed
+   live via REQUIRED_FIELD_MISSING when omitted -- describe() shows
+   createable: True, nillable: False, defaultedOnCreate: False, same as
+   PartyRelationshipGroup.Name (120); not a describe()/API mismatch as an
+   earlier version of this comment claimed, see
+   validators/GiftCommitment.md's own correction). Reuses the RD's own
    Name. */
 
 DROP TABLE IF EXISTS [dbo].[GiftCommitmentFromRD_Load];

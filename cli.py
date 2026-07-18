@@ -33,7 +33,7 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import text
 
-from config import get_settings, resolve_org_settings
+from config import get_settings, resolve_org_settings, partial_override_warnings
 from dataclasses import replace as _dc_replace
 from sf_client import connect_salesforce
 from sql_client import make_engine
@@ -88,6 +88,12 @@ def _ctx():
     if org_role:
         s = resolve_org_settings(s, org_role)
         click.echo(f"[org: {org_role} -> alias {s.sf_org_alias or '(unset)'}]", err=True)
+        fallback_fields = partial_override_warnings(s, org_role)
+        if fallback_fields:
+            click.echo(
+                f"[org: {org_role} -- {', '.join(fallback_fields)} not set for this role, "
+                f"still using the base .env value -- confirm that's intentional]", err=True,
+            )
     if org_alias:
         s = _dc_replace(s, sf_org_alias=org_alias)
         click.echo(f"[org: alias override -> {org_alias}]", err=True)

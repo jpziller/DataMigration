@@ -118,6 +118,27 @@ default:
 | PostgreSQL credentials (`SQL_BACKEND=postgresql`, roadmap #69) | `.env` (`SQL_UID`/`SQL_PWD`, reused from the SQL Server fields above — already backend-generic names), plus `SQL_PORT`/`SQL_POSTGRES_SSLMODE` (connection parameters, not credentials) | Manually configured | Built via `sqlalchemy.engine.URL.create()` (`sql_client.py`'s `_make_postgres_engine()`), not a hand-rolled connection string — the password is a distinct URL field SQLAlchemy already redacts in any `repr()`/`str()` of the engine or its `.url`, confirmed live; a stronger default than the SQL Server path's `odbc_connect` blob, which that function's own comment already flags as unmaskable. No Windows/trusted-auth equivalent — a password is always required unless the Postgres server itself is configured for passwordless local trust auth (a server-side setting, not something this framework controls). |
 | Mockaroo API key | `.env` | Manually configured | Only ever sent to Mockaroo's API; scoped to mock-data generation. |
 
+**Two-org config (roadmap #75) — any credential row above can now exist
+twice in one `.env`.** Every `SF_*` setting (including the credential
+rows above — `SF_PASSWORD`, `SF_SECURITY_TOKEN`, `SF_CONSUMER_KEY`,
+`SF_PRIVATE_KEY_FILE`, the JWT cert path) can be role-suffixed
+(`SF_PASSWORD_SOURCE`/`SF_PASSWORD_TARGET`, etc. — see
+`config.py`'s `resolve_org_settings()`), so a single `.env` can hold two
+full credential sets simultaneously — one per org in a source→target
+migration — instead of one. Nothing new is written to disk or logged
+beyond what the table above already covers (the mechanism only *selects*
+which existing `.env` values apply per invocation, via the `--org`/
+`--org-alias` CLI flags); the new trust-boundary consideration is that
+`resolve_org_settings()` falls back per-field to the base, unsuffixed
+value when a role-specific override isn't set — a partially-configured
+role override (e.g. `SF_ORG_ALIAS_TARGET` set but not
+`SF_CONSUMER_KEY_TARGET`) can silently produce an internally-inconsistent
+credential hybrid rather than a clear error. `cli.py`'s `_ctx()` echoes
+which role/alias resolved (`[org: target -> alias ...]`) before
+connecting, but not which individual fields fell back to the base
+value — worth checking manually if source and target orgs use different
+auth modes or connected apps.
+
 **`SQL_BACKEND=sqlite` (roadmap #28) has no credential at all** — SQLite is
 local-file access (`SQL_SQLITE_DIR`, one `<schema>.db` file per schema),
 no server process, no network connection, no auth handshake of any kind.
@@ -334,7 +355,12 @@ adoption.
 
 ---
 
-*Last reviewed against the codebase during the 2026-07-14 SFDMU
+*Last reviewed against the codebase during the 2026-07-18 code-review
+pass covering the two-org config mechanism (roadmap #75): added §3's new
+"any credential row can now exist twice" entry -- found missing by a
+multi-angle review of everything merged since the prior pass below (the
+mechanism itself had already shipped a few days earlier without a
+matching update here). Previously reviewed during the 2026-07-14 SFDMU
 integration (roadmap #71, found missing by a ruthless review pass): added
 SFDMU's own subprocess/supply-chain surface to §2/§9/§10 -- none of this
 existed until that integration landed. Previously reviewed during the

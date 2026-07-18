@@ -193,3 +193,31 @@ def test_disqualifying_match_case_insensitive():
 
 def test_disqualifying_match_false_for_unrelated_name():
     assert not sn._disqualifying_match("GiftTransactionDesignation", "010_account_load.sql")
+
+
+def test_disqualifying_match_normalizes_underscores_on_both_sides():
+    """Found in review: an earlier version only stripped delimiters from
+    text_value, not other_object_name -- an object name containing an
+    underscore (the norm for a real custom object) could never disqualify
+    anything, since an underscore-containing string can never be a
+    substring of one with every underscore already stripped."""
+    assert sn._disqualifying_match("Payment_Method", "090_payment_method_load.sql")
+
+
+def test_disqualifying_match_custom_object_suffix_is_a_known_residual_edge():
+    """A real "__c" custom-object suffix has no counterpart in a
+    conventionally-named script filename -- documented as a known,
+    unfixed residual edge (matching matches_token()'s own already-
+    disclosed limitation for the same underlying reason), not silently
+    assumed to work."""
+    assert not sn._disqualifying_match("Payment_Method__c", "090_payment_method_load.sql")
+
+
+def test_script_filename_for_disqualifies_using_underscored_known_object(tmp_path):
+    """Integration-level version of the fix: script_filename_for() itself
+    now correctly disqualifies using an underscored known_objects entry,
+    not just the lower-level helper."""
+    (tmp_path / "020_payment_load.sql").write_text("")
+    (tmp_path / "090_payment_method_load.sql").write_text("")
+    known = {"Payment", "Payment_Method"}
+    assert sn.script_filename_for("Payment", str(tmp_path), known_objects=known) == "020_payment_load.sql"

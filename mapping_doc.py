@@ -175,7 +175,24 @@ def set_transform_script(mapping_path, target_object, script_subdir="transformat
     in the standard workflow, mapping comes before the transform is built,
     so the script genuinely doesn't exist yet at that point. Raises if no
     matching script is found -- this step only makes sense to run after
-    the real script exists, not as a guess at what it will be named."""
+    the real script exists, not as a guess at what it will be named.
+    Prints a warning (doesn't raise) when MORE THAN ONE real, distinct
+    script matches target_object -- found in review, then found to be
+    more nuanced than a simple bug once an existing test was checked:
+    "two matches" covers both a genuinely harmless case (an old,
+    superseded draft alongside the current script -- e.g. this file's
+    own test_set_transform_script_prefers_highest_numbered_match fixture,
+    010_account_load.sql superseded by 040_account_load.sql, where
+    highest-number-wins is exactly the wanted behavior) and a genuinely
+    dangerous one (two DIFFERENT, both-still-real scripts for the same
+    object via different routing branches -- this project's own
+    GiftCommitment, split into a Recurring-Donation-routed script and a
+    separate Opportunity-routed one). Nothing in the filenames/numbers
+    alone reliably distinguishes the two cases, so raising unconditionally
+    would break the first, legitimate pattern -- a warning surfaces the
+    second, dangerous pattern for a human to notice without breaking the
+    first. Still returns the highest-numbered match either way, same
+    resolution as before this review."""
     wb = openpyxl.load_workbook(mapping_path)
     sheet_name = _safe_sheet_name(target_object)
     if sheet_name not in wb.sheetnames:
@@ -190,12 +207,22 @@ def set_transform_script(mapping_path, target_object, script_subdir="transformat
     # it happens to embed (ROADMAP #76). Not a full project registry (an
     # object never mapped in this workbook won't be in it), but a real,
     # already-available improvement over no known_objects at all.
-    filename = sn.script_filename_for(target_object, directory, known_objects=wb.sheetnames)
-    if not filename:
+    candidates = sn.script_candidates_for(target_object, directory, known_objects=wb.sheetnames)
+    if not candidates:
         raise ValueError(
             f"No transform script for '{target_object}' found in sql/{script_subdir}/ -- "
             "build the transform first, then run this."
         )
+    if len(candidates) > 1:
+        print(
+            f"Warning: more than one transform script matches '{target_object}' in "
+            f"sql/{script_subdir}/: {candidates} -- using the highest-numbered "
+            f"({candidates[-1]}). If these are genuinely different scripts (e.g. "
+            "different source-routing branches for the same target object, not one "
+            "superseding another), confirm this is really the one this mapping doc "
+            "is for before trusting the link written below."
+        )
+    filename = candidates[-1]
 
     ws.cell(row=1, column=5, value="Transform Script:")
     cell = ws.cell(row=1, column=6, value=filename)

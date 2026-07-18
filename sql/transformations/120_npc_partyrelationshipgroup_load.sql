@@ -11,11 +11,12 @@
    value (confirmed live) to NPSP's own household concept -- no exact
    "Household" Category value exists on this target org.
 
-   Name is required on insert despite describe() reporting createable =
-   false (confirmed live -- REQUIRED_FIELD_MISSING, not
-   INVALID_FIELD_FOR_INSERT_UPDATE, so the Bulk API genuinely accepts a
-   sent value here even though describe()'s own flag says otherwise; a
-   real describe()/API mismatch, not a mistaken assumption). Reuses the
+   Name is a genuinely required field with no platform default (confirmed
+   live -- REQUIRED_FIELD_MISSING when omitted; describe() shows
+   createable: True, nillable: False, defaultedOnCreate: False, an
+   ordinary required field, not a describe()/API mismatch -- an earlier
+   version of this comment claimed otherwise and was wrong, see
+   validators/PartyRelationshipGroup.md's own correction). Reuses the
    household Account's own Name. */
 
 DROP TABLE IF EXISTS [dbo].[PartyRelationshipGroup_Load];

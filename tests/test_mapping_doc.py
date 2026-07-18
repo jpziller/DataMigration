@@ -266,6 +266,25 @@ def test_set_transform_script_prefers_highest_numbered_match(tmp_path):
     assert filename == "040_account_load.sql"
 
 
+def test_set_transform_script_warns_but_still_resolves_when_multiple_scripts_match(tmp_path, capsys):
+    """Found in review: multiple matches can mean either a harmless
+    superseded-draft case (already covered above, must keep resolving)
+    or a genuinely dangerous same-object/different-routing-branch case
+    (this project's own GiftCommitment). Nothing in the filenames alone
+    reliably tells the two apart, so this warns rather than raising --
+    still resolves to the highest-numbered match either way."""
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "GiftCommitment", [("amount", "Yes", "ExpectedTotalCmtAmount")])
+    (tmp_path / "sql" / "transformations").mkdir(parents=True)
+    (tmp_path / "sql" / "transformations" / "160_giftcommitment_from_rd_load.sql").write_text("", encoding="utf-8")
+    (tmp_path / "sql" / "transformations" / "180_giftcommitment_from_opportunity_load.sql").write_text("", encoding="utf-8")
+
+    filename = set_transform_script(str(mapping_path), "GiftCommitment", repo_root=str(tmp_path))
+
+    assert filename == "180_giftcommitment_from_opportunity_load.sql"
+    assert "more than one transform script matches" in capsys.readouterr().out.lower()
+
+
 def test_set_transform_script_uses_source_ingestion_dir_when_given(tmp_path):
     mapping_path = tmp_path / "mapping.xlsx"
     _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
