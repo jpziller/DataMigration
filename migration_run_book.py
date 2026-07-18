@@ -404,7 +404,7 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
         if siblings:
             parts.append(f"parallel with: {', '.join(siblings)}")
 
-        filename = sn.script_filename_for(obj, _TRANSFORMS_DIR)
+        filename = sn.script_filename_for(obj, _TRANSFORMS_DIR, known_objects=in_scope)
         row = {
             "Stage": "Load",
             "Object": filename or obj,
@@ -678,7 +678,7 @@ def _insert_load_row(ws, object_name, phase_prefix="load"):
     return insert_at
 
 
-def _apply_log_result(ws, row_idx, log_row, git_info=None):
+def _apply_log_result(ws, row_idx, log_row, git_info=None, known_objects=None):
     # log_row's keys are already lowercased -- its one caller,
     # sync_run_book_from_log(), lowercases the whole batch once before
     # looping (found in review: this function used to re-lower here too,
@@ -715,7 +715,7 @@ def _apply_log_result(ws, row_idx, log_row, git_info=None):
     # matched a stale/illustrative script that has since been replaced),
     # so this is re-resolved on every sync rather than trusted from
     # whatever's already in the cell.
-    filename = sn.script_filename_for(log_row["objectname"], _TRANSFORMS_DIR)
+    filename = sn.script_filename_for(log_row["objectname"], _TRANSFORMS_DIR, known_objects=known_objects)
     if filename:
         object_idx = _COLUMNS.index("Object") + 1
         cell = ws.cell(row=row_idx, column=object_idx, value=filename)
@@ -768,6 +768,15 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
     # lowercased in its own query results, unlike SQL Server/SQLite).
     new_rows = [sql_dialect.lower_keys(r) for r in new_rows]
 
+    # The distinct object names in this sync batch -- passed to
+    # script_filename_for() as known_objects so a compound-name script
+    # (e.g. AccountContactRelation) can't silently outrank the real
+    # script for a shorter object it happens to embed (e.g. Account),
+    # the same collision found live in the NPSP-to-NPC migration
+    # (ROADMAP #76). Scoped to this batch, not a full project registry --
+    # still a real, partial improvement over no known_objects at all.
+    known_objects = {r["objectname"] for r in new_rows}
+
     git_info = gi.get_git_info()
     inserted, updated = 0, 0
     for log_row in new_rows:
@@ -777,7 +786,7 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
             inserted += 1
         else:
             updated += 1
-        _apply_log_result(ws, target_row, log_row, git_info=git_info)
+        _apply_log_result(ws, target_row, log_row, git_info=git_info, known_objects=known_objects)
 
     ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["logid"])
     _save_workbook(wb, path)

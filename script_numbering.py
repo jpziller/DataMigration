@@ -87,32 +87,28 @@ def matches_token(object_name, text_value):
     and migration_run_book.py's own row-matching logic, so the fix for
     one naturally covers the other instead of drifting apart again.
 
-    A second, still-open residual edge (found live, NPSP-to-NPC migration
-    proof-of-concept, not yet fixed here): a script filename for a
-    COMPOUND object name that embeds another real object's name as its
-    own delimiter-bounded word collides the same way. A file named
-    "110_account_contact_relation_load.sql" (for AccountContactRelation)
-    still matches a bare "Account" or "Contact" lookup, and -- since
-    script_filename_for() below picks the highest-numbered match -- can
-    silently outrank the real, unrelated "020_contact_load.sql" once its
-    own number is higher. This surfaced as a real, silent bug: it broke
-    migration_run_book.py's Load-phase Object-cell resolution for three
-    different bare object names in one pass (Account, Contact, Campaign),
-    caught only by the existing test suite failing, not by reasoning.
-    Worked around in that project by removing the internal delimiter
-    ("accountcontactrelation", "campaignmember", "giftcommitmentschedule",
-    "gifttransactiondesignation") so the compound name can't accidentally
-    match a shorter, unrelated object as a substring -- but that's a
-    naming-convention workaround, not a fix to this matcher itself. A
-    real fix would need script_filename_for() to know the full set of
-    object names in play (not just the one it's currently resolving) so
-    it can prefer a filename that matches ONLY the requested object over
-    one that also matches a different, longer compound name -- not yet
-    built. See ROADMAP.md for the full write-up. If you're naming a new
-    script for an object whose name contains another real object's name
-    as a whole word (AccountContactRelation, CampaignMember,
-    GiftCommitmentSchedule, GiftTransactionDesignation, etc.), don't put
-    an underscore between the embedded segments in the filename."""
+    A second, related residual edge (found live, NPSP-to-NPC migration
+    proof-of-concept): a script filename for a COMPOUND object name that
+    embeds another real object's name as its own delimiter-bounded word
+    collides the same way. A file named "110_account_contact_relation_load.sql"
+    (for AccountContactRelation) still matches a bare "Account" or
+    "Contact" lookup, and -- since script_filename_for() below picks the
+    highest-numbered match -- can silently outrank the real, unrelated
+    "020_contact_load.sql" once its own number is higher. This surfaced as
+    a real, silent bug: it broke migration_run_book.py's Load-phase
+    Object-cell resolution for three different bare object names in one
+    pass (Account, Contact, Campaign), caught only by the existing test
+    suite failing, not by reasoning. Two independent mitigations now
+    exist: (1) name a new compound-object script without an underscore
+    between the embedded segments ("accountcontactrelation",
+    "campaignmember", "giftcommitmentschedule",
+    "gifttransactiondesignation") so it can't match the shorter object as
+    a substring at all -- still the safest choice when naming a new
+    script; and (2) script_filename_for()'s own optional `known_objects`
+    parameter (see its docstring below), for callers that already know
+    the full set of real object names in play and want the matcher itself
+    to defend against this even if a script wasn't named defensively. See
+    ROADMAP.md #76 for the full write-up of both."""
     text_value = str(text_value)
     if object_name.lower() == text_value.strip().lower():
         return True
@@ -122,7 +118,26 @@ def matches_token(object_name, text_value):
     ) is not None
 
 
-def script_filename_for(object_name, directory):
+def _disqualifying_match(other_object_name, text_value):
+    """Looser than matches_token(), used only by script_filename_for()'s
+    known_objects disqualification check below. A real compound object
+    name (e.g. "AccountContactRelation") has no internal delimiters of
+    its own -- CamelCase, no separators -- but the filename representing
+    it is conventionally snake_case ("account_contact_relation_load.sql"),
+    so matches_token()'s own literal-substring requirement never matches
+    the compound name against its own delimited filename (only the
+    merged, no-delimiter naming convention matches_token()'s docstring
+    recommends). This strips every non-alphanumeric character from
+    text_value before comparing, so "AccountContactRelation" correctly
+    matches either filename style. Deliberately looser than
+    matches_token() -- safe here because this is only ever used to decide
+    whether to EXCLUDE a candidate; failing toward "don't disqualify" is
+    the unsafe direction, not this one."""
+    normalized = re.sub(r"[^A-Za-z0-9]", "", text_value)
+    return other_object_name.lower() in normalized.lower()
+
+
+def script_filename_for(object_name, directory, known_objects=None):
     """The real script for object_name in directory (sql/transformations/
     or sql/source_ingestion/) -- when more than one matches (e.g. an old
     illustrative template alongside the real numbered script), the
@@ -132,11 +147,36 @@ def script_filename_for(object_name, directory):
     ascending string sort already puts the highest number last. Returns ""
     if directory doesn't exist or nothing matches -- callers decide
     whether that's an error (a step that requires the script to already
-    exist) or just "nothing to link yet"."""
+    exist) or just "nothing to link yet".
+
+    known_objects: optional -- the full set of real object names in play
+    for this caller (e.g. every object in dbo.ObjectLoadOrder, or every
+    sheet already in a mapping workbook). When given, a filename that
+    matches object_name AND some other, different, LONGER name in
+    known_objects (via _disqualifying_match(), not matches_token() --
+    see that helper's own docstring for why) is disqualified for
+    object_name -- it more specifically belongs to that longer compound
+    name instead (see matches_token()'s own docstring for the real
+    collision this defends against, e.g.
+    "account_contact_relation_load.sql" also matching a bare "Account").
+    Omitted (the default): original behavior, unchanged -- every
+    existing caller that doesn't pass this is not affected. This is a
+    real but partial fix: it only helps when the caller actually knows
+    about the longer, disqualifying name; a caller with an incomplete
+    known_objects set (or none at all) can still hit the original
+    ambiguity. The naming-convention workaround in matches_token()'s own
+    docstring (no delimiter between a compound name's embedded segments)
+    remains the safest choice regardless."""
     if not os.path.isdir(directory):
         return ""
-    matches = sorted(
+    candidates = sorted(
         f for f in os.listdir(directory)
         if f.lower().endswith(".sql") and matches_token(object_name, f)
     )
-    return matches[-1] if matches else ""
+    if known_objects:
+        others = [o for o in known_objects if o != object_name]
+        candidates = [
+            f for f in candidates
+            if not any(len(o) > len(object_name) and _disqualifying_match(o, f) for o in others)
+        ]
+    return candidates[-1] if candidates else ""

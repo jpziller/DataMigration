@@ -5095,7 +5095,7 @@ skipped (no regressions).
 the `_SOURCE`/`_TARGET` suffix convention and the `--org`/`--org-alias`
 flags.
 
-## 76. Found live: `script_filename_for()` mis-resolves compound object names (documented, not yet fixed)
+## 76. Found live: `script_filename_for()` mis-resolves compound object names (BUILT 2026-07-17)
 
 Discovered during the NPSP-to-NPC migration proof-of-concept: adding
 `sql/transformations/110_account_contact_relation_load.sql` (for
@@ -5141,20 +5141,54 @@ match it as a standalone token. Confirmed live: `Account`/`Contact`/
 `Campaign` all resolve correctly again after the rename, and the full
 suite (387 passed, 6 skipped) is green.
 
-**Not yet fixed**: the underlying ambiguity in `matches_token()`/
-`script_filename_for()` is still there for the next person who doesn't
-know this convention and reintroduces an underscore-delimited compound
-name. A real fix needs `script_filename_for()` to be aware of the *full*
-set of real object names in play (not just the one it's currently
-resolving), so it can prefer a filename that matches only the requested
-object over one that also matches a different, longer compound name as a
-substring — that's a signature change touching both call sites
-(`migration_run_book.py`'s `_load_order_rows()`, `mapping_doc.py`'s
-`set-mapping-script`), not attempted here since it needs its own design
-and test coverage rather than a rushed fix mid-migration. Documented in
-`matches_token()`'s own docstring and CLAUDE.md's Standard Workflow step
-6 in the meantime, so the naming convention is at least discoverable
-before it bites again.
+**Real fix, built as a follow-up**: `script_filename_for()` gained an
+optional `known_objects` parameter — when given the full set of real
+object names in play, a filename that matches both `object_name` and
+some *other*, different, *longer* name in `known_objects` is disqualified
+for `object_name`, since it more specifically belongs to that longer,
+more specific name instead. Omitted (the default): original behavior,
+fully unchanged — no existing caller broke.
+
+One real design correction found by the new tests themselves before
+shipping: the first version reused `matches_token()` for the
+disqualification check, which turned out to never fire for the actual
+bug scenario — `matches_token("AccountContactRelation", "account_contact_relation_load.sql")`
+requires the literal CamelCase string as a contiguous substring, but the
+real filename is snake_case with underscores breaking it up, so the two
+never match at all. Fixed with a new, deliberately looser
+`_disqualifying_match()` helper that strips all non-alphanumeric
+characters from the filename before comparing — safe specifically
+because it's only ever used to decide whether to *exclude* a candidate
+(failing toward "don't disqualify" would be the unsafe direction, not
+this one).
+
+All 4 real call sites updated, each threading through a `known_objects`
+set it already had cheaply available — no new data source needed
+anywhere: `migration_run_book.py`'s `_load_order_rows()` (its own
+`object_names` param) and `sync_run_book_from_log()` (the distinct
+object names in the current `BulkOpsLog` sync batch), `readiness.py`'s
+`_mapping_balance_gate()` (via `assess_migration_readiness()`'s own
+`object_names`), and `mapping_doc.py`'s `set_transform_script()` (the
+mapping workbook's own existing sheet names). All optional-parameter,
+additive changes — zero behavior change for any caller that predates
+this fix.
+
+New tests in `tests/test_script_numbering.py` (previously zero coverage
+of `matches_token()`/`script_filename_for()` at all) cover the real
+collision, the disqualification helper directly, the "no known_objects
+given" backward-compatible default, and the honest partial-fix
+limitation (a `known_objects` set that doesn't happen to include the
+disqualifying longer name still hits the original ambiguity). A new
+integration test in `tests/test_migration_run_book_sqlite_integration.py`
+reproduces the original live bug through the real
+`generate_migration_run_book()` call path, not just `script_numbering.py`
+in isolation. Full suite green throughout.
+
+The naming-convention workaround (no delimiter between a compound name's
+embedded segments) documented in `matches_token()`'s own docstring and
+CLAUDE.md's Standard Workflow step 6 remains the safest choice regardless
+— this fix only protects callers that pass a `known_objects` set, and
+only when that set actually includes the disqualifying longer name.
 
 ## 77. NPSP-to-NPC migration proof-of-concept: full pipeline built and loaded live (2026-07-17)
 

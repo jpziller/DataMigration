@@ -184,7 +184,13 @@ def set_transform_script(mapping_path, target_object, script_subdir="transformat
 
     repo_root = repo_root if repo_root is not None else os.path.dirname(__file__)
     directory = os.path.join(repo_root, "sql", script_subdir)
-    filename = sn.script_filename_for(target_object, directory)
+    # wb.sheetnames -- every object this project has already built a
+    # mapping doc for -- doubles as a known_objects set so a compound-name
+    # script can't silently outrank the real script for a shorter object
+    # it happens to embed (ROADMAP #76). Not a full project registry (an
+    # object never mapped in this workbook won't be in it), but a real,
+    # already-available improvement over no known_objects at all.
+    filename = sn.script_filename_for(target_object, directory, known_objects=wb.sheetnames)
     if not filename:
         raise ValueError(
             f"No transform script for '{target_object}' found in sql/{script_subdir}/ -- "
