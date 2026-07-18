@@ -2,25 +2,25 @@
 type: ObjectValidator
 title: PartyRelationshipGroup validator
 description: Object-specific findings for PartyRelationshipGroup
-  (Nonprofit Cloud/AFNP) -- Name is required on insert despite describe()
-  reporting createable=false, same pattern as GiftCommitment/GiftTransaction;
-  no exact "Household" Category value exists.
+  (Nonprofit Cloud/AFNP) -- Name is a genuinely required field with no
+  default, same pattern as GiftCommitment/GiftTransaction; no exact
+  "Household" Category value exists.
 tags: [object-validator, party-relationship-group, nonprofit-cloud, afnp, npsp-to-npc, household]
 timestamp: "2026-07-17"
 ---
 # PartyRelationshipGroup validator
 
-## Name is required on insert despite describe() reporting createable=false
+## Name is a genuinely required field with no default
 **Found:** 2026-07-17, NPSP-to-NPC migration proof-of-concept -- the
 first of three objects this same pass to hit this pattern (also
 [GiftCommitment](GiftCommitment.md) and [GiftTransaction](GiftTransaction.md)).
-**What happens:** `describe('PartyRelationshipGroup')` reports `Name` as
-`createable: False`; the real Bulk API insert fails with
-`REQUIRED_FIELD_MISSING: Required fields are missing: [Name]` if it's
-omitted.
-**Why:** see GiftCommitment.md's write-up for the full reasoning -- a
-real `describe()`/API mismatch across this whole AFNP fundraising/CRM
-object family, not specific to this one object.
+Omitted initially, real Bulk API insert failed with
+`REQUIRED_FIELD_MISSING: Required fields are missing: [Name]`.
+**Correction (2026-07-18):** see GiftCommitment.md's own corrected
+write-up -- an ordinary required field (`createable: True, nillable:
+False, defaultedOnCreate: False`), not a `describe()`/API mismatch as
+originally (incorrectly) claimed here. `bulk_op()`'s pre-flight check
+already warned about this correctly before the failure.
 **What to do:** always send a real `Name` value. This migration reused
 the linked household Account's own `Name` (e.g. "Chen Household").
 

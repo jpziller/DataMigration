@@ -5216,11 +5216,19 @@ Allocation's parts summed back to its original total).
 
 **Real findings from this pass**, each written up in its own durable
 home rather than left as one-off session knowledge:
-- `Name` required on insert despite `describe()` reporting
-  `createable: False`, hit independently on `GiftCommitment`,
-  `GiftTransaction`, and `PartyRelationshipGroup` — see the three new
-  object validators (`validators/GiftCommitment.md`,
+- `Name` required on insert with no platform default, hit independently
+  on `GiftCommitment`, `GiftTransaction`, and `PartyRelationshipGroup` —
+  see the three new object validators (`validators/GiftCommitment.md`,
   `validators/GiftTransaction.md`, `validators/PartyRelationshipGroup.md`).
+  **Correction (2026-07-18)**: the original write-up here and in those
+  docs mischaracterized this as a `describe()`/API mismatch
+  (`createable: False` on a genuinely required field) — actually an
+  ordinary required field (`createable: True, nillable: False,
+  defaultedOnCreate: False`) that `bulk_op()`'s own pre-flight check
+  already warned about correctly; the real mistake was proceeding past
+  that warning. Found and fixed while planning a pre-flight-check
+  enhancement that, on closer live verification, turned out to target a
+  problem that didn't actually exist.
 - The `script_filename_for()` compound-name collision — roadmap #76
   above.
 - Allocation's Opportunity-level granularity doesn't map cleanly onto
