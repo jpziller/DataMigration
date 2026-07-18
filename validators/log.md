@@ -1,5 +1,18 @@
 # Validators bundle update log
 
+## 2026-07-18
+* **Correction**: [GiftCommitment validator](GiftCommitment.md),
+  [GiftTransaction validator](GiftTransaction.md),
+  [PartyRelationshipGroup validator](PartyRelationshipGroup.md) --
+  the 2026-07-17 entries below mischaracterized this finding as a
+  `describe()`/API mismatch (`createable: False` on a genuinely required
+  `Name` field). Re-verified live while planning a pre-flight-check
+  enhancement for that supposed mismatch: the real flags are
+  `createable: True, nillable: False, defaultedOnCreate: False` -- an
+  ordinary required field. `bulk_op()`'s pre-flight check already warned
+  correctly before each failure; the real mistake was proceeding past the
+  warning, not a tooling gap. All three docs corrected in place.
+
 ## 2026-07-17
 * **New**: [GiftCommitment validator](GiftCommitment.md),
   [GiftTransaction validator](GiftTransaction.md),

@@ -37,6 +37,7 @@ migration's source data in any way.
 * [Person Accounts and RecordTypes](person-accounts-and-record-types.md) -
   Person Accounts are a mandatory prerequisite; the real RecordType
   taxonomy a fresh AFNP org ships with.
-* [Name field createable-flag quirk](name-field-createable-flag-quirk.md) -
-  `describe()`'s `createable` flag can't be trusted at face value for
-  `Name` on this object family — confirmed on 3 separate objects.
+* [Name field required with no default](name-field-createable-flag-quirk.md) -
+  `GiftCommitment`/`GiftTransaction`/`PartyRelationshipGroup` all need a
+  real `Name` value on insert, with no natural 1:1 source field —
+  confirmed on 3 separate objects.

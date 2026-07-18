@@ -38,12 +38,21 @@ records, all loaded and verified live.
 
 ## What went poorly (and what was fixed)
 
-- **`Name` required on insert despite `describe()` reporting
-  `createable: False`** — hit independently on `PartyRelationshipGroup`,
-  `GiftCommitment`, `GiftTransaction`. Fixed live each time by sending a
-  real `Name` value; written up as
+- **`Name` required on insert, no platform default** — hit independently
+  on `PartyRelationshipGroup`, `GiftCommitment`, `GiftTransaction`. Fixed
+  live each time by sending a real `Name` value; written up as
   [okf/nonprofit-cloud/name-field-createable-flag-quirk.md](../okf/nonprofit-cloud/name-field-createable-flag-quirk.md)
   and three object validators once the pattern repeated a third time.
+  **Correction added 2026-07-18**: the original write-up here and in
+  those docs claimed `describe()` reported `createable: False` for these
+  fields while they were actually required — a genuine mismatch. That was
+  wrong: the real flags are `createable: True, nillable: False,
+  defaultedOnCreate: False`, an ordinary required field.
+  `bulk_op()`'s own pre-flight check already warned correctly before each
+  failure; the actual mistake was proceeding past the warning instead of
+  treating it as a hard stop. Caught while planning a pre-flight-check
+  enhancement for the (nonexistent) mismatch and re-verifying against the
+  live org first — all affected docs corrected in place.
 - **The roadmap #74 writeback-race fix's retry budget (~15s) wasn't
   generous enough for this target org's real propagation tail** — hit on
   3 of 9 loads in the Account/relationship/Campaign phase alone, each

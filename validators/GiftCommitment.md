@@ -2,43 +2,37 @@
 type: ObjectValidator
 title: GiftCommitment validator
 description: Object-specific findings for GiftCommitment (Nonprofit Cloud/
-  AFNP) -- Name is required on insert despite describe() reporting
-  createable=false, and ScheduleType must match the Gift Commitment
-  Schedule's own TransactionPeriod mapping.
+  AFNP) -- Name is a genuinely required field with no default, and
+  ScheduleType must match the Gift Commitment Schedule's own
+  TransactionPeriod mapping.
 tags: [object-validator, gift-commitment, nonprofit-cloud, afnp, npsp-to-npc]
 timestamp: "2026-07-17"
 ---
 # GiftCommitment validator
 
-## Name is required on insert despite describe() reporting createable=false
+## Name is a genuinely required field with no default
 **Found:** 2026-07-17, NPSP-to-NPC migration proof-of-concept, first
-`bulkops insert` against a real GiftCommitment Load table.
-**What happens:** `describe('GiftCommitment')` reports `Name` as
-`createable: False`, so it's excluded from `bulk_op()`'s auto-derived send
-columns by default -- the pre-flight check only warns
-("required field(s) not sent... only fails if nothing else defaults
-them"), doesn't block. The real Bulk API call then fails with
+`bulkops insert` against a real GiftCommitment Load table -- omitted
+initially, and the real Bulk API call failed with
 `REQUIRED_FIELD_MISSING: Required fields are missing: [Name]`.
-**Why:** a genuine `describe()`/Bulk-API-reality mismatch on this object --
-confirmed live, not assumed. The same pattern hit
-[GiftTransaction](GiftTransaction.md) and
-[PartyRelationshipGroup](PartyRelationshipGroup.md) independently in the
-same migration pass, all three showing the identical `createable: False`
-signal for a field that's actually required and genuinely acceptable to
-send. `describe()`'s `createable` flag can't be trusted at face value for
-`Name` on this object family -- it doesn't distinguish "auto-generated,
-truly read-only" (e.g. `GiftCommitmentSchedule.Name`, which really is
-read-only and never needed a value) from "required, mislabeled." There's
-no way to tell which case you're in from `describe()` alone; it has to be
-learned live or from this entry.
+**Correction (2026-07-18):** this entry originally claimed a
+`describe()`/API mismatch (`createable: False` but genuinely required) --
+that was wrong, caught by planning a follow-up fix and re-checking
+`describe()` directly. The real flags are `createable: True, nillable:
+False, defaultedOnCreate: False` -- an ordinary required field, not an
+ambiguous one. `bulk_op()`'s own pre-flight check (`bulkops.py`'s
+`_preflight_check()`) correctly printed `Warning: required field(s) not
+sent... ['Name']` before the failed insert; the actual mistake was
+proceeding past that warning instead of treating it as a hard stop. (The
+genuinely `createable: False` case on this same object family is
+`GiftCommitmentSchedule.Name` -- a real auto-generated field,
+`defaultedOnCreate: True`, correctly never needs a value and never hit
+this failure. Don't confuse the two.)
 **What to do:** always send a real `Name` value in the transform for this
-object -- don't rely on the pre-flight warning being survivable. This
-migration reused the source Recurring Donation's own `Name`; any
-reasonable human-readable label works.
-**Executable check:** none yet -- a pre-flight enhancement that escalates
-this specific ambiguity (required=true *and* createable=false) to a
-louder warning, rather than the current generic wording, would help
-future projects notice it before the first failed load rather than after.
+object -- this migration reused the source Recurring Donation's own
+`Name`; any reasonable human-readable label works. More generally: treat
+`bulk_op()`'s `required field(s) not sent` warning as a hard stop before
+running a real load, not something to note and proceed past.
 
 ## ScheduleType must match the linked Gift Commitment Schedule's TransactionPeriod
 **Found:** 2026-07-17, same migration pass -- a `FIELD_INTEGRITY_EXCEPTION`
