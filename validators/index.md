@@ -42,6 +42,14 @@ discovered the hard way — nothing exists preemptively.
 * [GiftCommitment validator](GiftCommitment.md) - Name required despite
   createable=false, ScheduleType must match its Schedule's TransactionPeriod.
 * [GiftTransaction validator](GiftTransaction.md) - Name required despite
-  createable=false, GiftCommitmentId links back to an originating commitment.
+  createable=false, GiftCommitmentId links back to an originating commitment,
+  GiftCommitmentScheduleId gated by the Single-Transaction-for-Custom-Schedule rule.
 * [PartyRelationshipGroup validator](PartyRelationshipGroup.md) - Name
-  required despite createable=false, no exact "Household" Category value.
+  required despite createable=false, no exact "Household" Category value
+  and real data mostly leaves it unset entirely.
+* [AccountContactRelation validator](AccountContactRelation.md) -
+  IsIncludedInGroup/IsPrimaryMember are the real household-membership
+  signal, not just AccountId/ContactId.
+* [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - never
+  explicitly insert a schedule for a Recurring-type parent GiftCommitment;
+  the platform auto-creates one and rejects a second, explicit insert.

@@ -345,6 +345,46 @@ This is exactly the problem `analyze-load-order` (roadmap #2, built) solves
 programmatically from live describe() metadata, rather than requiring this
 list to be maintained by hand.
 
+### Corrective reload: cleaning up an org that already has migrated data
+
+A real, live-confirmed finding (NPSP-to-NPC proof-of-concept, 2026-07-18):
+when a migration needs to remove and reload previously-migrated records
+(a bug fix in a transform, a data-shape correction), don't assume every
+record to remove carries your migration key (`MigrationID__c` or
+equivalent). **Some target objects get real child records the platform
+creates on its own** — automation-generated, never explicitly inserted by
+this migration, so they never carry a migration key at all (see
+`okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md` for a
+concrete, confirmed example: a Recurring-type `GiftCommitment` auto-creates
+its own `GiftCommitmentSchedule`). Filtering a cleanup pass on
+`WHERE MigrationID__c != null` alone will miss these — the relationship
+back to a real, migration-key-tagged parent record still exists and is the
+only reliable way to find them.
+
+**The pattern:** before deleting, build a `<Object>_Delete` staging table
+in the mirror DB per object in scope, populated from **two** sources,
+`UNION`ed:
+1. Every record whose own migration key matches this migration's real,
+   already-loaded rows (the normal case).
+2. Every child record with **no** migration key of its own, but whose
+   foreign key points at a real parent record from source (1) — found by
+   replicating the child object from the target org and joining on that
+   real relationship, not guessed at.
+
+Use the resulting Id list to drive the actual `bulkops <Object> delete`
+pass (or `--where "Id IN (...)"` for a scoped purge), in reverse
+dependency order (children before parents, mirroring `analyze-load-order`'s
+own dependency graph but backwards). Drop each `_Delete` table once its
+object's cleanup is confirmed complete — it's working scratch state for
+one corrective pass, not a permanent artifact.
+
+This is the same principle as the two-pass `dbo.Account` requery pattern
+already established for `PersonContactId`
+(`sql/transformations/110_npc_accountcontactrelation_load.sql`'s own
+header) and for `GiftCommitmentSchedule` above — a migration that only
+ever inserts and never reads real state back from the org will silently
+miss what the platform did on its own.
+
 ## 7. SQL Best Practices
 
 - **Alias the primary table `a`**, other joined tables with short but

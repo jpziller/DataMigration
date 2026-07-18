@@ -19,7 +19,31 @@
    dbo.Contact (source-side, untouched since Phase 2) is the join spine:
    Contact.AccountId is the NPSP household Account's own source Id,
    matching HouseholdAccount_Load.LoadId; Contact.Id is the source Contact
-   Id, matching the target Person Account's MigrationID__c (set in 100). */
+   Id, matching the target Person Account's MigrationID__c (set in 100).
+
+   IsIncludedInGroup/IsPrimaryMember (added 2026-07-18, architect review
+   finding -- likely root cause of "no household grouping visible" on the
+   live org): sample-reference-records against 10 real, non-migrated
+   AccountContactRelation records showed IsIncludedInGroup populated 10/10
+   and IsPrimaryMember populated 10/10, neither of which this script
+   originally set at all. Without IsIncludedInGroup = true, the standard
+   household UI grouping has no signal that a person is actually "in" the
+   Account's group, even though the AccountContactRelation and
+   PartyRelationshipGroup (120) records both genuinely exist -- Account
+   itself has no direct lookup field back to PartyRelationshipGroup
+   (confirmed via describe()), so this membership flag is the real
+   mechanism, not a page-layout/related-list issue.
+   IsIncludedInGroup = true for every row here: every one of these rows IS
+   a real household member, by construction.
+   IsPrimaryMember: exactly one true per household, chosen by NPSP's own
+   npo02__Household_Naming_Order__c (lower = named first/more senior),
+   falling back to Contact.Id when the naming order is null/tied, for a
+   deterministic single primary per household.
+   IsPrimaryGroup and Roles are deliberately left unset -- the same sample
+   didn't give confident evidence for either (IsPrimaryGroup showed only
+   False across the sample; Roles is a free-form multipicklist with no
+   natural source value) -- see Hard Rule 11 and
+   validators/AccountContactRelation.md. */
 
 DROP TABLE IF EXISTS [dbo].[AccountContactRelation_Load];
 
@@ -28,7 +52,14 @@ SELECT
     c.Id AS MigrationID__c,
     ha.Id AS AccountId,
     pa.PersonContactId AS ContactId,
-    1 AS IsActive
+    1 AS IsActive,
+    1 AS IsIncludedInGroup,
+    CASE WHEN ROW_NUMBER() OVER (
+        PARTITION BY ha.LoadId
+        ORDER BY CASE WHEN c.npo02__Household_Naming_Order__c IS NULL THEN 1 ELSE 0 END,
+                 c.npo02__Household_Naming_Order__c,
+                 c.Id
+    ) = 1 THEN 1 ELSE 0 END AS IsPrimaryMember
 INTO [dbo].[AccountContactRelation_Load]
 FROM [dbo].[Contact] c
 JOIN [dbo].[HouseholdAccount_Load] ha ON ha.LoadId = c.AccountId

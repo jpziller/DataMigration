@@ -55,3 +55,11 @@ pattern.
 a Gift Commitment's `ScheduleType` against its linked Schedule's
 `TransactionPeriod` (both already known at Load-table-build time) would
 catch this before the live API call rather than after.
+
+## A Recurring-type commitment gets its own schedule auto-created -- never insert one explicitly
+**Found:** 2026-07-18, while fixing a downstream `GiftTransaction` gap --
+see [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) for the
+full write-up. When this commitment's own `ScheduleType = 'Recurring'`,
+Nonprofit Cloud auto-creates its `GiftCommitmentSchedule` the moment this
+record is inserted; a second, explicit schedule insert for the same
+commitment fails live.

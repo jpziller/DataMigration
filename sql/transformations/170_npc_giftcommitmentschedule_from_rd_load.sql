@@ -20,7 +20,30 @@
    TransactionInterval defaults to 1 (every period) -- NPSP's own RD model
    has no direct "every N periods" concept to carry over. Type is always
    'CreateTransactions' (never 'PauseTransactions') since every seeded RD
-   is Active, not Paused. */
+   is Active, not Paused.
+
+   ONLY 'Custom'-period RDs get an explicit insert here (added 2026-07-18,
+   architect review finding). Confirmed live: when GiftCommitment.ScheduleType
+   = 'Recurring' (this org's target for a Monthly/Weekly/Yearly period, see
+   160), Nonprofit Cloud's own automation auto-creates a matching
+   GiftCommitmentSchedule the moment the GiftCommitment itself is inserted
+   -- a second, explicit insert attempt for the same commitment then fails
+   live with FIELD_INTEGRITY_EXCEPTION ("doesn't overlap with an existing
+   schedule"). This is exactly what happened to 3 of this project's 4
+   original RD-derived schedule rows -- silently recorded as a real bulk_op()
+   failure in this table's own Error column, never investigated until a
+   second architect's live review of the migrated org traced a specific
+   GiftTransaction's missing GiftCommitmentScheduleId back to it. Confirmed
+   by direct query: all 3 "Recurring"-type commitments in this org DO have a
+   real, live GiftCommitmentSchedule (auto-created, TransactionPeriod
+   matching), and the 1 "Custom"-type commitment's schedule is the only one
+   this script's own explicit insert actually created. See
+   okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md and
+   validators/GiftCommitmentSchedule.md.
+   Only inserting for 'Custom' here avoids repeating the same collision on
+   any future Recurring-period RD -- 200 derives GiftCommitmentScheduleId
+   for a Recurring-type case by querying the org's real (auto-created)
+   schedule directly, not from this table. */
 
 DROP TABLE IF EXISTS [dbo].[GiftCommitmentSchedule_Load];
 
@@ -28,16 +51,8 @@ SELECT
     rd.Id AS LoadId,
     rd.Id AS MigrationID__c,
     gc.Id AS GiftCommitmentId,
-    CASE rd.npe03__Installment_Period__c
-        WHEN 'Monthly' THEN 'Monthly'
-        WHEN 'Weekly' THEN 'Weekly'
-        WHEN 'Yearly' THEN 'Yearly'
-        ELSE 'Custom'
-    END AS TransactionPeriod,
-    CASE WHEN rd.npe03__Installment_Period__c = 'Monthly'
-         THEN COALESCE(rd.npsp__Day_of_Month__c, '1')
-         ELSE NULL
-    END AS TransactionDay,
+    'Custom' AS TransactionPeriod,
+    NULL AS TransactionDay,
     1 AS TransactionInterval,
     rd.npe03__Installment_Amount__c AS TransactionAmount,
     rd.npsp__StartDate__c AS StartDate,
@@ -45,4 +60,6 @@ SELECT
     'CreateTransactions' AS [Type]
 INTO [dbo].[GiftCommitmentSchedule_Load]
 FROM [dbo].[npe03__Recurring_Donation__c] rd
-JOIN [dbo].[GiftCommitmentFromRD_Load] gc ON gc.LoadId = rd.Id;
+JOIN [dbo].[GiftCommitmentFromRD_Load] gc ON gc.LoadId = rd.Id
+WHERE rd.npe03__Installment_Period__c NOT IN ('Monthly', 'Weekly', 'Yearly')
+   OR rd.npe03__Installment_Period__c IS NULL;

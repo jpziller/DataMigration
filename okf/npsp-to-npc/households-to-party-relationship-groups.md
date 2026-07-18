@@ -6,7 +6,7 @@ description: NPSP's Household Account model has no direct object
   (Business Account type or similar) plus a separate Party Relationship
   Group record representing the household grouping itself.
 tags: [npsp, npc, afnp, household, party-relationship-group, account-model, migration-pattern]
-timestamp: "2026-07-16"
+timestamp: "2026-07-18"
 ---
 # Households become Party Relationship Groups (AFNP)
 
@@ -29,6 +29,17 @@ second, by real Id) is exactly the kind of two-pass, Id-dependent load
 this framework's own Hard Rule 6 (Parent-Batch Sort) and migration-key
 conventions are built for -- the household's NPSP-legacy Id becomes the
 join key connecting the new Account to its Party Relationship Group.
+
+**A Party Relationship Group record existing correctly is not the whole
+picture** (found 2026-07-18, a second architect's live review of a real
+migration): `Account` has no direct lookup field back to
+`PartyRelationshipGroup`, so a household's members are surfaced through
+`AccountContactRelation`'s own `IsIncludedInGroup`/`IsPrimaryMember` flags,
+not through the group record alone. A migration that creates the Account
+and the Party Relationship Group correctly but leaves
+`AccountContactRelation` at its bare `AccountId`/`ContactId`/`IsActive`
+minimum can still leave the household looking ungrouped in the standard UI.
+See [validators/AccountContactRelation.md](../../validators/AccountContactRelation.md).
 
 # Citations
 

@@ -6,7 +6,7 @@ description: The concrete, live-verified artifacts this repo's own
   scripts, mapping workbooks, and a Migration Run Book tab -- and how a
   future real engagement should (and shouldn't) reuse them.
 tags: [npsp, npc, afnp, reference-implementation, reusable, migration-pattern]
-timestamp: "2026-07-17"
+timestamp: "2026-07-18"
 ---
 # NPSP-to-NPC reference implementation
 
@@ -35,11 +35,30 @@ starting point for the *next* NPSP→NPC engagement — not a throwaway demo.
   [households-to-party-relationship-groups.md](households-to-party-relationship-groups.md)
   for the guide-level rules these scripts implement.
 - **The RecordType/picklist choices already discovered and confirmed
-  live** — `Household`/`PersonAccount` RecordTypes, `PartyRelationshipGroup.Category
-  = 'Staying under same roof'` as the closest household fit,
+  live** — `Household`/`PersonAccount` RecordTypes,
   `GiftCommitment.ScheduleType`/`GiftCommitmentSchedule.TransactionPeriod`
   cross-validation, the `Percent`+`Amount` pairing requirement on
-  `GiftTransactionDesignation`.
+  `GiftTransactionDesignation`. **Corrected 2026-07-18**:
+  `PartyRelationshipGroup.Category` was originally defaulted to
+  `'Staying under same roof'`; real reference-record evidence (10 sampled,
+  0 populated) showed this was an invented value real household groups in
+  this org don't set — leave `Category` unset by default instead.
+- **The `AccountContactRelation` household-membership flag pattern**
+  (found 2026-07-18) — `IsIncludedInGroup = true` for every migrated
+  household member, `IsPrimaryMember = true` for exactly one per household
+  chosen by NPSP's own `npo02__Household_Naming_Order__c`. Without these,
+  a migrated household can have a perfectly valid `PartyRelationshipGroup`
+  record and still look ungrouped in the standard UI. See
+  [validators/AccountContactRelation.md](../../validators/AccountContactRelation.md).
+- **Recurring-type GiftCommitments auto-create their own GiftCommitmentSchedule**
+  (found 2026-07-18) — never insert one explicitly for a `Recurring`
+  commitment; the platform already did, and a second insert collides with
+  it. Confirmed on 6 of 6 real records. Downstream consumers of the real
+  schedule Id (e.g. `GiftTransaction.GiftCommitmentScheduleId`) need to
+  replicate `GiftCommitmentSchedule` from the target org and join by the
+  real `GiftCommitmentId`, not by any local Load table's own bookkeeping.
+  See [validators/GiftCommitmentSchedule.md](../../validators/GiftCommitmentSchedule.md)
+  and [gift-commitment-schedule-auto-creation.md](../nonprofit-cloud/gift-commitment-schedule-auto-creation.md).
 - **The `MigrationID__c` migration-key convention and its FLS grant
   pattern** (Hard Rule 8) — deploy the same custom field + permission set
   shape to a new target org, don't reinvent the field name or the

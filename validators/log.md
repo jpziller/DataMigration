@@ -1,5 +1,27 @@
 # Validators bundle update log
 
+## 2026-07-18 (3)
+* **New**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) --
+  never explicitly insert a schedule for a Recurring-type parent
+  GiftCommitment; Nonprofit Cloud auto-creates one and rejects a second
+  explicit insert. Found while fixing the GiftCommitmentScheduleId gap
+  below -- 3 of 4 RD-derived schedule inserts had actually failed live all
+  along, unnoticed until now.
+
+## 2026-07-18 (2)
+* **New**: [AccountContactRelation validator](AccountContactRelation.md) --
+  IsIncludedInGroup/IsPrimaryMember are the real household-membership
+  signal a migration must set. Found via a second architect's live review
+  of the migrated `NPC_TARGET_v2` org, diagnosed using `sample-reference-records`
+  against real, non-migrated reference data per their explicit instruction.
+* **Correction**: [GiftTransaction validator](GiftTransaction.md),
+  [PartyRelationshipGroup validator](PartyRelationshipGroup.md) -- the
+  same review found `GiftTransaction.GiftCommitmentScheduleId` was never
+  populated (fixed for the Recurring-Donation branch only, gated by the
+  Single-Transaction-for-Custom-Schedule rule), and
+  `PartyRelationshipGroup.Category` was being invented on every record when
+  real reference data leaves it unset 0/10 times (now left unset).
+
 ## 2026-07-18
 * **Correction**: [GiftCommitment validator](GiftCommitment.md),
   [GiftTransaction validator](GiftTransaction.md),
