@@ -32,4 +32,8 @@ own `WHERE` clause). For a `Recurring`-type commitment, replicate
 `GiftCommitment` insert has run, and join downstream consumers (e.g.
 `GiftTransaction.GiftCommitmentScheduleId`) by the real `GiftCommitmentId`
 relationship instead of any local Load table bookkeeping.
-**Executable check:** none yet -- see the OKF finding's own note on this.
+**Executable check:** built 2026-07-18 -- `analyze-org-risk` now runs
+`child_record_risk.py`'s auto-generated-child-record check by default,
+which empirically diffs real reference data since this behavior isn't
+visible via the Tooling API. See the OKF finding's own note on this and
+`ROADMAP.md` #79.
