@@ -53,3 +53,7 @@ discovered the hard way — nothing exists preemptively.
 * [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - never
   explicitly insert a schedule for a Recurring-type parent GiftCommitment;
   the platform auto-creates one and rejects a second, explicit insert.
+* [Contact Point (Address/Phone/Email) validator](ContactPointAddress.md) -
+  ParentId is polymorphic Account/Individual (scope to Account only);
+  real ContactPointAddress data is sparser than describe() suggests;
+  boolean fields can break bulk_op()'s default result matching.

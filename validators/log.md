@@ -1,5 +1,15 @@
 # Validators bundle update log
 
+## 2026-07-19 (2)
+* **New**: [Contact Point (Address/Phone/Email) validator](ContactPointAddress.md)
+  -- covers all three Contact Point objects together (they share the
+  same real shape/scoping questions). ParentId is polymorphic Account/
+  Individual, scoped to Account only; real ContactPointAddress data is
+  much sparser than describe() suggests (Street/PostalCode/AddressType
+  etc. essentially unpopulated in a real 3-record sample); boolean
+  fields can silently break bulk_op()'s default fingerprint matching,
+  same root cause as the AccountContactRelation finding below.
+
 ## 2026-07-19
 * **Update**: [AccountContactRelation validator](AccountContactRelation.md)
   -- three new findings from the NPC fundraising/donor-management
