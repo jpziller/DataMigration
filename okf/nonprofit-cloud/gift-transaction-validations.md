@@ -71,6 +71,32 @@ builds a schedule per transaction instead of per parent. See
 `validators/GiftTransaction.md` and
 `okf/npsp-to-npc/opportunity-routing.md`.
 
+**Confirmed a second time, independently** (NPC fundraising/donor-
+management Snowfakery dogfood build, 2026-07-19 — a different dataset,
+different session, same org): "Transaction Due Date Required" and "Due
+Date vs. Schedule Start Date" both fired live on freshly-generated data
+that omitted/misordered `TransactionDueDate`, exactly as this table
+predicts. Two things this second pass adds beyond what's in this table:
+
+- **"Single Transaction for Custom Schedule" is not always enforced
+  synchronously within one Bulk API 2.0 batch.** 3 real rows briefly
+  succeeded linking to the same Custom-type schedule before the
+  platform's own revalidation caught the violation on a later touch —
+  don't assume a same-batch insert attempt will reliably reject the
+  second-and-later violating row; rank candidates client-side and only
+  ever send the link for one per Custom schedule to begin with.
+- **Clearing an already-set `GiftCommitmentScheduleId` needs the literal
+  `#N/A` Bulk API 2.0 CSV sentinel, not a blank cell** — a blank cell on
+  an update is a no-op, not "set to null." Relevant to "Updating the Gift
+  Commitment Schedule"'s own lock: even a correctly-`#N/A`'d clear
+  attempt is rejected once `Status` has left `Unpaid`/`Pending` (matches
+  this table's own restriction exactly) — the delete-then-reinsert fix
+  this doc already names is confirmed the only way out, not merely one
+  option among several.
+
+See [validators/GiftTransaction.md](../../validators/GiftTransaction.md)
+for the full technical write-up of this second confirmation.
+
 # Citations
 
 1. Migration guide, Appendix B - Fundraising Validations, "Gift
