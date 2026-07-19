@@ -16,6 +16,14 @@ are the 3 official validation-rule docs plus real findings from this
 repo's own NPSP-to-NPC proof-of-concept that turned out to be genuinely
 platform-level, not NPSP-source-specific.
 
+# Migration patterns
+
+* [Fundraising/donor-management Snowfakery dogfood — reference implementation](fundraising-dogfood-reference-implementation.md) -
+  what's reusable from the full 20-object, source-free Snowfakery build
+  (2026-07-19) — transform scripts, the generation sequence, every real
+  fix baked in — and what a next rebuild pass needs to redo or
+  reconsider.
+
 # Platform validations
 
 Official, target-platform-enforced business rules — not migration
