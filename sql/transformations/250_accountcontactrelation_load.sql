@@ -23,15 +23,43 @@
    exactly one member per household gets IsPrimaryMember = true, chosen
    deterministically by lowest Contact_Load.LoadId (this data has no
    NPSP npo02__Household_Naming_Order__c equivalent to rank by).
-   MigrationID__c is backfilled onto the real auto-created row too, for
-   the same traceability every other object in this build gets. */
+
+   CORRECTED again (user feedback, live): an earlier version of this
+   script also backfilled MigrationID__c onto the real auto-created row.
+   Wrong -- this row wasn't created by this migration, so stamping a
+   migration key on it falsely claims it was, and there's no reason to
+   touch a platform-managed row's fields beyond what's functionally
+   necessary (unnecessary writes to a system-managed record are their
+   own real risk). Only IsIncludedInGroup/IsPrimaryMember are sent.
+   Hard Rules 7/12 (migration-key dedup/live-validation) don't apply to
+   this table either, for the same reason -- there's no migration key
+   here, matching is by the real Id alone (already known via the
+   replicate + join below), not a fingerprint/external-id lookup.
+
+   Two more real findings from correcting this live: (1) bulk_op()'s
+   default result-matching fingerprints every SENT column, including the
+   boolean IsIncludedInGroup/IsPrimaryMember fields here -- Salesforce
+   echoes a sent boolean back in a different string representation than
+   pandas' CSV export used, silently breaking the fingerprint match for
+   every row (reported succeeded=0/failed=0, even though the real DML
+   fully succeeded, confirmed by direct query). Always pass
+   `--fingerprint-columns Id` for an update where Id is already known
+   ahead of time, not the default (every sent column). (2) That same
+   false-negative match, on an EARLIER bad run of this same command
+   (before this fix), destructively nulled out the Id column this
+   script's own SELECT had already populated -- bulk_op()'s in-place
+   writeback sets id_column = NULL for any row it fails to fingerprint-
+   match, even when the caller supplied a real, correct Id going in. This
+   script's SELECT re-derives Id fresh from the replicated
+   dbo.AccountContactRelation table every run specifically so a corrupted
+   Load table is always recoverable by re-running it -- never hand-edit
+   AccountContactRelation_Load's own Id column to "fix" it. */
 
 DROP TABLE IF EXISTS [dbo].[AccountContactRelation_Load];
 
 SELECT
     c.LoadId AS LoadId,
     acr.Id AS Id,
-    'SNOWFAKE-ACR-' + CAST(c.LoadId AS VARCHAR(10)) AS MigrationID__c,
     c.AccountId AS REF_AccountId,  -- bookkeeping only (hard rule 13), for the Sort column below; AccountId itself isn't updateable
     1 AS IsIncludedInGroup,
     CASE WHEN c.LoadId = (

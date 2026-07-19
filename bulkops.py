@@ -929,9 +929,26 @@ def _writeback_inplace(engine, schema, table, df, key_column,
             cx.execute(text(
                 f"ALTER TABLE {qualified} ADD {d.quote_ident(col)} {d.raw_text_type()} NULL;"
             ))
+        # COALESCE on id_column, not a plain overwrite: a failed fingerprint
+        # match (rid=None) means "we couldn't correlate a result back to
+        # this row," not "this row has no real Id." For insert, id_column
+        # is always NULL going in (COALESCE(NULL, NULL) = NULL, unchanged
+        # behavior) -- but for an update/upsert where the caller supplied a
+        # real, already-known Id ahead of time (a legitimate pattern for a
+        # record whose Id is already known, e.g. correcting a platform
+        # auto-created row), a plain overwrite destructively nulled out
+        # that correct Id on every fingerprint mismatch, even though the
+        # real DML had nothing to do with it. Found live: a boolean field's
+        # Salesforce-reformatted echo broke fingerprint matching for every
+        # row of an AccountContactRelation update, and the writeback then
+        # silently wiped the real Id this same script's own SELECT had
+        # just populated. error_column is still a plain overwrite -- an
+        # unmatched row's error genuinely is unknown this run, and a stale
+        # error from an earlier run would be actively misleading to keep.
         stmt = text(
             f"UPDATE {qualified} "
-            f"SET {d.quote_ident(id_column)} = :rid, {d.quote_ident(error_column)} = :rerr "
+            f"SET {d.quote_ident(id_column)} = COALESCE(:rid, {d.quote_ident(id_column)}), "
+            f"{d.quote_ident(error_column)} = :rerr "
             f"WHERE {d.quote_ident(key_column)} = :k"
         )
         rows = [

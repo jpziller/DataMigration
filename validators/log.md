@@ -1,5 +1,19 @@
 # Validators bundle update log
 
+## 2026-07-19
+* **Update**: [AccountContactRelation validator](AccountContactRelation.md)
+  -- three new findings from the NPC fundraising/donor-management
+  Snowfakery dogfood build: the platform auto-creates this row itself on
+  Contact insert (never insert explicitly, always update -- the same
+  auto-creation pattern already known for GiftCommitmentSchedule); a
+  boolean field's Salesforce-reformatted echo can silently break
+  `bulk_op()`'s default fingerprint match (`--fingerprint-columns Id`
+  fixes it) and, found along the way, a real bug in `bulk_op()`'s own
+  in-place writeback that destructively nulled a caller-supplied real Id
+  on a failed match (fixed in `bulkops.py`, `_writeback_inplace()` now
+  `COALESCE`s instead of overwriting); and Bulk API 2.0 needs the literal
+  `#N/A` in a CSV cell to null a field on update, not a blank cell.
+
 ## 2026-07-18 (4)
 * **Update**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md)
   -- "Executable check: none yet" replaced with a real one. New

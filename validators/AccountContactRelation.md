@@ -4,10 +4,10 @@ title: AccountContactRelation validator
 description: Object-specific findings for AccountContactRelation
   (Nonprofit Cloud/AFNP) -- IsIncludedInGroup/IsPrimaryMember are the real
   household-membership signal a migration must set, not just AccountId/
-  ContactId; discovered as the likely root cause of migrated household
-  data appearing to have no visible grouping.
-tags: [object-validator, account-contact-relation, nonprofit-cloud, afnp, npsp-to-npc, household]
-timestamp: "2026-07-18"
+  ContactId; the platform auto-creates this row itself on Contact insert,
+  so it must be updated, never inserted.
+tags: [object-validator, account-contact-relation, nonprofit-cloud, afnp, npsp-to-npc, household, auto-created-child-record]
+timestamp: "2026-07-19"
 ---
 # AccountContactRelation validator
 
@@ -51,3 +51,44 @@ conversation instead.
 **Executable check:** none yet -- this is a migration-design decision
 (which fields to derive and how), not a pre-load consistency check the
 way Hard Rules 6/7/12/15 are.
+
+## Salesforce auto-creates the row itself -- never insert, always update
+**Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
+dogfood build -- an explicit `insert` of AccountContactRelation collided
+with a real, already-existing row (submitted 16, succeeded 0, failed 0,
+no error). The platform auto-creates an AccountContactRelation
+(`IsDirect = true`) the instant a Contact is inserted with a real
+`AccountId` -- the same auto-creation pattern already known for
+`GiftCommitmentSchedule` (see [GiftCommitmentSchedule.md](GiftCommitmentSchedule.md)).
+**What to do:** never insert this object explicitly when its Account and
+Contact were both just loaded by this same migration. Replicate the real
+row first (`replicate AccountContactRelation --where "IsDirect = true"`),
+join it back by (AccountId, ContactId), and `update` it with only the
+fields the auto-creation doesn't set (IsIncludedInGroup/IsPrimaryMember
+above). Don't send `MigrationID__c` on this update -- the row wasn't
+created by this migration, so stamping a migration key on it falsely
+claims it was; Hard Rules 7/12 don't apply here either, since matching is
+by the real Id (already known), not a fingerprint/external-id lookup.
+
+## Update calls need `--fingerprint-columns Id`, or a boolean field can silently corrupt the Load table's own Id column
+**Found:** same session. `bulk_op()`'s default result-matching
+fingerprints every sent column -- including the boolean
+IsIncludedInGroup/IsPrimaryMember fields here. Salesforce can echo a sent
+boolean back in a different string representation than pandas' own CSV
+export used, silently breaking the fingerprint match for the whole row
+(reported succeeded=0/failed=0 even though the real DML fully succeeded,
+confirmed via direct query). Worse: this also surfaced a real bug in
+`bulk_op()`'s in-place writeback (`_writeback_inplace()` in
+`bulkops.py`, fixed this session) -- on a failed fingerprint match, it
+unconditionally overwrote `id_column` with NULL, even when the caller
+had supplied a real, correct Id going in (exactly this case, since the
+Id was already known via the replicate + join above). Fixed to
+`COALESCE` instead of overwrite, so a failed match no longer destroys a
+pre-existing Id. **What to do:** always pass `--fingerprint-columns Id`
+for an update where Id is already known ahead of time, rather than
+relying on the default (every sent column).
+
+## Clearing a field via Bulk API 2.0 CSV needs the literal `#N/A`, not a blank cell
+**Found:** same session, correcting the MigrationID__c mistake above. An
+empty CSV cell on an update is a no-op in Bulk API 2.0 -- it does NOT set
+the field to null. Only the literal string `#N/A` in that cell does.
