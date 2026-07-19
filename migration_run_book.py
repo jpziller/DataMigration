@@ -404,6 +404,13 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
         if siblings:
             parts.append(f"parallel with: {', '.join(siblings)}")
 
+        # Best-effort only -- no BulkOpsLog row exists yet at generation
+        # time (no load has run), so there's no real SourceTable signal to
+        # disambiguate a same-object-name, multiple-script case the way
+        # _apply_log_result() below can once real load data exists. A
+        # placeholder row built here that guesses the wrong one of two
+        # real scripts gets corrected automatically the first time
+        # sync_run_book_from_log() runs against a real log row for it.
         filename = sn.script_filename_for(obj, _TRANSFORMS_DIR, known_objects=in_scope)
         row = {
             "Stage": "Load",
@@ -715,7 +722,34 @@ def _apply_log_result(ws, row_idx, log_row, git_info=None, known_objects=None):
     # matched a stale/illustrative script that has since been replaced),
     # so this is re-resolved on every sync rather than trusted from
     # whatever's already in the cell.
-    filename = sn.script_filename_for(log_row["objectname"], _TRANSFORMS_DIR, known_objects=known_objects)
+    #
+    # When more than one real script implements this same object name from
+    # different source-routing branches (e.g. this project's own
+    # GiftTransaction: 200 from Opportunity, 210 from Payment),
+    # script_filename_for()'s own highest-number-wins tiebreak can silently
+    # pick the wrong one -- found live, 2026-07-18, syncing this exact
+    # object after a corrective reload against the Opportunity branch
+    # linked to 210 (the Payment branch) instead of 200. SourceTable is a
+    # real, unambiguous signal here (each script's own SELECT INTO target
+    # is exactly what bulk_op() recorded there), so it's tried first via
+    # script_filename_for_source_table(); the original highest-number
+    # default only applies when that can't disambiguate (a single
+    # candidate, or SourceTable not matching any of them).
+    #
+    # Known residual gap, not fixed here: a `delete` operation's own
+    # SourceTable is always a `<Object>_Purge` table (bulkops.py's
+    # purge_by_filter()), never one of the real scripts' own build tables
+    # -- there's no per-branch signal to disambiguate a delete row this
+    # way at all, so a multi-script object's delete rows still fall back
+    # to the highest-numbered guess, same as before this fix.
+    candidates = sn.script_candidates_for(log_row["objectname"], _TRANSFORMS_DIR, known_objects=known_objects)
+    filename = ""
+    if len(candidates) > 1:
+        filename = sn.script_filename_for_source_table(
+            candidates, _TRANSFORMS_DIR, log_row.get("sourcetable")
+        )
+    if not filename:
+        filename = candidates[-1] if candidates else ""
     if filename:
         object_idx = _COLUMNS.index("Object") + 1
         cell = ws.cell(row=row_idx, column=object_idx, value=filename)
@@ -753,7 +787,7 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
     with engine.connect() as cx:
         new_rows = cx.execute(
             text(
-                f"SELECT LogId, ObjectName, Operation, TargetSchema, RecordsSubmitted, "
+                f"SELECT LogId, ObjectName, SourceTable, Operation, TargetSchema, RecordsSubmitted, "
                 f"RecordsSucceeded, RecordsFailed, StartedAt, CompletedAt, RunBy, JobCount "
                 f"FROM {d.qualify(schema, 'BulkOpsLog')} WHERE LogId > :last ORDER BY LogId"
             ),
