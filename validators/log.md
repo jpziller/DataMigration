@@ -1,5 +1,17 @@
 # Validators bundle update log
 
+## 2026-07-19 (3)
+* **Correction**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md),
+  [okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md)
+  -- the "Recurring-type GiftCommitment always auto-creates its own
+  schedule" finding (confirmed 3/3 and 6/6 in two earlier sessions) does
+  NOT hold universally. This session's NPC dogfood build inserted 12
+  fresh Recurring-type commitments and got zero auto-created schedules,
+  verified multiple ways. Root platform cause still unclear (Tooling-API-
+  invisible). Corrected guidance: check what's actually missing (replicate
+  + LEFT JOIN) before deciding whether to insert, rather than assuming
+  either "always" or "never" from a prior finding.
+
 ## 2026-07-19 (2)
 * **New**: [Contact Point (Address/Phone/Email) validator](ContactPointAddress.md)
   -- covers all three Contact Point objects together (they share the

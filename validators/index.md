@@ -50,9 +50,10 @@ discovered the hard way — nothing exists preemptively.
 * [AccountContactRelation validator](AccountContactRelation.md) -
   IsIncludedInGroup/IsPrimaryMember are the real household-membership
   signal, not just AccountId/ContactId.
-* [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - never
-  explicitly insert a schedule for a Recurring-type parent GiftCommitment;
-  the platform auto-creates one and rejects a second, explicit insert.
+* [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - the
+  platform SOMETIMES auto-creates a schedule for a Recurring-type parent
+  GiftCommitment (confirmed both ways live) -- check what's actually
+  missing before inserting, never assume either way.
 * [Contact Point (Address/Phone/Email) validator](ContactPointAddress.md) -
   ParentId is polymorphic Account/Individual (scope to Account only);
   real ContactPointAddress data is sparser than describe() suggests;

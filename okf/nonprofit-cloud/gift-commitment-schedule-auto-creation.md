@@ -91,9 +91,31 @@ command now correctly flags `GiftCommitment -> GiftCommitmentSchedule` at
 60% — confirmed directly, not assumed. See `ROADMAP.md` #79 for the full
 account.
 
+**CORRECTION (2026-07-19):** this "always auto-creates" rule does not
+hold universally. A later session's NPC fundraising/donor-management
+Snowfakery dogfood build inserted 12 fresh Recurring-type
+`GiftCommitment` records into the same org and got ZERO auto-created
+schedules -- verified from both directions, confirmed stable over an
+extended period (not an async delay), and confirmed that updating an
+already-inserted commitment's fields afterward does not retroactively
+trigger it. The root platform cause remains genuinely unclear (still a
+Tooling-API-invisible blind spot) -- a plausible but unconfirmed guess is
+a Bulk-API-2.0-vs-UI-single-record-insert context difference. **The safe
+pattern going forward is defensive, not predictive:** after inserting a
+`GiftCommitment`, replicate `GiftCommitmentSchedule` for its Id and check
+what's actually there before deciding whether an explicit insert is
+needed -- never assume "always" or "never" from a prior session's
+finding, even a well-confirmed one like this one originally was. See
+[validators/GiftCommitmentSchedule.md](../../validators/GiftCommitmentSchedule.md)'s
+own correction entry and
+`sql/transformations/370_giftcommitmentschedule_load.sql` for the
+corrected implementation.
+
 # Citations
 
 1. Live-confirmed, 2026-07-18, `NPC_TARGET_v2` -- not documented in the
    migration guide's own Appendix B validation tables (see
    `okf/nonprofit-cloud/gift-commitment-schedule-validations.md`,
    `gift-commitment-validations.md`) as of this writing.
+2. Correction live-confirmed, 2026-07-19, same org -- see the correction
+   note above.
