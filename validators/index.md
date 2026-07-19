@@ -63,3 +63,7 @@ discovered the hard way — nothing exists preemptively.
 * [GiftSoftCredit validator](GiftSoftCredit.md) - RecipientId is an
   Account, not a Contact; PartialAmount/PartialPercent are mutually
   exclusive.
+* [GiftTransactionDesignation validator](GiftTransactionDesignation.md) -
+  a split's two Amounts must sum to an exact remainder, not two
+  independently-rounded shares; Amount may lock after the parent
+  transaction reaches a certain state (unresolved).

@@ -1,5 +1,14 @@
 # Validators bundle update log
 
+## 2026-07-19 (5)
+* **New**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
+  -- a split allocation's two Amounts must sum to an exact remainder
+  (not two independently-rounded percentages, which can overshoot by a
+  cent); Amount also appears to lock once the parent transaction reaches
+  a certain state, matching the same pattern already found on
+  GiftCommitment/GiftTransaction, but left unresolved this pass (1 of 60
+  rows, a known accepted gap in this practice build).
+
 ## 2026-07-19 (4)
 * **New**: [GiftRefund validator](GiftRefund.md) -- three real
   constraints tying a refund to its parent GiftTransaction (must be
