@@ -1,5 +1,22 @@
 # Validators bundle update log
 
+## 2026-07-19 (4)
+* **New**: [GiftRefund validator](GiftRefund.md) -- three real
+  constraints tying a refund to its parent GiftTransaction (must be
+  Paid, Amount <= OriginalAmount, Date >= TransactionDate); also where a
+  real pyodbc fast_executemany bug in `_writeback_inplace()` was found
+  and fixed (long, variable-length error messages truncating and
+  crashing the writeback -- now one execute() per row).
+* **New**: [GiftSoftCredit validator](GiftSoftCredit.md) -- RecipientId
+  is an Account not a Contact (confirmed live); PartialAmount/
+  PartialPercent are mutually exclusive.
+* **Update**: [GiftTransaction validator](GiftTransaction.md) -- two new
+  findings: TransactionDueDate required + must not precede its linked
+  schedule's StartDate; a Custom-type schedule allows only ONE linked
+  transaction (with a real Bulk-API-batch race letting more than one
+  briefly succeed), clearing the link afterward needs the `#N/A`
+  sentinel and is blocked entirely once Status leaves Unpaid/Pending.
+
 ## 2026-07-19 (3)
 * **Correction**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md),
   [okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md)

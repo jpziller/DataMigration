@@ -957,7 +957,22 @@ def _writeback_inplace(engine, schema, table, df, key_column,
              "k": r[key_column]}
             for _, r in df.iterrows()
         ]
-        cx.execute(stmt, rows)
+        # One execute() per row, not a single executemany-style call with
+        # the full `rows` list -- found live: pyodbc's fast_executemany
+        # (enabled globally in sql_client.py's make_engine()) infers a
+        # bound string parameter's buffer size from an early row in the
+        # batch, then truncates a LATER row whose value is longer ("String
+        # data, right truncation: length 666 buffer 510"), crashing this
+        # whole writeback outright rather than writing back what it could.
+        # Hit here by real, wide variance in Salesforce validation-failure
+        # message lengths across one GiftRefund batch -- the same class of
+        # fast_executemany bug already fixed elsewhere in this codebase for
+        # other column types (see ROADMAP.md), just not previously hit for
+        # a variable-length text column. Writeback is a small, bounded
+        # number of rows (one load's worth), not the high-volume path --
+        # per-row execute() has no meaningful performance cost here.
+        for row in rows:
+            cx.execute(stmt, row)
 
 
 def _writeback_result_table(engine, schema, table, df, sent,

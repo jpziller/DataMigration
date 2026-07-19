@@ -7,7 +7,7 @@ description: Object-specific findings for GiftTransaction (Nonprofit
   must also be populated where a schedule exists, but only when doing so
   doesn't violate the Single-Transaction-for-Custom-Schedule rule.
 tags: [object-validator, gift-transaction, nonprofit-cloud, afnp, npsp-to-npc]
-timestamp: "2026-07-18"
+timestamp: "2026-07-19"
 ---
 # GiftTransaction validator
 
@@ -80,3 +80,45 @@ failed live (silently, until now). See
 real `GiftCommitmentId`, not the local Load table's own bookkeeping, so it
 finds the schedule regardless of which side (this migration or the
 platform) actually created it.
+
+## TransactionDueDate is required for commitment-linked transactions, and must not precede the schedule's StartDate
+**Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
+dogfood build. `TransactionDueDate` is required specifically when
+`GiftCommitmentId` is set (an installment payment needs a due date) --
+`INVALID_INPUT: "Complete this field."` on every commitment-linked row
+that omitted it; a standalone (non-commitment) transaction doesn't need
+it. Separately, once sent, it must also be on or after the linked
+`GiftCommitmentSchedule.StartDate` -- `INVALID_INPUT: "Enter a date
+that's on or after the start date of the associated gift commitment
+schedule."` Both found because Snowfakery generates `TransactionDueDate`
+independently, with no awareness of whether/which commitment a row will
+end up linked to (that link is a separate, later assignment).
+**What to do:** always send `TransactionDueDate`, and clamp it to the
+later of its own generated value and the linked schedule's `StartDate`
+when a commitment link exists.
+
+## A Custom-type schedule allows only ONE linked GiftTransaction
+**Found:** same session -- `INVALID_INPUT: "Select a schedule without any
+gift transactions."` A `GiftCommitmentSchedule` with `TransactionPeriod =
+'Custom'` accepts exactly one `GiftTransaction`; a Recurring-type
+schedule accepts many. Confirmed live that a real Bulk API 2.0 batch can
+let more than one row momentarily succeed against the same Custom
+schedule before the platform's own revalidation catches up (3 real rows
+briefly held one Custom schedule at once in this build) -- not a reliable
+guard to rely on, don't assume the platform will always reject the
+second attempt synchronously.
+**What to do:** rank candidate transactions per schedule and only let the
+first (by a stable, deterministic order) keep `GiftCommitmentScheduleId`
+for a Custom-type schedule; clear it on the rest.
+**Related finding:** clearing `GiftCommitmentScheduleId` on an
+already-inserted record needs the literal `#N/A` CSV sentinel, not a
+blank/NULL value (Bulk API 2.0 treats a blank cell as "no change" on
+update -- the same lesson from
+[AccountContactRelation.md](AccountContactRelation.md)'s `MigrationID__c`
+finding). Worse: once a `GiftTransaction`'s `Status` has left
+`Unpaid`/`Pending`, `GiftCommitmentScheduleId` becomes immutable
+entirely -- even a correctly-sent `#N/A` is rejected
+(`INVALID_INPUT: "You can edit this field when the transaction status is
+Unpaid or Pending."`). A delete-and-reinsert is the only fix once a
+record has reached that state (same pattern already documented in
+`docs/MIGRATION_PLAYBOOK.md`'s "Corrective reload" section).

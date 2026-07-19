@@ -58,3 +58,8 @@ discovered the hard way — nothing exists preemptively.
   ParentId is polymorphic Account/Individual (scope to Account only);
   real ContactPointAddress data is sparser than describe() suggests;
   boolean fields can break bulk_op()'s default result matching.
+* [GiftRefund validator](GiftRefund.md) - three real constraints tying a
+  refund to its parent GiftTransaction's own Status/Amount/Date.
+* [GiftSoftCredit validator](GiftSoftCredit.md) - RecipientId is an
+  Account, not a Contact; PartialAmount/PartialPercent are mutually
+  exclusive.
