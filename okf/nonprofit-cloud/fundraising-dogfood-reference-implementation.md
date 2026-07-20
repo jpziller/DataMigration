@@ -32,7 +32,7 @@ rediscover.
 
 | Artifact | Location | Covers |
 |---|---|---|
-| Transform scripts | `sql/transformations/230-430_*.sql` | 21 scripts, 11 build groups, all 20 objects, real dependency order. |
+| Transform scripts | `sql/transformations/230-430_*.sql` | 20 scripts, 11 build groups, all 20 objects, real dependency order (`380` deliberately skipped — see the numbering note below). |
 | Mapping workbook | `mapping/npc_dogfood_mapping.xlsx` | One tab per object with a real Mock source table (Hard Rule 11 — carried to completion, not a first-draft). |
 | Migration Run Book tab | `migration_run_book.xlsx`, tab `NPC_Fundraising_Dogfood` | Real load-order data and every real `bulkops` result from this pass. |
 | Migration-key metadata | `force-app/main/default/objects/*/fields/MigrationID__c.field-meta.xml` (20 objects total, 13 from the earlier PoC + 7 new this pass) + the extended `MigrationFieldAccess` permission set | The migration-key field + FLS grant on every object this build writes to. |
@@ -77,6 +77,15 @@ script(s)):
     --count GiftSoftCredit=0-1`.
 11. **GiftDefaultDesignation + GiftTransactionDesignation** (`420`,
     `430`) — pure SQL, no new generation.
+
+**Numbering note**: `380` is a deliberate gap, not a missing file. It was
+originally planned as a separate "replicate the real, auto-created
+Recurring schedules" reference step, but `370`'s own corrected check-first
+design (see below) absorbed that logic directly — `370` already replicates
+real state before deciding what to insert, so a second, standalone
+replicate step was redundant and was removed rather than kept as an
+empty placeholder. `next-script-number` will offer `380` again for a
+genuinely new script inserted between `370` and `390` in a future pass.
 
 # What transfers directly to a next pass — reuse verbatim
 

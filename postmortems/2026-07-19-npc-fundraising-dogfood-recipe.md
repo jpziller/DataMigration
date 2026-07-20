@@ -139,7 +139,7 @@ exception for framework-generated data. PR #20
 
 ## Reusable artifacts produced
 
-- `sql/transformations/230-430_*.sql` — 21 scripts across 11 build
+- `sql/transformations/230-430_*.sql` — 20 scripts across 11 build
   groups, in real dependency order, covering all 20 objects. Every
   script already holds its final, live-corrected logic (fixes were
   applied in place during the build, not left as separate patch scripts)
