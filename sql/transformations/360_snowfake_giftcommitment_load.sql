@@ -46,7 +46,29 @@
    deleted and reinserted with ExpectedEndDate correctly null from the
    start. ExpectedEndDate is now only ever sent for Custom-type rows,
    where it's meaningful (a Custom schedule needs a real end). See
-   validators/GiftCommitmentSchedule.md for the corrected write-up. */
+   validators/GiftCommitmentSchedule.md for the corrected write-up.
+
+   UPDATE (2026-07-19, later, official docs + a real Nonprofit Cloud
+   architect's confirmation): the auto-creation IS real for a "regular"
+   recurring type (architect's own words, "eg monthly") -- this build's
+   own ScheduleType='Recurring' rows never actually got one because (a)
+   the real trigger is either an explicit "Manage Recurring Gift
+   Commitment Schedule" Invocable Action call (confirmed NOT fired by a
+   plain Bulk API insert) or the nightly "NextGen commitment processing
+   job" (a real Salesforce batch, confirmed via
+   GiftCommitment.LastNextGenCmtProcError's own field-help text) -- and
+   (b) this build checked same-day, before that nightly job could ever
+   have run. "Irregular" commitments (pledges) don't get this, or only
+   get the first commitment covered -- ScheduleType='Custom' here is
+   believed to be that case, matching TransactionPeriod='Custom' on
+   GiftCommitmentSchedule, though the exact field-level trigger for
+   "regular" isn't independently confirmed by this project yet (only by
+   the architect's own domain knowledge). See
+   okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md's own
+   2026-07-19 update for the full account and what to try differently
+   next time (call the Action explicitly, or insert and wait a real day
+   before checking -- never explicitly insert a competing schedule
+   without checking live first). */
 
 DROP TABLE IF EXISTS [dbo].[GiftCommitment_Load];
 
@@ -74,6 +96,12 @@ SELECT
     m.FormalCommitmentType,
     m.GiftVehicleType,
     m.GiftVehicle,
+    -- 'Recurring' = the "regular" type (architect-confirmed, e.g. Monthly
+    -- cadence) that gets a real GiftCommitmentSchedule auto-created, via
+    -- either the Manage Recurring Gift Commitment Schedule action or the
+    -- nightly NextGen batch -- see this file's own header UPDATE note.
+    -- 'Custom' = the "irregular"/pledge case, which doesn't (or only
+    -- covers the first commitment) and needs an explicit schedule (370).
     CASE WHEN m._MockRowId % 10 < 7 THEN 'Recurring' ELSE 'Custom' END AS ScheduleType,
     CASE WHEN m.EffectiveStartDate <= m.ExpectedEndDate THEN m.EffectiveStartDate ELSE m.ExpectedEndDate END AS EffectiveStartDate,
     CASE

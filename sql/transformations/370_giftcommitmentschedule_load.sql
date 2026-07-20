@@ -30,7 +30,26 @@
    cadence (this build has no real source period to derive from) --
    TransactionDay defaults to 1, since Monthly requires a real
    TransactionDay value (Appendix B validation, same pattern as the
-   earlier PoC's own 170_npc_giftcommitmentschedule_from_rd_load.sql). */
+   earlier PoC's own 170_npc_giftcommitmentschedule_from_rd_load.sql).
+
+   UPDATE (2026-07-19, later, official docs + a real Nonprofit Cloud
+   architect's confirmation): the check-first pattern above is still the
+   right defensive design (never collides regardless of timing), but the
+   "genuinely unclear" root cause note above is now mostly resolved --
+   see 360's own header UPDATE and
+   okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md. Real
+   auto-creation requires either an explicit "Manage Recurring Gift
+   Commitment Schedule" action call (this build never made one) or the
+   nightly "NextGen commitment processing job" (a real batch, confirmed
+   via GiftCommitment.LastNextGenCmtProcError's own field-help text) --
+   this build's same-day check ran before that job could ever fire. The
+   12 explicit inserts this script produced for "Recurring" commitments
+   may collide with real schedules the nightly job creates later against
+   the SAME commitments -- a live, unresolved risk on whatever org this
+   was run against, not just a documentation gap. On the next rebuild,
+   prefer calling the real Action (or waiting a real day) over this
+   script's own explicit-insert fallback for genuinely "regular"
+   (Monthly-cadence) commitments. */
 
 DROP TABLE IF EXISTS [dbo].[GiftCommitmentSchedule_Load];
 

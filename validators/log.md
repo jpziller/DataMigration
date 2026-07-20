@@ -1,5 +1,19 @@
 # Validators bundle update log
 
+## 2026-07-19 (6)
+* **Update**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md),
+  [okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md)
+  -- the real mechanism found: official docs confirm a "Manage Recurring
+  Gift Commitment Schedule" Invocable Action (not fired by a plain Bulk
+  API insert) and a real nightly "NextGen commitment processing job"
+  batch. A human Nonprofit Cloud architect confirmed live: a schedule
+  does get created for a "regular" recurring type (e.g. Monthly);
+  "irregular" pledge-type commitments don't, or only get the first
+  covered. Narrows the earlier same-day correction ("sometimes,
+  unexplained") to a real, meaningful distinction plus a likely timing
+  artifact, not platform inconsistency. Exact mechanical trigger still
+  open. Also now commented directly in `sql/transformations/360`/`370`.
+
 ## 2026-07-19 (5)
 * **New**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
   -- a split allocation's two Amounts must sum to an exact remainder

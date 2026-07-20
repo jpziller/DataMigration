@@ -140,12 +140,25 @@ genuinely new script inserted between `370` and `390` in a future pass.
   is NOT yet fixed in `430` — a rebuild will hit it again unless it's
   resolved first. Try the delete-and-reinsert approach already proven
   twice this session before assuming it's a different root cause.
-- **The `GiftCommitmentSchedule` auto-creation root cause is still
-  unconfirmed** — `370`'s check-first pattern is safe either way, but if
-  a rebuild pass gets a *third*, different data point (e.g. auto-creation
-  fires for some but not all Recurring commitments), that's worth a
-  fresh investigation rather than assuming this pass's "0/12" result
-  generalizes.
+- **UPDATE (2026-07-19, later): the `GiftCommitmentSchedule` auto-creation
+  root cause is mostly resolved, not still open.** Official docs plus a
+  real Nonprofit Cloud architect's confirmation (see
+  [gift-commitment-schedule-auto-creation.md](gift-commitment-schedule-auto-creation.md)'s
+  own later update) found it: auto-creation is real for a "regular"
+  recurring type (e.g. Monthly), via either an explicit "Manage Recurring
+  Gift Commitment Schedule" Invocable Action call (confirmed NOT fired by
+  a plain Bulk API insert) or the nightly "NextGen commitment processing
+  job" (a real Salesforce batch). This build's "0/12" result was very
+  likely a timing artifact (checked same-day, before the nightly job
+  could run) combined with never calling the explicit Action — not
+  inconsistent platform behavior. `370`'s check-first pattern remains the
+  right defensive design regardless. **What's still genuinely open**: the
+  exact mechanical trigger (does `ScheduleType='Recurring'` alone suffice
+  given enough time, or is the explicit Action call required first) was
+  not independently confirmed even by the architect. On the next rebuild,
+  try calling the Action explicitly for Recurring-type commitments (with
+  a real `TransactionPeriod` like `Monthly`) rather than repeating this
+  pass's same-day check-and-workaround pattern.
 - **Volumes were a judgment call** (8 households, 40 gift transactions,
   etc.) — a rebuild pass is free to scale these differently; nothing in
   the current scripts locks a specific volume in as structurally

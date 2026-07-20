@@ -197,13 +197,25 @@ written into `okf/nonprofit-cloud/`:
   worth a focused follow-up before the next rebuild, since the fix
   pattern (delete + reinsert) is already known and just wasn't applied
   here.
-- **The `GiftCommitmentSchedule` auto-creation root cause remains
-  unconfirmed** — two sessions have now observed opposite behavior (3/3
-  auto-created vs. 12/12 not) against the same org, and the difference
-  wasn't isolated. If a third data point ever surfaces (a client
-  engagement, another dogfood pass), compare Bulk-API-batch-size,
-  Bulk-API-vs-UI-insert-context, and exact field population against both
-  prior sessions' own data rather than starting from scratch again.
+- **UPDATE (2026-07-19, later same day): mostly resolved.** Official
+  Nonprofit Cloud docs research plus a real architect's (Ali's) direct
+  confirmation found the real mechanism: auto-creation is genuine for a
+  "regular" recurring type (e.g. Monthly), via either an explicit
+  "Manage Recurring Gift Commitment Schedule" Invocable Action (confirmed
+  not fired by a plain Bulk API insert) or the nightly "NextGen
+  commitment processing job" (a real Salesforce batch — this build's own
+  `LastNextGenCmtProcError`/`LastNextGenCmtProcDtTm` fields were blank on
+  all 12 commitments even hours later, consistent with "hasn't run yet,"
+  not "ran and found nothing"). The two sessions' apparently opposite
+  results (3/3 vs. 0/12) were very likely a timing artifact plus never
+  calling the explicit Action — not inconsistent platform behavior.
+  **Still genuinely open**: whether `ScheduleType='Recurring'` alone is
+  sufficient given enough real time, or whether the explicit Action call
+  is required — the architect herself wasn't certain of the exact
+  mechanical trigger. See
+  `okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md`'s own
+  2026-07-19 update for the full account, now also commented directly in
+  `sql/transformations/360`/`370`'s own headers.
 - **Volumes were a judgment call, not evidenced** — 8 households, 5
   organizations, 10 person accounts, 40 gift transactions, etc. A next
   rebuild pass could reasonably scale these up or down; nothing in this

@@ -2,11 +2,13 @@
 type: ObjectValidator
 title: GiftCommitmentSchedule validator
 description: Object-specific findings for GiftCommitmentSchedule
-  (Nonprofit Cloud/AFNP) -- Recurring-type parent GiftCommitments
-  SOMETIMES get an auto-created schedule from the platform itself
-  (confirmed both ways live, in two different sessions); check what's
-  actually missing before inserting rather than assuming either way.
-tags: [object-validator, gift-commitment-schedule, nonprofit-cloud, afnp, npsp-to-npc]
+  (Nonprofit Cloud/AFNP) -- a "regular" recurring parent GiftCommitment
+  (e.g. Monthly) gets an auto-created schedule via either an explicit
+  Invocable Action or the nightly NextGen batch job; an "irregular"
+  pledge-type commitment doesn't, or only gets the first covered.
+  Confirmed by a human Nonprofit Cloud architect; exact trigger
+  mechanism still open.
+tags: [object-validator, gift-commitment-schedule, nonprofit-cloud, afnp, npsp-to-npc, nextgen]
 timestamp: "2026-07-19"
 ---
 # GiftCommitmentSchedule validator
@@ -78,3 +80,37 @@ correctly flags this object as having auto-generation risk (a real
 non-1:1 relationship rate would still show up) -- but it can't
 distinguish "always," "sometimes," or "never" from one snapshot,
 consistent with everything else found this session.
+
+## UPDATE (2026-07-19, later same day): real mechanism identified, narrows the correction above
+**Found:** official Nonprofit Cloud Developer Guide research plus a real
+Nonprofit Cloud architect's (Ali's) direct confirmation, both same day.
+Two real mechanisms exist: the **"Manage Recurring Gift Commitment
+Schedule" Invocable Action** (explicit REST/Flow call, confirmed NOT
+triggered by a plain Bulk API insert), and **"the scheduled NextGen
+commitment processing job"** -- Salesforce's own literal field-help text
+for `GiftCommitment.LastNextGenCmtProcError`, a real nightly batch per
+Salesforce's Summer '26 release notes. Both were blank on all 12 of this
+build's own Recurring commitments even hours after insert -- the job
+genuinely hadn't run yet, not that it ran and found nothing to do.
+
+**Ali's direct confirmation:** yes, a schedule gets created for a
+"regular" type (e.g. Monthly); "irregular" pledge-type commitments
+either never get one, or only get the first commitment covered. This
+confirms the original 2026-07-18 finding's core claim was right, not
+wrong -- the 2026-07-19 correction above overcorrected toward "sometimes,
+unexplained" when the real answer is "depends on regular vs. irregular,"
+a real, meaningful distinction, not noise. **Ali was not certain of the
+exact mechanical trigger** (explicit Action call vs. the nightly batch
+vs. both) -- that specific piece remains open.
+
+**What to do on the next rebuild pass:** don't set `ScheduleType =
+'Recurring'` with no real schedule and assume one will appear same-day.
+Either call the "Manage Recurring Gift Commitment Schedule" action
+explicitly with a real `TransactionPeriod` (e.g. `Monthly`), or insert
+and genuinely wait until the next day before checking -- and don't
+explicitly `INSERT` a competing schedule without first confirming, live,
+that this pass didn't already get one either way. See
+`sql/transformations/360_snowfake_giftcommitment_load.sql` and `370`'s
+own header comments for the field-level detail baked in from this
+finding. Full account:
+[okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md).
