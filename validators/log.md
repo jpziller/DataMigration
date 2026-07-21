@@ -1,5 +1,94 @@
 # Validators bundle update log
 
+## 2026-07-20
+* **New**: [GiftDesignation validator](GiftDesignation.md) -- can't
+  delete an active GiftDesignation, found purging every migrated record
+  from `NPC_TARGET_v2` to reset the org before a fresh rebuild attempt.
+* **Update**: [AccountContactRelation validator](AccountContactRelation.md)
+  -- a "direct" relationship (IsDirect=true) can't be deleted
+  independently; delete the owning Contact instead. Found during the
+  same purge.
+* **New OKF doc**: [okf/nonprofit-cloud/full-org-reset-between-build-attempts.md](../okf/nonprofit-cloud/full-org-reset-between-build-attempts.md)
+  -- the full reverse-dependency delete sequence for the NPC fundraising
+  object family, both quirks above, and the relationship-traced deletion
+  technique for AccountContactRelation (no migration key of its own).
+
+## 2026-07-19 (6)
+* **Update**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md),
+  [okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md)
+  -- the real mechanism found: official docs confirm a "Manage Recurring
+  Gift Commitment Schedule" Invocable Action (not fired by a plain Bulk
+  API insert) and a real nightly "NextGen commitment processing job"
+  batch. A human Nonprofit Cloud architect confirmed live: a schedule
+  does get created for a "regular" recurring type (e.g. Monthly);
+  "irregular" pledge-type commitments don't, or only get the first
+  covered. Narrows the earlier same-day correction ("sometimes,
+  unexplained") to a real, meaningful distinction plus a likely timing
+  artifact, not platform inconsistency. Exact mechanical trigger still
+  open. Also now commented directly in `sql/transformations/360`/`370`.
+
+## 2026-07-19 (5)
+* **New**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
+  -- a split allocation's two Amounts must sum to an exact remainder
+  (not two independently-rounded percentages, which can overshoot by a
+  cent); Amount also appears to lock once the parent transaction reaches
+  a certain state, matching the same pattern already found on
+  GiftCommitment/GiftTransaction, but left unresolved this pass (1 of 60
+  rows, a known accepted gap in this practice build).
+
+## 2026-07-19 (4)
+* **New**: [GiftRefund validator](GiftRefund.md) -- three real
+  constraints tying a refund to its parent GiftTransaction (must be
+  Paid, Amount <= OriginalAmount, Date >= TransactionDate); also where a
+  real pyodbc fast_executemany bug in `_writeback_inplace()` was found
+  and fixed (long, variable-length error messages truncating and
+  crashing the writeback -- now one execute() per row).
+* **New**: [GiftSoftCredit validator](GiftSoftCredit.md) -- RecipientId
+  is an Account not a Contact (confirmed live); PartialAmount/
+  PartialPercent are mutually exclusive.
+* **Update**: [GiftTransaction validator](GiftTransaction.md) -- two new
+  findings: TransactionDueDate required + must not precede its linked
+  schedule's StartDate; a Custom-type schedule allows only ONE linked
+  transaction (with a real Bulk-API-batch race letting more than one
+  briefly succeed), clearing the link afterward needs the `#N/A`
+  sentinel and is blocked entirely once Status leaves Unpaid/Pending.
+
+## 2026-07-19 (3)
+* **Correction**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md),
+  [okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md)
+  -- the "Recurring-type GiftCommitment always auto-creates its own
+  schedule" finding (confirmed 3/3 and 6/6 in two earlier sessions) does
+  NOT hold universally. This session's NPC dogfood build inserted 12
+  fresh Recurring-type commitments and got zero auto-created schedules,
+  verified multiple ways. Root platform cause still unclear (Tooling-API-
+  invisible). Corrected guidance: check what's actually missing (replicate
+  + LEFT JOIN) before deciding whether to insert, rather than assuming
+  either "always" or "never" from a prior finding.
+
+## 2026-07-19 (2)
+* **New**: [Contact Point (Address/Phone/Email) validator](ContactPointAddress.md)
+  -- covers all three Contact Point objects together (they share the
+  same real shape/scoping questions). ParentId is polymorphic Account/
+  Individual, scoped to Account only; real ContactPointAddress data is
+  much sparser than describe() suggests (Street/PostalCode/AddressType
+  etc. essentially unpopulated in a real 3-record sample); boolean
+  fields can silently break bulk_op()'s default fingerprint matching,
+  same root cause as the AccountContactRelation finding below.
+
+## 2026-07-19
+* **Update**: [AccountContactRelation validator](AccountContactRelation.md)
+  -- three new findings from the NPC fundraising/donor-management
+  Snowfakery dogfood build: the platform auto-creates this row itself on
+  Contact insert (never insert explicitly, always update -- the same
+  auto-creation pattern already known for GiftCommitmentSchedule); a
+  boolean field's Salesforce-reformatted echo can silently break
+  `bulk_op()`'s default fingerprint match (`--fingerprint-columns Id`
+  fixes it) and, found along the way, a real bug in `bulk_op()`'s own
+  in-place writeback that destructively nulled a caller-supplied real Id
+  on a failed match (fixed in `bulkops.py`, `_writeback_inplace()` now
+  `COALESCE`s instead of overwriting); and Bulk API 2.0 needs the literal
+  `#N/A` in a CSV cell to null a field on update, not a blank cell.
+
 ## 2026-07-18 (4)
 * **Update**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md)
   -- "Executable check: none yet" replaced with a real one. New

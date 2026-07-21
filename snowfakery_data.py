@@ -253,6 +253,27 @@ def build_recipe(sf, object_names, counts, stage_dir="_stage"):
         raise ValueError(f"Missing --count for: {missing_counts}")
 
     edges = lo.build_dependency_edges(sf, object_names)
+
+    # build_dependency_edges() is a general-purpose analyzer (also used by
+    # analyze-load-order) and deliberately records every reference field
+    # regardless of createable -- useful there as pure documentation. Here,
+    # a non-createable edge (e.g. Account.PersonContactId, the reverse of
+    # Contact.AccountId) can never actually appear in this recipe's own
+    # generated fields -- object_field_schema() below already excludes it
+    # via its own `not field.get("createable")` check. Left unfiltered, such
+    # an edge can still wrongly trigger a "circular dependency" error for two
+    # objects that would never actually conflict in the real generated
+    # recipe -- found live: Account<->Contact, the single most common
+    # parent+child pairing this command exists for, blocked entirely by
+    # Account's own non-createable PersonContactId reference back to Contact.
+    createable_ref_fields = {
+        (object_name, field["name"])
+        for object_name in object_names
+        for field in getattr(sf, object_name).describe()["fields"]
+        if field["type"] == "reference" and field.get("createable")
+    }
+    edges = [e for e in edges if (e["child"], e["field"]) in createable_ref_fields]
+
     result = lo.compute_load_order(object_names, edges)
     if result["unresolved_cycles"]:
         raise ValueError(

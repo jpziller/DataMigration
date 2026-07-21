@@ -42,6 +42,68 @@ import sql_dialect
 
 _HYPERLINK_FONT = Font(color="0563C1", underline="single")
 
+_CTE_START_RE = re.compile(r"(?:\A|;)\s*WITH\s+", re.IGNORECASE)
+_CTE_NAME_AS_RE = re.compile(r"\s*\w+\s+AS\s*", re.IGNORECASE)
+
+
+def _strip_leading_ctes(sql_text):
+    """Skip past a `WITH <cte1> AS (...), <cte2> AS (...), ...` preamble
+    (wherever it starts a statement -- file start, or right after a
+    preceding `;`, e.g. this project's own `DROP TABLE IF EXISTS ...;`
+    header) so the SELECT...INTO / CREATE TABLE AS SELECT regexes below
+    only ever see the FINAL statement's own SELECT, not an inner CTE's.
+
+    Found live: _SELECT_INTO_RE's non-greedy `.*?` still spans across CTE
+    boundaries whenever a CTE's own body contains no INTO keyword to stop
+    at -- `.finditer()` starts from the very first SELECT in the whole
+    text (inside the first CTE) and expands until it hits the real INTO
+    much later, capturing every CTE's own internal columns (window-
+    function aliases, even raw comma-split SQL punctuation) as if they
+    were the real Load table's implemented column list. Confirmed live
+    against real multi-CTE scripts in this project's own
+    sql/transformations/ (e.g. 360, 390, 420, 430) -- check-mapping-
+    balance reported plausible-looking real target fields as both
+    "not a real field" and "not documented as mapped" simultaneously,
+    both symptoms of the same garbled capture.
+
+    Only handles the well-formed, comma-separated CTE list shape this
+    project's own scripts actually use -- not a general SQL parser. Falls
+    back to returning the text unchanged (parenthesis-balance walk simply
+    won't advance) if the shape doesn't match what's expected."""
+    matches = list(_CTE_START_RE.finditer(sql_text))
+    if not matches:
+        return sql_text
+    m = matches[-1]  # the statement-starting WITH nearest the real final SELECT
+    prefix = sql_text[: m.start()]
+    i = m.end()
+    n = len(sql_text)
+    while i < n:
+        name_m = _CTE_NAME_AS_RE.match(sql_text, i)
+        if not name_m or name_m.end() >= n or sql_text[name_m.end()] != "(":
+            return sql_text  # not the expected shape -- bail out unchanged
+        depth = 0
+        j = name_m.end()
+        while j < n:
+            if sql_text[j] == "(":
+                depth += 1
+            elif sql_text[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    j += 1
+                    break
+            j += 1
+        else:
+            return sql_text  # unbalanced parens -- bail out unchanged
+        rest = sql_text[j:]
+        stripped = rest.lstrip()
+        whitespace_len = len(rest) - len(stripped)
+        if stripped.startswith(","):
+            i = j + whitespace_len + 1  # position right after the comma
+            continue
+        return prefix + stripped  # final statement, CTE preamble consumed
+    return sql_text
+
+
 _INSERT_INTO_RE = re.compile(
     r'INSERT\s+INTO\s+(?:(?:\[\w+\]|"\w+"|\w+)\.)?'
     r'(?:\[(?P<table_br>\w+)\]|"(?P<table_dq>\w+)"|(?P<table_bare>\w+))'
@@ -414,6 +476,7 @@ def extract_insert_columns(sql_text, table_name=None):
     not just bracket-or-bare. Returns None if no match is found in any
     of the three forms."""
     sql_text = _strip_sql_comments(sql_text)
+    sql_text = _strip_leading_ctes(sql_text)
     for match in _INSERT_INTO_RE.finditer(sql_text):
         found_table = (
             match.group("table_br") or match.group("table_dq") or match.group("table_bare")

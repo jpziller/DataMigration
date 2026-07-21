@@ -32,6 +32,22 @@ generally load Gift Commitments in their final intended Status, or
 accept that some of these transitions become permanently blocked once
 downstream Gift Transactions/Schedules are created.
 
+**A related field-semantics note, not a confirmed validation rule**
+(NPC fundraising/donor-management Snowfakery dogfood build, 2026-07-19):
+`RecurrenceType` auto-defaults to `'OpenEnded'` on a Recurring-type
+commitment when left unsent (`defaultedOnCreate: True`, confirmed live).
+`'OpenEnded'` recurrence is semantically "no end date," so a real,
+human-created Recurring commitment would be expected to leave
+`ExpectedEndDate` unset — this build did so for realism, not because a
+real validation failure forced it. **Tested and ruled out as the cause
+of a separate, unrelated problem**: this build's `GiftCommitmentSchedule`
+auto-creation didn't fire regardless of whether `ExpectedEndDate` was
+sent or left null (see
+[gift-commitment-schedule-auto-creation.md](gift-commitment-schedule-auto-creation.md)'s
+own correction) — don't assume clearing `ExpectedEndDate` fixes an
+auto-creation gap; that specific hypothesis was tried live and didn't
+change the outcome.
+
 # Citations
 
 1. Migration guide, Appendix B - Fundraising Validations, "Gift

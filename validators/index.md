@@ -49,7 +49,25 @@ discovered the hard way — nothing exists preemptively.
   and real data mostly leaves it unset entirely.
 * [AccountContactRelation validator](AccountContactRelation.md) -
   IsIncludedInGroup/IsPrimaryMember are the real household-membership
-  signal, not just AccountId/ContactId.
-* [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - never
-  explicitly insert a schedule for a Recurring-type parent GiftCommitment;
-  the platform auto-creates one and rejects a second, explicit insert.
+  signal, not just AccountId/ContactId; a "direct" relationship can't be
+  deleted independently -- delete the Contact instead.
+* [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - the
+  platform SOMETIMES auto-creates a schedule for a Recurring-type parent
+  GiftCommitment (confirmed both ways live) -- check what's actually
+  missing before inserting, never assume either way.
+* [Contact Point (Address/Phone/Email) validator](ContactPointAddress.md) -
+  ParentId is polymorphic Account/Individual (scope to Account only);
+  real ContactPointAddress data is sparser than describe() suggests;
+  boolean fields can break bulk_op()'s default result matching.
+* [GiftRefund validator](GiftRefund.md) - three real constraints tying a
+  refund to its parent GiftTransaction's own Status/Amount/Date.
+* [GiftSoftCredit validator](GiftSoftCredit.md) - RecipientId is an
+  Account, not a Contact; PartialAmount/PartialPercent are mutually
+  exclusive.
+* [GiftTransactionDesignation validator](GiftTransactionDesignation.md) -
+  a split's two Amounts must sum to an exact remainder, not two
+  independently-rounded shares; Amount may lock after the parent
+  transaction reaches a certain state (unresolved).
+* [GiftDesignation validator](GiftDesignation.md) - NEW (2026-07-20) --
+  can't delete an active GiftDesignation; deactivate (IsActive=false)
+  first.
