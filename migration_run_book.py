@@ -67,6 +67,23 @@ import sql_dialect
 _TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "docs", "MIGRATION_RUN_BOOK_TEMPLATE.md")
 _TRANSFORMS_DIR = os.path.join(os.path.dirname(__file__), "sql", "transformations")
 
+
+def _script_dir_and_display(script_dir):
+    """Resolve an optional script_dir override to (search_directory,
+    repo-relative display path for GitHub URLs). None (the default)
+    reproduces today's exact behavior byte-for-byte -- _TRANSFORMS_DIR
+    and the literal "sql/transformations". A given script_dir (e.g. an
+    attempts workspace's own script folder -- see CLAUDE.md's "Library
+    vs. attempts workspace" section) is used directly for search, and its
+    own path relative to this repo's root for the URL, posix-normalized
+    since a GitHub blob/tree URL always uses forward slashes regardless
+    of the OS building it."""
+    if script_dir is None:
+        return _TRANSFORMS_DIR, "sql/transformations"
+    repo_root = os.path.dirname(__file__)
+    display = os.path.relpath(script_dir, repo_root).replace(os.sep, "/")
+    return script_dir, display
+
 # The one shared column schema every phase uses -- mirrors a real client
 # file's actual header, plus this framework's own additions. "Object" is
 # kept as the literal name (not "Item"/"Script Name") to match that file
@@ -200,7 +217,7 @@ def _save_workbook(wb, path):
 
 
 def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, target_env=None,
-                              ticket_url=None, ticket_label="JIRA"):
+                              ticket_url=None, ticket_label="JIRA", script_dir=None):
     """Write the fixed-height breadcrumb block (rows 1-8). "Last Synced Log
     Id" (row 8) is always written blank here -- it's per-pass state
     managed exclusively by sync_run_book_from_log(), not something this
@@ -209,8 +226,9 @@ def _write_breadcrumb_header(ws, git_info, project_name=None, source_env=None, t
     hasn't had any of its own runs logged yet."""
     github_url = gi.github_url(git_info["remote_url"]) if git_info else None
     commit_label = f'{git_info["commit_sha"][:8]} ({git_info["branch"]})' if git_info else None
+    _, scripts_display_dir = _script_dir_and_display(script_dir)
     scripts_url = (
-        f'{github_url}/tree/{git_info["commit_sha"]}/sql/transformations'
+        f'{github_url}/tree/{git_info["commit_sha"]}/{scripts_display_dir}'
         if (git_info and github_url) else None
     )
 
@@ -339,15 +357,20 @@ def _size_columns(ws):
         ws.column_dimensions[letter].width = min(width, 90)
 
 
-def _load_order_rows(engine, object_names, schema, git_info=None):
+def _load_order_rows(engine, object_names, schema, git_info=None, script_dir=None):
     """Auto-fill Load-phase rows from load_order.py's (#2) existing
     dbo.ObjectLoadOrder/dbo.ObjectDependency -- same "prefill only what's
     already known, don't guess" principle as generate-mapping-doc's
     profiling auto-fill. When git_info resolves to a GitHub remote, a
     matched script filename also gets a real hyperlink to that exact file
-    at the pinned commit."""
+    at the pinned commit.
+
+    script_dir: optional -- resolve scripts from here instead of the
+    default sql/transformations/ (see CLAUDE.md's "Library vs. attempts
+    workspace" section). None reproduces today's exact behavior."""
     in_scope = set(object_names)
     github_url = gi.github_url(git_info["remote_url"]) if git_info else None
+    search_dir, display_dir = _script_dir_and_display(script_dir)
 
     d = sql_dialect.for_engine(engine)
     if not d.table_exists(engine, schema, "ObjectLoadOrder"):
@@ -411,7 +434,7 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
         # placeholder row built here that guesses the wrong one of two
         # real scripts gets corrected automatically the first time
         # sync_run_book_from_log() runs against a real log row for it.
-        filename = sn.script_filename_for(obj, _TRANSFORMS_DIR, known_objects=in_scope)
+        filename = sn.script_filename_for(obj, search_dir, known_objects=in_scope)
         row = {
             "Stage": "Load",
             "Object": filename or obj,
@@ -419,7 +442,7 @@ def _load_order_rows(engine, object_names, schema, git_info=None):
             "Status": "Not Started",
         }
         if filename and github_url:
-            row["__hyperlink__"] = f'{github_url}/blob/{git_info["commit_sha"]}/sql/transformations/{filename}'
+            row["__hyperlink__"] = f'{github_url}/blob/{git_info["commit_sha"]}/{display_dir}/{filename}'
         rows.append(row)
     return rows
 
@@ -444,7 +467,7 @@ def _write_phase(ws, row, phase, load_rows):
 def generate_migration_run_book(output_path, tab_name, template_path=_TEMPLATE_PATH,
                                  engine=None, object_names=None, schema="dbo",
                                  project_name=None, source_env=None, target_env=None,
-                                 ticket_url=None, ticket_label="JIRA"):
+                                 ticket_url=None, ticket_label="JIRA", script_dir=None):
     """Create a brand-new Migration Run Book tab from
     docs/MIGRATION_RUN_BOOK_TEMPLATE.md (or a custom template_path).
     Refuses to overwrite an existing tab -- unlike mapping_doc.py's
@@ -460,7 +483,11 @@ def generate_migration_run_book(output_path, tab_name, template_path=_TEMPLATE_P
     project_name/source_env/target_env/ticket_url/ticket_label populate
     the fixed breadcrumb block (see module docstring) -- Git Repository/
     Commit-Branch/Scripts-link are always computed fresh from this repo's
-    actual git state, not passed in."""
+    actual git state, not passed in.
+
+    script_dir: optional -- resolve/link scripts from here instead of the
+    default sql/transformations/ (see CLAUDE.md's "Library vs. attempts
+    workspace" section). None reproduces today's exact behavior."""
     phases = _parse_template(template_path)
 
     if os.path.exists(output_path):
@@ -480,6 +507,7 @@ def generate_migration_run_book(output_path, tab_name, template_path=_TEMPLATE_P
     _write_breadcrumb_header(
         ws, git_info, project_name=project_name, source_env=source_env,
         target_env=target_env, ticket_url=ticket_url, ticket_label=ticket_label,
+        script_dir=script_dir,
     )
     _write_table_header(ws, _TABLE_HEADER_ROW)
 
@@ -487,7 +515,7 @@ def generate_migration_run_book(output_path, tab_name, template_path=_TEMPLATE_P
     if object_names:
         if engine is None:
             raise ValueError("object_names given without an engine")
-        load_rows = _load_order_rows(engine, list(object_names), schema, git_info=git_info)
+        load_rows = _load_order_rows(engine, list(object_names), schema, git_info=git_info, script_dir=script_dir)
 
     row = _FIRST_DATA_ROW
     for phase in phases:
@@ -502,18 +530,23 @@ def generate_migration_run_book(output_path, tab_name, template_path=_TEMPLATE_P
     return output_path
 
 
-def _blank_result_columns_and_refresh(ws, git_info):
+def _blank_result_columns_and_refresh(ws, git_info, script_dir=None):
     """Blank every result column for each real data row (a banner row has
     no Object value, so it's skipped automatically), resetting Status to
     "Not Started" rather than leaving it empty -- a fresh pass's steps
     genuinely haven't started. Also re-derives each row's Object hyperlink
     against the *current* commit, working off whatever filename text is
-    already there, including one a human typed in by hand."""
+    already there, including one a human typed in by hand.
+
+    script_dir: optional -- look for the file here instead of the default
+    sql/transformations/ (see CLAUDE.md's "Library vs. attempts
+    workspace" section). None reproduces today's exact behavior."""
     recipe = set(_RECIPE_COLUMNS)
     result_idxs = [i for i, c in enumerate(_COLUMNS, start=1) if c not in recipe]
     status_idx = _COLUMNS.index("Status") + 1
     object_idx = _COLUMNS.index("Object") + 1
     github_url = gi.github_url(git_info["remote_url"]) if git_info else None
+    search_dir, display_dir = _script_dir_and_display(script_dir)
 
     for row_idx in range(_FIRST_DATA_ROW, ws.max_row + 1):
         object_value = ws.cell(row=row_idx, column=object_idx).value
@@ -526,15 +559,15 @@ def _blank_result_columns_and_refresh(ws, git_info):
             ws.cell(row=row_idx, column=col_idx).value = None
         ws.cell(row=row_idx, column=status_idx).value = "Not Started"
 
-        if github_url and os.path.isfile(os.path.join(_TRANSFORMS_DIR, str(object_value))):
+        if github_url and os.path.isfile(os.path.join(search_dir, str(object_value))):
             cell = ws.cell(row=row_idx, column=object_idx)
-            cell.hyperlink = f'{github_url}/blob/{git_info["commit_sha"]}/sql/transformations/{object_value}'
+            cell.hyperlink = f'{github_url}/blob/{git_info["commit_sha"]}/{display_dir}/{object_value}'
             cell.font = _HYPERLINK_FONT
 
 
 def add_migration_run_book_pass(path, from_tab, to_tab, template_path=_TEMPLATE_PATH,
                                  project_name=None, source_env=None, target_env=None,
-                                 ticket_url=None, ticket_label=None):
+                                 ticket_url=None, ticket_label=None, script_dir=None):
     """Duplicate from_tab into a new to_tab: recipe columns (Stage/Object/
     Dependency/Critical/JIRA Ticket Link) carry forward verbatim, including
     any rows a human added by hand since generation; every result column
@@ -547,7 +580,11 @@ def add_migration_run_book_pass(path, from_tab, to_tab, template_path=_TEMPLATE_
     to pass). Commit/Branch and the Scripts-link are always recomputed to
     the *current* git state. Target Environment is never silently carried
     forward -- Dev/UAT/PROD are different Salesforce orgs; pass it
-    explicitly or it's left blank for a human to fill in."""
+    explicitly or it's left blank for a human to fill in.
+
+    script_dir: optional -- resolve/link scripts from here instead of the
+    default sql/transformations/ (see CLAUDE.md's "Library vs. attempts
+    workspace" section). None reproduces today's exact behavior."""
     wb = openpyxl.load_workbook(path)
     if from_tab not in wb.sheetnames:
         raise ValueError(f"No tab named '{from_tab}' in {path}")
@@ -569,9 +606,10 @@ def add_migration_run_book_pass(path, from_tab, to_tab, template_path=_TEMPLATE_
         target_env=target_env,
         ticket_url=ticket_url if ticket_url is not None else carried["ticket_url"],
         ticket_label=ticket_label if ticket_label is not None else carried["ticket_label"],
+        script_dir=script_dir,
     )
 
-    _blank_result_columns_and_refresh(dst, git_info)
+    _blank_result_columns_and_refresh(dst, git_info, script_dir=script_dir)
     _apply_conditional_formatting(dst)
 
     _save_workbook(wb, path)
@@ -685,7 +723,7 @@ def _insert_load_row(ws, object_name, phase_prefix="load"):
     return insert_at
 
 
-def _apply_log_result(ws, row_idx, log_row, git_info=None, known_objects=None):
+def _apply_log_result(ws, row_idx, log_row, git_info=None, known_objects=None, script_dir=None):
     # log_row's keys are already lowercased -- its one caller,
     # sync_run_book_from_log(), lowercases the whole batch once before
     # looping (found in review: this function used to re-lower here too,
@@ -742,11 +780,12 @@ def _apply_log_result(ws, row_idx, log_row, git_info=None, known_objects=None):
     # -- there's no per-branch signal to disambiguate a delete row this
     # way at all, so a multi-script object's delete rows still fall back
     # to the highest-numbered guess, same as before this fix.
-    candidates = sn.script_candidates_for(log_row["objectname"], _TRANSFORMS_DIR, known_objects=known_objects)
+    search_dir, display_dir = _script_dir_and_display(script_dir)
+    candidates = sn.script_candidates_for(log_row["objectname"], search_dir, known_objects=known_objects)
     filename = ""
     if len(candidates) > 1:
         filename = sn.script_filename_for_source_table(
-            candidates, _TRANSFORMS_DIR, log_row.get("sourcetable")
+            candidates, search_dir, log_row.get("sourcetable")
         )
     if not filename:
         filename = candidates[-1] if candidates else ""
@@ -755,11 +794,11 @@ def _apply_log_result(ws, row_idx, log_row, git_info=None, known_objects=None):
         cell = ws.cell(row=row_idx, column=object_idx, value=filename)
         github_url = gi.github_url(git_info["remote_url"]) if git_info else None
         if github_url:
-            cell.hyperlink = f'{github_url}/blob/{git_info["commit_sha"]}/sql/transformations/{filename}'
+            cell.hyperlink = f'{github_url}/blob/{git_info["commit_sha"]}/{display_dir}/{filename}'
             cell.font = _HYPERLINK_FONT
 
 
-def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
+def sync_run_book_from_log(engine, path, tab_name, schema="dbo", script_dir=None):
     """Pull dbo.BulkOpsLog (#14) rows not yet reflected in this tab into
     its Load phase: fills in a still-pending auto-fill placeholder row for
     that object if one exists, otherwise inserts a new row (e.g. a retry)
@@ -771,7 +810,11 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
 
     v1 limit: only pulls dbo.BulkOpsLog's own aggregate columns (record
     counts, timing) -- per-row Error Details text would need reading the
-    separate `_Result` writeback table too, not done here."""
+    separate `_Result` writeback table too, not done here.
+
+    script_dir: optional -- resolve/link scripts from here instead of the
+    default sql/transformations/ (see CLAUDE.md's "Library vs. attempts
+    workspace" section). None reproduces today's exact behavior."""
     wb = openpyxl.load_workbook(path)
     if tab_name not in wb.sheetnames:
         raise ValueError(f"No tab named '{tab_name}' in {path}")
@@ -820,7 +863,7 @@ def sync_run_book_from_log(engine, path, tab_name, schema="dbo"):
             inserted += 1
         else:
             updated += 1
-        _apply_log_result(ws, target_row, log_row, git_info=git_info, known_objects=known_objects)
+        _apply_log_result(ws, target_row, log_row, git_info=git_info, known_objects=known_objects, script_dir=script_dir)
 
     ws.cell(row=_HEADER_ROW_LAST_SYNCED_LOG_ID, column=2, value=new_rows[-1]["logid"])
     _save_workbook(wb, path)

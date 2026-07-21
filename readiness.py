@@ -120,13 +120,14 @@ def _org_risk_gate(engine, d, schema, object_name):
     return {"ok": bool(count), "detail": "Scanned." if count else "Never scanned -- run analyze-org-risk."}
 
 
-def _mapping_balance_gate(sf, mapping_path, object_name, load_table, known_objects=None):
+def _mapping_balance_gate(sf, mapping_path, object_name, load_table, known_objects=None, script_dir=None):
     if not mapping_path:
         return {"ok": None, "detail": "Not checked -- no --mapping-path given."}
-    script_filename = script_numbering.script_filename_for(object_name, _TRANSFORMS_DIR, known_objects=known_objects)
+    search_dir = script_dir if script_dir is not None else _TRANSFORMS_DIR
+    script_filename = script_numbering.script_filename_for(object_name, search_dir, known_objects=known_objects)
     if not script_filename:
         return {"ok": None, "detail": "No transform script found for this object yet."}
-    script_path = os.path.join(_TRANSFORMS_DIR, script_filename)
+    script_path = os.path.join(search_dir, script_filename)
     try:
         balance = mapping_doc.check_mapping_balance(sf, mapping_path, object_name, script_path, load_table_name=load_table)
     except (ValueError, FileNotFoundError) as e:
@@ -210,7 +211,8 @@ def _reconciliation_gate(engine, object_name, schema, mapping_path, load_table):
 
 
 def assess_migration_readiness(sf, engine, object_names, schema="dbo",
-                                migration_keys=None, mapping_path=None, load_tables=None):
+                                migration_keys=None, mapping_path=None, load_tables=None,
+                                script_dir=None):
     """Aggregate go/no-go readiness per object in object_names.
 
     migration_keys: optional {object_name: field_name} -- enables the
@@ -222,6 +224,10 @@ def assess_migration_readiness(sf, engine, object_names, schema="dbo",
     source-count half).
     load_tables: optional {object_name: table_name} override -- defaults
     to <object_name>_Load.
+    script_dir: optional -- resolve the mapping-balance gate's transform
+    script from here instead of the default sql/transformations/ (see
+    CLAUDE.md's "Library vs. attempts workspace" section). None
+    reproduces today's exact behavior.
 
     Returns [{"object", "load_table", "gates": {gate_name: {"ok",
     "detail"}, ...}, "ready": bool, "blocking": [gate_name, ...]}, ...].
@@ -243,7 +249,7 @@ def assess_migration_readiness(sf, engine, object_names, schema="dbo",
             "migration_key_integrity": _duplicate_key_gate(engine, d, schema, load_table, migration_key),
             "live_migration_key_validation": _external_id_gate(sf, object_name, migration_key),
             "org_risk_scanned": _org_risk_gate(engine, d, schema, object_name),
-            "mapping_balance": _mapping_balance_gate(sf, mapping_path, object_name, load_table, known_objects=known_objects),
+            "mapping_balance": _mapping_balance_gate(sf, mapping_path, object_name, load_table, known_objects=known_objects, script_dir=script_dir),
             "email_deliverability_attested": _email_deliverability_gate(engine, d, schema, object_name),
             "row_count_reconciliation": _reconciliation_gate(engine, object_name, schema, mapping_path, load_table),
         }

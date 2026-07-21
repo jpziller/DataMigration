@@ -211,6 +211,43 @@ def test_mapping_balance_gate_reports_bad_mapping_path_cleanly_not_a_crash():
     assert "No such file" in result["detail"] or "cannot find" in result["detail"].lower()
 
 
+def test_mapping_balance_gate_uses_script_dir_override(tmp_path):
+    """script_dir bypasses _TRANSFORMS_DIR entirely -- for an attempts
+    workspace whose scripts don't live under sql/transformations/ at all
+    (see CLAUDE.md's "Library vs. attempts workspace" section). Proven by
+    reaching past the "no script found" gate straight to the bad
+    mapping-path error, the same signal
+    test_mapping_balance_gate_reports_bad_mapping_path_cleanly_not_a_crash
+    already uses."""
+    sf = _StubSF("Account", _ACCOUNT_FIELDS)
+    attempt_scripts = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    attempt_scripts.mkdir(parents=True)
+    (attempt_scripts / "777_account_load.sql").write_text("", encoding="utf-8")
+
+    result = rd._mapping_balance_gate(
+        sf, "/does/not/exist.xlsx", "Account", "Account_Load", script_dir=str(attempt_scripts),
+    )
+
+    assert result["ok"] is None
+    assert "No such file" in result["detail"] or "cannot find" in result["detail"].lower()
+
+
+def test_mapping_balance_gate_script_dir_override_reports_no_script_found(tmp_path):
+    """A script_dir with no matching script for this object must report
+    the same "no script found" outcome the default directory already
+    gives -- not silently fall back to _TRANSFORMS_DIR."""
+    sf = _StubSF("Account", _ACCOUNT_FIELDS)
+    empty_dir = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    empty_dir.mkdir(parents=True)
+
+    result = rd._mapping_balance_gate(
+        sf, "/does/not/exist.xlsx", "Account", "Account_Load", script_dir=str(empty_dir),
+    )
+
+    assert result["ok"] is None
+    assert result["detail"] == "No transform script found for this object yet."
+
+
 # --- Email Deliverability attestation gate ---
 
 def test_email_gate_not_checked_without_bulkopslog(sqlite_engine):
