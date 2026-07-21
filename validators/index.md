@@ -49,7 +49,8 @@ discovered the hard way — nothing exists preemptively.
   and real data mostly leaves it unset entirely.
 * [AccountContactRelation validator](AccountContactRelation.md) -
   IsIncludedInGroup/IsPrimaryMember are the real household-membership
-  signal, not just AccountId/ContactId.
+  signal, not just AccountId/ContactId; a "direct" relationship can't be
+  deleted independently -- delete the Contact instead.
 * [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - the
   platform SOMETIMES auto-creates a schedule for a Recurring-type parent
   GiftCommitment (confirmed both ways live) -- check what's actually
@@ -67,3 +68,6 @@ discovered the hard way — nothing exists preemptively.
   a split's two Amounts must sum to an exact remainder, not two
   independently-rounded shares; Amount may lock after the parent
   transaction reaches a certain state (unresolved).
+* [GiftDesignation validator](GiftDesignation.md) - NEW (2026-07-20) --
+  can't delete an active GiftDesignation; deactivate (IsActive=false)
+  first.

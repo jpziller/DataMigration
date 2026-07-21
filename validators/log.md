@@ -1,5 +1,18 @@
 # Validators bundle update log
 
+## 2026-07-20
+* **New**: [GiftDesignation validator](GiftDesignation.md) -- can't
+  delete an active GiftDesignation, found purging every migrated record
+  from `NPC_TARGET_v2` to reset the org before a fresh rebuild attempt.
+* **Update**: [AccountContactRelation validator](AccountContactRelation.md)
+  -- a "direct" relationship (IsDirect=true) can't be deleted
+  independently; delete the owning Contact instead. Found during the
+  same purge.
+* **New OKF doc**: [okf/nonprofit-cloud/full-org-reset-between-build-attempts.md](../okf/nonprofit-cloud/full-org-reset-between-build-attempts.md)
+  -- the full reverse-dependency delete sequence for the NPC fundraising
+  object family, both quirks above, and the relationship-traced deletion
+  technique for AccountContactRelation (no migration key of its own).
+
 ## 2026-07-19 (6)
 * **Update**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md),
   [okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md)

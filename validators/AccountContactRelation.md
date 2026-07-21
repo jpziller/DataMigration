@@ -7,7 +7,7 @@ description: Object-specific findings for AccountContactRelation
   ContactId; the platform auto-creates this row itself on Contact insert,
   so it must be updated, never inserted.
 tags: [object-validator, account-contact-relation, nonprofit-cloud, afnp, npsp-to-npc, household, auto-created-child-record]
-timestamp: "2026-07-19"
+timestamp: "2026-07-20"
 ---
 # AccountContactRelation validator
 
@@ -92,3 +92,25 @@ relying on the default (every sent column).
 **Found:** same session, correcting the MigrationID__c mistake above. An
 empty CSV cell on an update is a no-op in Bulk API 2.0 -- it does NOT set
 the field to null. Only the literal string `#N/A` in that cell does.
+
+## A "direct" relationship (IsDirect=true) can't be deleted independently
+**Found:** 2026-07-20, purging every migrated record from `NPC_TARGET_v2`
+to reset the org to a clean slate before a fresh rebuild. Deleting the
+16 real `AccountContactRelation` rows tied to migrated Accounts/Contacts
+failed with `INVALID_OPERATION: "A direct relationship can't be deleted.
+You can modify the relationship by changing the contact's parent account
+or deleting the contact."` -- 0 of 16 succeeded when targeted directly.
+**Why:** `IsDirect = true` on this object reflects the Contact's own
+`AccountId` field (the primary/direct household or organization
+relationship this auto-creates on Contact insert -- see this doc's own
+auto-creation finding above). It isn't a standalone junction record for
+that relationship; it's a view onto the Contact's own field, so
+Salesforce refuses to delete it as an independent record.
+**What to do:** never try to delete a direct `AccountContactRelation`
+row on its own. Delete the Contact instead (or reassign its
+`AccountId`) -- the relationship record is removed automatically as a
+side effect. Confirmed live: deleting the 16 owning Contacts
+immediately dropped the `AccountContactRelation` count to 0 with no
+separate delete attempt needed. See
+`okf/nonprofit-cloud/full-org-reset-between-build-attempts.md` for the
+full reverse-dependency purge sequence this was found while building.

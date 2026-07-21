@@ -23,6 +23,12 @@ platform-level, not NPSP-source-specific.
   (2026-07-19) — transform scripts, the generation sequence, every real
   fix baked in — and what a next rebuild pass needs to redo or
   reconsider.
+* [Full org reset between build attempts](full-org-reset-between-build-attempts.md) -
+  NEW (2026-07-20) — the real reverse-dependency delete sequence for
+  wiping every migrated record (plus auto-created children with no
+  migration key of their own) from the NPC fundraising surface, two new
+  platform delete-constraint quirks found doing it, and how this differs
+  from a targeted corrective reload.
 
 # Platform validations
 
