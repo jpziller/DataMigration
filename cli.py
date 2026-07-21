@@ -192,8 +192,11 @@ def validate_external_id_cmd(object_name, field_name):
 
 
 @cli.command("next-script-number")
-@click.option("--dir", "target_dir", type=click.Choice(["transformations", "source_ingestion"]),
-              default="transformations", help="Which numbered script folder to check.")
+@click.option("--dir", "target_dir", default="transformations",
+              help="'transformations' or 'source_ingestion' (the shared library's own "
+                   "sql/ subfolders), or a literal path to check instead -- e.g. an "
+                   "attempts workspace's own script folder (see CLAUDE.md's "
+                   "\"Library vs. attempts workspace\" section).")
 @click.option("--after", type=int, default=None, help="Insert between two existing scripts: the number immediately before the gap (use with --before).")
 @click.option("--before", type=int, default=None, help="Insert between two existing scripts: the number immediately after the gap (use with --after).")
 def next_script_number_cmd(target_dir, after, before):
@@ -203,7 +206,7 @@ def next_script_number_cmd(target_dir, after, before):
     top-level slot. With --after/--before: an unused number strictly
     between two existing scripts, for inserting one later. Read-only,
     advisory only -- never creates or renames a file itself."""
-    directory = f"sql/{target_dir}"
+    directory = sn.resolve_dir(target_dir)
     try:
         n = sn.next_number(directory, after=after, before=before)
     except ValueError as e:
@@ -613,7 +616,8 @@ def reconcile_load_counts_cmd(object_names, schema, mapping_path, load_tables):
 @click.option("--migration-key", "migration_keys", multiple=True,
               help="Object=Field, repeatable -- enables the Migration Key Integrity and Live Migration Key Validation gates for that object.")
 @click.option("--load-table", "load_tables", multiple=True, help="Object=TableName, repeatable -- overrides the <Object>_Load default.")
-def assess_migration_readiness_cmd(object_names, schema, mapping_path, migration_keys, load_tables):
+@click.option("--script-dir", default=None, help="Resolve the mapping-balance gate's transform script from here instead of the default sql/transformations/ -- e.g. an attempts workspace's own script folder (see CLAUDE.md's \"Library vs. attempts workspace\" section).")
+def assess_migration_readiness_cmd(object_names, schema, mapping_path, migration_keys, load_tables, script_dir):
     """One aggregate go/no-go readiness view per object (roadmap #65) --
     re-checks or re-presents every gate this framework already enforces
     individually (hard rules 6/7/12, analyze-org-risk coverage,
@@ -630,6 +634,7 @@ def assess_migration_readiness_cmd(object_names, schema, mapping_path, migration
     results = rdy.assess_migration_readiness(
         sf, engine, list(object_names), schema=schema,
         migration_keys=key_map, mapping_path=mapping_path, load_tables=load_table_map,
+        script_dir=script_dir,
     )
     for r in results:
         verdict = "READY" if r["ready"] else "NOT READY"
@@ -1247,15 +1252,18 @@ def generate_mapping_doc_cmd(object_name, output_path, source_table, schema):
 @cli.command("set-mapping-script")
 @click.argument("object_name")
 @click.argument("mapping_path")
-@click.option("--dir", "target_dir", type=click.Choice(["transformations", "source_ingestion"]),
-              default="transformations", help="Which numbered script folder to resolve the script from.")
+@click.option("--dir", "target_dir", default="transformations",
+              help="'transformations' or 'source_ingestion' (the shared library's own "
+                   "sql/ subfolders), or a literal path to resolve the script from instead "
+                   "-- e.g. an attempts workspace's own script folder (see CLAUDE.md's "
+                   "\"Library vs. attempts workspace\" section).")
 def set_mapping_script_cmd(object_name, mapping_path, target_dir):
     """Fill in the mapping doc's "Transform Script:" header field for
     object_name with the real transform script (auto-resolved, highest-
     numbered match) -- run this only after the script has actually been
     built, as its own step right after "Build the transform" in the
     standard workflow, never before."""
-    filename = mpd.set_transform_script(mapping_path, object_name, script_subdir=target_dir)
+    filename = mpd.set_transform_script(mapping_path, object_name, script_dir=sn.resolve_dir(target_dir))
     click.echo(f"{mapping_path} [{object_name}]: Transform Script set to {filename}")
 
 
@@ -1461,8 +1469,9 @@ def generate_solution_doc_cmd(output_path, object_names, mapping_path, template_
 @click.option("--target-env", default=None, help="Target environment shown in the header (defaults to the configured Salesforce org alias).")
 @click.option("--ticket-url", default=None, help="Link to this project's ticket-system project, shown in the header (defaults to TICKET_SYSTEM_URL if configured).")
 @click.option("--ticket-label", default=None, help="Ticket system name shown in the header, e.g. JIRA (defaults to TICKET_SYSTEM_LABEL).")
+@click.option("--script-dir", default=None, help="Resolve/link scripts from here instead of the default sql/transformations/ -- e.g. an attempts workspace's own script folder (see CLAUDE.md's \"Library vs. attempts workspace\" section).")
 def generate_migration_run_book_cmd(output_path, tab_name, object_names, schema, template_path,
-                           project_name, source_env, target_env, ticket_url, ticket_label):
+                           project_name, source_env, target_env, ticket_url, ticket_label, script_dir):
     s, _, engine = _ctx()
     kwargs = {
         "schema": schema,
@@ -1471,6 +1480,7 @@ def generate_migration_run_book_cmd(output_path, tab_name, object_names, schema,
         "target_env": target_env or (s.sf_org_alias or None),
         "ticket_url": ticket_url or (s.ticket_system_url or None),
         "ticket_label": ticket_label or s.ticket_system_label,
+        "script_dir": script_dir,
     }
     if template_path:
         kwargs["template_path"] = template_path
@@ -1492,13 +1502,15 @@ def generate_migration_run_book_cmd(output_path, tab_name, object_names, schema,
 @click.option("--target-env", default=None, help="Target environment for this pass -- never carried forward automatically (Dev/UAT/PROD are different orgs); defaults to the configured Salesforce org alias.")
 @click.option("--ticket-url", default=None, help="Override the carried-forward ticket-system project link.")
 @click.option("--ticket-label", default=None, help="Override the carried-forward ticket system name.")
-def add_migration_run_book_pass_cmd(path, from_tab, to_tab, project_name, source_env, target_env, ticket_url, ticket_label):
+@click.option("--script-dir", default=None, help="Resolve/link scripts from here instead of the default sql/transformations/ -- e.g. an attempts workspace's own script folder (see CLAUDE.md's \"Library vs. attempts workspace\" section).")
+def add_migration_run_book_pass_cmd(path, from_tab, to_tab, project_name, source_env, target_env, ticket_url, ticket_label, script_dir):
     s, _, _e = _ctx()
     mrb.add_migration_run_book_pass(
         path, from_tab, to_tab,
         project_name=project_name, source_env=source_env,
         target_env=target_env or (s.sf_org_alias or None),
         ticket_url=ticket_url, ticket_label=ticket_label,
+        script_dir=script_dir,
     )
     click.echo(f"Copied '{from_tab}' -> '{to_tab}' in {path} (recipe carried forward, result columns blanked)")
 
@@ -1507,9 +1519,10 @@ def add_migration_run_book_pass_cmd(path, from_tab, to_tab, project_name, source
 @click.argument("path")
 @click.option("--tab", "tab_name", required=True, help="Migration Run Book tab to sync into.")
 @click.option("--schema", default="dbo")
-def update_migration_run_book_cmd(path, tab_name, schema):
+@click.option("--script-dir", default=None, help="Resolve/link scripts from here instead of the default sql/transformations/ -- e.g. an attempts workspace's own script folder (see CLAUDE.md's \"Library vs. attempts workspace\" section).")
+def update_migration_run_book_cmd(path, tab_name, schema, script_dir):
     _, _, engine = _ctx()
-    result = mrb.sync_run_book_from_log(engine, path, tab_name, schema=schema)
+    result = mrb.sync_run_book_from_log(engine, path, tab_name, schema=schema, script_dir=script_dir)
     if result.get("message"):
         click.echo(result["message"])
     else:

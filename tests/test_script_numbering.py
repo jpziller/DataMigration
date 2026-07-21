@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 import script_numbering as sn
@@ -271,3 +273,20 @@ def test_script_filename_for_source_table_does_not_prefix_match_a_longer_table_n
     assert sn.script_filename_for_source_table(
         ["200_foo.sql"], str(tmp_path), "GiftTransactionFromOpp_Load"
     ) == ""
+
+
+def test_resolve_dir_transformations_shortcut():
+    assert sn.resolve_dir("transformations") == os.path.join("sql", "transformations")
+
+
+def test_resolve_dir_source_ingestion_shortcut():
+    assert sn.resolve_dir("source_ingestion") == os.path.join("sql", "source_ingestion")
+
+
+def test_resolve_dir_passes_through_literal_path():
+    """A value that isn't one of the two known shortcuts is treated as a
+    literal directory path, unchanged -- e.g. an attempts workspace's own
+    script folder (see CLAUDE.md's "Library vs. attempts workspace"
+    section)."""
+    literal = os.path.join("attempts", "2026-07-21-npc-dogfood-v2", "sql")
+    assert sn.resolve_dir(literal) == literal

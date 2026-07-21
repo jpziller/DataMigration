@@ -298,6 +298,31 @@ def test_set_transform_script_uses_source_ingestion_dir_when_given(tmp_path):
     assert filename == "010_account_ingest.sql"
 
 
+def test_set_transform_script_uses_script_dir_override_outside_sql_tree(tmp_path):
+    """script_dir bypasses the repo_root/sql/script_subdir construction
+    entirely -- for an attempts workspace whose scripts don't live under
+    sql/ at all (see CLAUDE.md's "Library vs. attempts workspace"
+    section)."""
+    mapping_path = tmp_path / "mapping.xlsx"
+    _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
+    attempt_dir = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    attempt_dir.mkdir(parents=True)
+    (attempt_dir / "010_account_load.sql").write_text("", encoding="utf-8")
+    # A file of the same name under sql/transformations/ too, to prove
+    # script_dir is actually being used instead of the default location.
+    (tmp_path / "sql" / "transformations").mkdir(parents=True)
+    (tmp_path / "sql" / "transformations" / "999_account_load.sql").write_text("", encoding="utf-8")
+
+    filename = set_transform_script(
+        str(mapping_path), "Account", repo_root=str(tmp_path), script_dir=str(attempt_dir)
+    )
+
+    assert filename == "010_account_load.sql"
+    wb = openpyxl.load_workbook(mapping_path)
+    ws = wb["Account"]
+    assert ws.cell(row=1, column=6).value == "010_account_load.sql"
+
+
 def test_set_transform_script_raises_when_no_sheet(tmp_path):
     mapping_path = tmp_path / "mapping.xlsx"
     _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])

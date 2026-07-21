@@ -138,6 +138,56 @@ def test_generate_migration_run_book_resolves_compound_object_name_collision(sql
     assert "110_account_contact_relation_load.sql" not in objects
 
 
+def test_generate_migration_run_book_uses_script_dir_override(sqlite_engine, tmp_path):
+    """script_dir bypasses _TRANSFORMS_DIR entirely -- for an attempts
+    workspace whose scripts don't live under sql/transformations/ at all
+    (see CLAUDE.md's "Library vs. attempts workspace" section). Uses a
+    filename number (777) that doesn't collide with any real script in
+    this repo's own sql/transformations/, so a pass here can only mean
+    the override directory was actually searched, not the default one."""
+    engine, _ = sqlite_engine
+    attempt_scripts = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    attempt_scripts.mkdir(parents=True)
+    (attempt_scripts / "777_account_load.sql").write_text("", encoding="utf-8")
+
+    _seed_load_order(engine, rows=[("Account", 0, 1)])
+    output_path = str(tmp_path / "run_book.xlsx")
+
+    mrb.generate_migration_run_book(
+        output_path, "Dev1", engine=engine, object_names=["Account"], schema="dbo",
+        script_dir=str(attempt_scripts),
+    )
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["Dev1"]
+    objects = [
+        row[1].value for row in ws.iter_rows(min_row=mrb._FIRST_DATA_ROW)
+        if row[1].value
+    ]
+    assert "777_account_load.sql" in objects
+
+
+def test_generate_migration_run_book_default_script_dir_matches_no_override(sqlite_engine, tmp_path):
+    """script_dir=None must reproduce today's exact behavior -- resolving
+    against the real, committed sql/transformations/ (this repo already
+    has 010_account_load.sql there)."""
+    engine, _ = sqlite_engine
+    _seed_load_order(engine, rows=[("Account", 0, 1)])
+    output_path = str(tmp_path / "run_book.xlsx")
+
+    mrb.generate_migration_run_book(
+        output_path, "Dev1", engine=engine, object_names=["Account"], schema="dbo",
+    )
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["Dev1"]
+    objects = [
+        row[1].value for row in ws.iter_rows(min_row=mrb._FIRST_DATA_ROW)
+        if row[1].value
+    ]
+    assert any("account" in obj.lower() for obj in objects)
+
+
 def test_generate_migration_run_book_refuses_to_overwrite_existing_tab(sqlite_engine, tmp_path):
     engine, _ = sqlite_engine
     _seed_load_order(engine, rows=[("Account", 0, 1)])

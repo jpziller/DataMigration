@@ -1171,6 +1171,67 @@ mid-sprint when refining, or after a UAT finding reveals a field nobody
 thought to include — the same way `query`/`describe` themselves get used
 throughout a project, not just once.
 
+## Library vs. attempts workspace
+Once a project has produced a real, proven set of transform scripts,
+mapping workbook, and Migration Run Book tab (e.g. this repo's own NPC
+fundraising dogfood build, `sql/transformations/230-430`, committed as a
+reference implementation rather than disposable client work — see
+`okf/nonprofit-cloud/fundraising-dogfood-reference-implementation.md`),
+a **second rebuild attempt against a freshly reset org must not overwrite
+that reference state.** This is the same experience a new engineer
+picking up this repo would have: use its knowledge and artifacts to
+start fresh, without corrupting the starting point other people (or a
+future pass of this same project) still need.
+
+- **Library** — `sql/transformations/`, `sql/source_ingestion/`,
+  `mapping/`, a project's committed `migration_run_book.xlsx`,
+  `validators/`, `okf/`. Proven, shared reference state. Never worked on
+  directly for a new rebuild attempt — only ever updated deliberately,
+  once a new attempt's findings are worth folding back in (see
+  "Promotion" below).
+- **Attempts workspace** — a new top-level `attempts/<date>-<slug>/`
+  folder (e.g. `attempts/2026-07-21-npc-dogfood-v2/`), mirroring `sql/`
+  and `mapping/` inside it, for a new rebuild attempt's own scripts,
+  mapping doc, and Run Book tab (or file) built *from* the library's
+  knowledge without touching it:
+  - `.venv/Scripts/python.exe cli.py next-script-number --dir attempts/<date>-<slug>/sql`
+  - `.venv/Scripts/python.exe cli.py set-mapping-script Account attempts/<date>-<slug>/mapping/mapping.xlsx --dir attempts/<date>-<slug>/sql`
+    (`--dir` on both commands accepts either the two shortcut keywords —
+    `transformations`/`source_ingestion`, resolving to `sql/transformations`/
+    `sql/source_ingestion` exactly as before — or any literal path, so an
+    attempts-workspace directory works the same way with no new flag.)
+  - `.venv/Scripts/python.exe cli.py generate-mapping-doc Account attempts/<date>-<slug>/mapping/mapping.xlsx SourceAccounts`
+    (already a free-form output path — no change needed here.)
+  - `.venv/Scripts/python.exe cli.py generate-migration-run-book attempts/<date>-<slug>/migration_run_book.xlsx --tab Dev1 --objects Account --script-dir attempts/<date>-<slug>/sql`
+    (`--script-dir`, also on `add-migration-run-book-pass` and
+    `update-migration-run-book`, controls only where the Load phase's
+    script-resolution/hyperlink logic looks — left off, it resolves
+    against `sql/transformations/` exactly as before.)
+  - `.venv/Scripts/python.exe cli.py assess-migration-readiness Account --script-dir attempts/<date>-<slug>/sql`
+    (same override, for the mapping-balance gate.)
+  - `attempts/` is **not** gitignored — a real attempt's scripts/mapping
+    are meant to be committed on their own feature branch and reviewed
+    via PR, the same branch-per-change convention as everything else in
+    this repo (see "Real work happens on a branch, not `main`" above).
+- **Promotion (Replace model)** — once an attempt is proven, a deliberate
+  PR moves its scripts into `sql/transformations/` (replacing the
+  superseded number range), its mapping workbook becomes the new
+  canonical `mapping/*.xlsx`, and its Run Book tab becomes the new
+  canonical tab. One canonical "best known" reference lives in the
+  library at a time — the superseded version is never kept as a second
+  live copy, only recoverable through git history. `validators/`/`okf/`
+  are the one exception: findings discovered *during* an attempt should
+  be written into those shared files directly, in real time, the same as
+  any other finding — they're durable knowledge, not attempt-specific
+  work product, so there's no separate promotion step for them.
+- **No dedicated tooling for scaffolding or promoting an attempt** —
+  deliberately out of scope for now, matching this repo's own
+  don't-build-until-proven-needed philosophy. Creating
+  `attempts/<date>-<slug>/{sql,mapping}/` is a plain directory creation;
+  promotion is a plain `git mv` + PR, exactly like every other
+  deliberate change in this repo already works. Worth a real command
+  later only if this convention gets used enough to justify it.
+
 ## Licensing
 MIT licensed, Copyright JP Ziller LLC (see `LICENSE`) — free to use, modify,
 and redistribute (including commercially), provided the copyright notice is

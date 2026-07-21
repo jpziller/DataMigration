@@ -16,6 +16,24 @@ _SCRIPT_RE = re.compile(r"^(\d+)_")
 
 DEFAULT_GAP = 10
 
+_KNOWN_SHORTCUTS = {
+    "transformations": os.path.join("sql", "transformations"),
+    "source_ingestion": os.path.join("sql", "source_ingestion"),
+}
+
+
+def resolve_dir(target_dir):
+    """Resolve a --dir value to a real directory path. The two known
+    shortcut keywords ("transformations", "source_ingestion") map to this
+    project's own sql/ subfolders, exactly as every existing caller
+    already expects. Anything else is treated as a literal path (relative
+    to cwd, or absolute) -- e.g. "attempts/2026-07-21-npc-dogfood-v2/sql",
+    a per-attempt workspace kept separate from the shared library (see
+    CLAUDE.md's "Library vs. attempts workspace" section). Purely string
+    logic -- doesn't check the path exists; callers already handle a
+    missing/empty directory the same way they always have."""
+    return _KNOWN_SHORTCUTS.get(target_dir, target_dir)
+
 
 def existing_numbers(directory):
     """Sorted list of numeric prefixes already used in directory. Empty if

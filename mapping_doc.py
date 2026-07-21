@@ -159,7 +159,8 @@ def generate_mapping_workbook(sf, target_object, output_path, engine, source_tab
     return output_path
 
 
-def set_transform_script(mapping_path, target_object, script_subdir="transformations", repo_root=None):
+def set_transform_script(mapping_path, target_object, script_subdir="transformations",
+                          repo_root=None, script_dir=None):
     """Fill in the "Transform Script:" header field (row 1) on
     target_object's sheet with the real script that implements it --
     resolved from sql/<script_subdir>/ the same way migration_run_book.py's
@@ -170,6 +171,15 @@ def set_transform_script(mapping_path, target_object, script_subdir="transformat
     the real sql/ tree). A real hyperlink to that file at the current
     commit is attached too, when this repo has a GitHub remote -- same
     breadcrumb convention the Migration Run Book uses.
+
+    script_dir: optional -- when given, used directly as the search
+    directory instead of the repo_root/sql/script_subdir construction
+    above, and the hyperlink is built from its own path relative to
+    repo_root instead of the literal "sql/<script_subdir>" text. For an
+    attempts workspace whose scripts don't live under sql/ at all (see
+    CLAUDE.md's "Library vs. attempts workspace" section) -- pass
+    cli.py's own `script_numbering.resolve_dir(target_dir)` result here.
+    Purely additive: omitted, this function's behavior is unchanged.
 
     Deliberately a separate step, not part of generate_mapping_workbook():
     in the standard workflow, mapping comes before the transform is built,
@@ -200,7 +210,17 @@ def set_transform_script(mapping_path, target_object, script_subdir="transformat
     ws = wb[sheet_name]
 
     repo_root = repo_root if repo_root is not None else os.path.dirname(__file__)
-    directory = os.path.join(repo_root, "sql", script_subdir)
+    directory = script_dir if script_dir is not None else os.path.join(repo_root, "sql", script_subdir)
+    # A relative-to-repo-root path segment for both the error message and
+    # the hyperlink below -- "sql/<script_subdir>" when script_dir wasn't
+    # given (today's exact text, unchanged), otherwise script_dir's own
+    # path relative to repo_root (e.g. "attempts/2026-.../sql"), posix-
+    # normalized since a GitHub blob URL always uses forward slashes
+    # regardless of the OS building it.
+    if script_dir is None:
+        display_dir = f"sql/{script_subdir}"
+    else:
+        display_dir = os.path.relpath(script_dir, repo_root).replace(os.sep, "/")
     # wb.sheetnames -- every object this project has already built a
     # mapping doc for -- doubles as a known_objects set so a compound-name
     # script can't silently outrank the real script for a shorter object
@@ -210,13 +230,13 @@ def set_transform_script(mapping_path, target_object, script_subdir="transformat
     candidates = sn.script_candidates_for(target_object, directory, known_objects=wb.sheetnames)
     if not candidates:
         raise ValueError(
-            f"No transform script for '{target_object}' found in sql/{script_subdir}/ -- "
+            f"No transform script for '{target_object}' found in {display_dir}/ -- "
             "build the transform first, then run this."
         )
     if len(candidates) > 1:
         print(
             f"Warning: more than one transform script matches '{target_object}' in "
-            f"sql/{script_subdir}/: {candidates} -- using the highest-numbered "
+            f"{display_dir}/: {candidates} -- using the highest-numbered "
             f"({candidates[-1]}). If these are genuinely different scripts (e.g. "
             "different source-routing branches for the same target object, not one "
             "superseding another), confirm this is really the one this mapping doc "
@@ -229,7 +249,7 @@ def set_transform_script(mapping_path, target_object, script_subdir="transformat
     info = gi.get_git_info()
     url = gi.github_url(info["remote_url"]) if info else None
     if url:
-        cell.hyperlink = f'{url}/blob/{info["commit_sha"]}/sql/{script_subdir}/{filename}'
+        cell.hyperlink = f'{url}/blob/{info["commit_sha"]}/{display_dir}/{filename}'
         cell.font = _HYPERLINK_FONT
 
     wb.save(mapping_path)
