@@ -1,5 +1,36 @@
 # Validators bundle update log
 
+## 2026-07-21
+* **New**: [GiftDefaultDesignation validator](GiftDefaultDesignation.md)
+  -- the platform auto-creates a 100% default designation the instant a
+  GiftCommitment is inserted; an explicit insert collided
+  (FIELD_INTEGRITY_EXCEPTION, "Designations can't exceed 100%"), 15 of
+  15 failed cleanly. Never insert or update this object. Found during
+  the second NPC fundraising dogfood rebuild attempt
+  (`attempts/2026-07-21-npc-dogfood-v2/`).
+* **Update (correction)**: [AccountContactRelation validator](AccountContactRelation.md)
+  -- the first build's own fix (replicate + update IsIncludedInGroup/
+  IsPrimaryMember) was itself wrong, caught directly by the user: no
+  auto-created record should be updated, not even for a seemingly
+  necessary field. Real, IsDirect=true-filtered evidence (5 of 5) shows
+  these fields stay False/False -- the earlier "10/10 populated, mixed
+  True/False" finding was contaminated by an unfiltered sample that
+  picked up unrelated business-relationship rows. Reverted the 19 real
+  rows this rebuild had already updated back to False/False.
+* **Update**: [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md)
+  -- the documented "Manage Recurring Gift Commitment Schedule" Invocable
+  Action was tried for real this pass (not just researched) and worked
+  cleanly for all 12 Recurring-type commitments, zero collisions -- see
+  `okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md`'s own
+  update for the full account, including the one-record-per-call
+  constraint found live.
+* **Methodology note**: this pass surfaced a general principle worth
+  stating once, not per-object: never insert OR update a platform
+  auto-created record unless real, filtered reference-data evidence
+  (not a broad/unfiltered sample) shows a human genuinely needs to
+  change something on it. See
+  [okf/nonprofit-cloud/never-update-auto-created-records.md](../okf/nonprofit-cloud/never-update-auto-created-records.md).
+
 ## 2026-07-20
 * **New**: [GiftDesignation validator](GiftDesignation.md) -- can't
   delete an active GiftDesignation, found purging every migrated record

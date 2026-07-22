@@ -2,12 +2,12 @@
 type: ObjectValidator
 title: AccountContactRelation validator
 description: Object-specific findings for AccountContactRelation
-  (Nonprofit Cloud/AFNP) -- IsIncludedInGroup/IsPrimaryMember are the real
-  household-membership signal a migration must set, not just AccountId/
-  ContactId; the platform auto-creates this row itself on Contact insert,
-  so it must be updated, never inserted.
+  (Nonprofit Cloud/AFNP) -- the platform auto-creates this row itself on
+  Contact insert, so it must never be inserted OR updated; real evidence
+  shows IsIncludedInGroup/IsPrimaryMember stay False/False on a real
+  IsDirect=true row, contradicting this doc's own earlier finding.
 tags: [object-validator, account-contact-relation, nonprofit-cloud, afnp, npsp-to-npc, household, auto-created-child-record]
-timestamp: "2026-07-20"
+timestamp: "2026-07-21"
 ---
 # AccountContactRelation validator
 
@@ -114,3 +114,40 @@ immediately dropped the `AccountContactRelation` count to 0 with no
 separate delete attempt needed. See
 `okf/nonprofit-cloud/full-org-reset-between-build-attempts.md` for the
 full reverse-dependency purge sequence this was found while building.
+
+## CORRECTION (2026-07-21): never update the auto-created row either -- IsIncludedInGroup/IsPrimaryMember stay False/False on real data
+**Found:** second NPC fundraising dogfood rebuild attempt, caught directly
+by the user rather than discovered independently: "you shouldn't be
+updating auto created records... not even to add a migration id to
+it... the rule to not update the created records is all created records
+and not just one object." This overturns this doc's own earlier
+"Salesforce auto-creates the row itself" entry above, which recommended
+replicating and updating the auto-created row with
+IsIncludedInGroup/IsPrimaryMember.
+**Investigated live rather than assumed** (per the user's own standing
+"test and ask questions, don't brute-force" instruction): queried every
+real, non-migrated `AccountContactRelation` row with `IsDirect = true` in
+`NPC_TARGET_v2` --
+
+    IsIncludedInGroup = False, IsPrimaryMember = False -- 5 of 5, zero
+    exceptions.
+
+**Why the original finding was wrong:** the original "10/10 populated,
+mixed True/False" evidence came from an unfiltered sample that, on
+closer inspection, was actually picking up organization-style business
+relationships (`Roles` = Influencer/Decision Maker/Evaluator/Other --
+clearly not household membership) rather than genuine `IsDirect = true`
+household rows. Filtering to the exact real shape this migration
+actually produces (`IsDirect = true`, auto-created on Contact insert)
+shows a uniform False/False, not a human-set mixed pattern.
+**What to do now:** never insert AND never update this object. The
+platform's own auto-created row, left completely untouched, already
+matches real evidenced shape -- setting IsIncludedInGroup/IsPrimaryMember
+to anything else is inventing a value Hard Rule 11 doesn't license, not
+correcting a gap. If a future real client engagement's own reference
+data shows a genuinely different, evidenced pattern (e.g. real household
+management workflows that do set these fields), re-verify with a
+`IsDirect = true`-filtered sample specifically before trusting a broader,
+unfiltered one again -- this is the same lesson `PartyRelationshipGroup.md`'s
+own `Category` correction already learned once, now confirmed a second
+time on a different object.

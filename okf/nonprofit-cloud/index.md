@@ -29,6 +29,11 @@ platform-level, not NPSP-source-specific.
   migration key of their own) from the NPC fundraising surface, two new
   platform delete-constraint quirks found doing it, and how this differs
   from a targeted corrective reload.
+* [Never insert or update a platform auto-created record without real, filtered evidence](never-update-auto-created-records.md) -
+  NEW (2026-07-21) — generalizes a mistake this project made once
+  (updating AccountContactRelation's auto-created row) and a second,
+  independent object hitting the same family (GiftDefaultDesignation)
+  into one standing rule for every future object.
 
 # Platform validations
 
