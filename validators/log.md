@@ -1,5 +1,18 @@
 # Validators bundle update log
 
+## 2026-07-21 (2)
+* **Update**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
+  -- investigated the second rebuild's own P9 failure (a fresh insert,
+  not a follow-up correction like the first pass's LoadId 38). Ruled out
+  both rounding/precision and "fully-refunded transactions reject any
+  designation" as the sole cause (a second, otherwise-identical
+  fully-refunded transaction succeeded fine). The one real remaining
+  difference -- standalone (no GiftCommitmentId) vs. commitment-linked --
+  is a genuine lead but only an n=1-vs-n=1 comparison, not confirmed.
+  Left open pending a real migration, more human-created reference data,
+  or official documentation -- not enough evidence to responsibly guess
+  further.
+
 ## 2026-07-21
 * **New**: [GiftDefaultDesignation validator](GiftDefaultDesignation.md)
   -- the platform auto-creates a 100% default designation the instant a

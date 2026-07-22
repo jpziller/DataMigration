@@ -67,8 +67,10 @@ discovered the hard way — nothing exists preemptively.
   exclusive.
 * [GiftTransactionDesignation validator](GiftTransactionDesignation.md) -
   a split's two Amounts must sum to an exact remainder, not two
-  independently-rounded shares; Amount may lock after the parent
-  transaction reaches a certain state (unresolved).
+  independently-rounded shares; a separate insert-time failure on a
+  standalone, fully-refunded transaction remains unresolved (rounding
+  and refund-status both ruled out; sample too small to confirm the
+  real cause -- 2026-07-21).
 * [GiftDesignation validator](GiftDesignation.md) - NEW (2026-07-20) --
   can't delete an active GiftDesignation; deactivate (IsActive=false)
   first.
