@@ -48,9 +48,10 @@ discovered the hard way — nothing exists preemptively.
   required despite createable=false, no exact "Household" Category value
   and real data mostly leaves it unset entirely.
 * [AccountContactRelation validator](AccountContactRelation.md) -
-  IsIncludedInGroup/IsPrimaryMember are the real household-membership
-  signal, not just AccountId/ContactId; a "direct" relationship can't be
-  deleted independently -- delete the Contact instead.
+  auto-created on Contact insert; never insert OR update it (corrected
+  2026-07-21 -- real data shows IsIncludedInGroup/IsPrimaryMember stay
+  False/False); a "direct" relationship can't be deleted independently --
+  delete the Contact instead.
 * [GiftCommitmentSchedule validator](GiftCommitmentSchedule.md) - the
   platform SOMETIMES auto-creates a schedule for a Recurring-type parent
   GiftCommitment (confirmed both ways live) -- check what's actually
@@ -66,8 +67,13 @@ discovered the hard way — nothing exists preemptively.
   exclusive.
 * [GiftTransactionDesignation validator](GiftTransactionDesignation.md) -
   a split's two Amounts must sum to an exact remainder, not two
-  independently-rounded shares; Amount may lock after the parent
-  transaction reaches a certain state (unresolved).
+  independently-rounded shares; a separate insert-time failure on a
+  standalone, fully-refunded transaction remains unresolved (rounding
+  and refund-status both ruled out; sample too small to confirm the
+  real cause -- 2026-07-21).
 * [GiftDesignation validator](GiftDesignation.md) - NEW (2026-07-20) --
   can't delete an active GiftDesignation; deactivate (IsActive=false)
   first.
+* [GiftDefaultDesignation validator](GiftDefaultDesignation.md) - NEW
+  (2026-07-21) -- the platform auto-creates a 100% default designation
+  on GiftCommitment insert; never insert or update this object.

@@ -176,6 +176,54 @@ explicitly `INSERT` a competing `GiftCommitmentSchedule` for a
 Recurring-type commitment without first confirming, live, that this
 specific org/pass didn't already get one through path (a) or (b).
 
+**UPDATE (2026-07-21, second NPC fundraising dogfood rebuild attempt):
+the Action was actually tried live for the first time, not just
+researched.** Called `POST
+/services/data/v67.0/actions/standard/manageRcrGiftCmtSchd` for all 12
+of this build's own Recurring-type `GiftCommitment` records, one real
+`giftCommitmentSchedule` payload per call (`GiftCommitmentId`,
+`TransactionPeriod='Monthly'`, `TransactionDay='1'`,
+`TransactionInterval=1`, `TransactionAmount`, `StartDate`,
+`Type='CreateTransactions'`). **Result: 12 of 12 succeeded, zero
+collisions, zero `FIELD_INTEGRITY_EXCEPTION`s** -- each call returned a
+real `GiftCommitmentSchedule` Id in `giftCommitmentScheduleIdsList`,
+confirmed by direct query. This fully resolves the "on the next rebuild,
+prefer calling the real Action" guidance from the correction above --
+the resulting `GiftCommitmentSchedule_Load` transform's own check-first
+`LEFT JOIN` (see `sql/transformations/370_giftcommitmentschedule_load.sql`)
+then correctly found only the 3 genuinely `Custom`-type commitments still
+needing an explicit insert, exactly matching the real 12-Recurring/
+3-Custom split.
+
+**Two new mechanical findings from actually calling it:**
+1. **One record per call, strictly.** Batching all 12 payloads into a
+   single POST's `inputs` array failed every one of them with
+   `MAX_LIMIT_EXCEEDED: "This action can process no more than 1 request
+   at a time."` -- unlike a normal Bulk API 2.0 job, this Invocable
+   Action has no batch mode; call it once per commitment, in a loop.
+2. **The first GiftTransaction and `GiftCommitment.CurrentGiftCmtScheduleId`
+   do NOT get created/populated synchronously.** The Action's own
+   description promises "creates the first upcoming gift commitment
+   transaction record," but a same-session query immediately after a
+   successful call showed no matching `GiftTransaction` yet, and
+   `CurrentGiftCmtScheduleId` still blank on the parent commitment --
+   both likely deferred to the nightly NextGen batch (see this doc's own
+   citation 2) rather than happening inline with the Action call. Not
+   chased further this pass since it didn't block the schedule itself
+   from being usable (this build's own `390_snowfake_gifttransaction_load.sql`
+   still builds its GiftTransactions explicitly either way) -- worth
+   re-checking a day later on a future pass if the auto-created first
+   transaction specifically matters.
+
+**Also learned, unrelated to the Action itself but found the same
+session:** `GET`ting the action's own metadata first
+(`sf.restful("actions/standard/manageRcrGiftCmtSchd", method="GET")`,
+read-only) is the reliable way to learn an Invocable Action's exact
+required inputs before ever attempting a live call -- confirms the
+required `giftCommitmentSchedule` SObject-shaped input and its real
+field names directly from the org, rather than guessing from
+documentation prose alone.
+
 # Citations
 
 1. Live-confirmed, 2026-07-18, `NPC_TARGET_v2` -- not documented in the
