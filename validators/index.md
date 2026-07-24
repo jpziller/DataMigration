@@ -66,14 +66,20 @@ discovered the hard way — nothing exists preemptively.
   Account, not a Contact; PartialAmount/PartialPercent are mutually
   exclusive.
 * [GiftTransactionDesignation validator](GiftTransactionDesignation.md) -
-  a split's two Amounts must sum to an exact remainder, not two
-  independently-rounded shares; a separate insert-time failure on a
-  standalone, fully-refunded transaction remains unresolved (rounding
-  and refund-status both ruled out; sample too small to confirm the
-  real cause -- 2026-07-21).
-* [GiftDesignation validator](GiftDesignation.md) - NEW (2026-07-20) --
-  can't delete an active GiftDesignation; deactivate (IsActive=false)
-  first.
-* [GiftDefaultDesignation validator](GiftDefaultDesignation.md) - NEW
-  (2026-07-21) -- the platform auto-creates a 100% default designation
-  on GiftCommitment insert; never insert or update this object.
+  CONFIRMED by a real Nonprofit Cloud architect (2026-07-24): a
+  transaction's designations must be INHERITED from its parent's real
+  GiftDefaultDesignation(s) (GiftCommitment, else Opportunity, else
+  Campaign, else the org-wide default) -- the earlier round-robin
+  approach was fundamentally wrong. Also: a split's two Amounts must sum
+  to an exact remainder, not two independently-rounded shares; a
+  standalone, fully-refunded transaction's insert-time failure remains
+  unresolved.
+* [GiftDesignation validator](GiftDesignation.md) - `IsDefault = true`
+  identifies the org-wide default designation dynamically, never a
+  hardcoded Id (confirmed 2026-07-24); can't delete an active
+  GiftDesignation, deactivate (IsActive=false) first.
+* [GiftDefaultDesignation validator](GiftDefaultDesignation.md) - the
+  platform auto-creates a 100% default designation on GiftCommitment
+  insert; never insert or update this object. Auto-creation correlates
+  with ScheduleType='Recurring' (12/15 confirmed) -- Custom-type
+  commitments and Campaign never get one.
