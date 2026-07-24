@@ -3,13 +3,13 @@ type: ObjectValidator
 title: GiftTransactionDesignation validator
 description: Object-specific findings for GiftTransactionDesignation
   (Nonprofit Cloud/AFNP) -- CONFIRMED by a real Nonprofit Cloud architect
-  (Ali), 2026-07-24: a transaction's designations must be INHERITED from
+  (Ali) on 2026-07-24 -- a transaction's designations must be INHERITED from
   its parent's real Gift Default Designation(s) (GiftCommitment, else
   Opportunity, else Campaign, else the org-wide default), mirroring the
   same designation(s) and split percentages -- not independently chosen.
   The earlier round-robin-across-fabricated-designations approach in this
   build's own 430 script was fundamentally the wrong mechanism, not a
-  minor miss. Also: a split's two Amounts must sum to exactly the
+  minor miss. Also -- a split's two Amounts must sum to exactly the
   transaction's OriginalAmount (rounding-safety), and a standalone,
   fully-refunded transaction's first-insert failure remains genuinely
   unresolved.
