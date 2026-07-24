@@ -3,11 +3,26 @@ type: ObjectValidator
 title: GiftDesignation validator
 description: Object-specific findings for GiftDesignation (Nonprofit
   Cloud/AFNP) -- a GiftDesignation must be deactivated (IsActive=false)
-  before it can be deleted.
-tags: [object-validator, gift-designation, nonprofit-cloud, afnp]
-timestamp: "2026-07-20"
+  before it can be deleted. IsDefault=true identifies the org-wide
+  default designation dynamically -- never hardcode its Id.
+tags: [object-validator, gift-designation, nonprofit-cloud, afnp, gift-default-designation]
+timestamp: "2026-07-24"
 ---
 # GiftDesignation validator
+
+## IsDefault=true identifies the org-wide default designation -- confirmed live, never hardcode its Id
+**Found:** 2026-07-24, building the corrected GiftTransactionDesignation
+inheritance logic (see [GiftTransactionDesignation.md](GiftTransactionDesignation.md)).
+Every auto-created `GiftDefaultDesignation` in `NPC_TARGET_v2` points at
+the same real `GiftDesignation` -- confirmed live it has `IsDefault =
+true`, `Name = "General fund"`. Matches Ali's own description of the
+fallback: "usually something like General Fund or Unrestricted or Annual
+Fund."
+**What to do:** look this org's real default up dynamically
+(`SELECT Id FROM GiftDesignation WHERE IsDefault = true`) every time it's
+needed -- e.g. as the final fallback when a `GiftTransaction` has no
+`GiftCommitmentId`/`CampaignId`-linked `GiftDefaultDesignation` to
+inherit from. Never hardcode the literal Id, which is org-specific.
 
 ## Can't delete an active GiftDesignation
 **Found:** 2026-07-20, purging every migrated record from `NPC_TARGET_v2`

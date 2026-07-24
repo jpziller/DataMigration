@@ -1,5 +1,48 @@
 # Validators bundle update log
 
+## 2026-07-24 (2)
+* **Resolved live**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
+  -- `attempts/2026-07-21-npc-dogfood-v2/sql/430_gifttransactiondesignation_load.sql`
+  rewritten for the confirmed inheritance rule (see the 2026-07-24 entry
+  below), Hard Rules 6/7/12 all re-passed, then run live against
+  `NPC_TARGET_v2`: the 59 wrong round-robin rows deleted, 39 of 40
+  corrected rows loaded (Hard Rule 2 confirmed with the user first). The
+  1 failure was the identical pre-existing "standalone + fully-refunded"
+  gap hitting the exact same transaction as the original finding, with a
+  different designation assigned -- rules out "wrong designation" as a
+  contributing cause, narrowing that open gap further. A real fallback
+  bug was also found and fixed while building this: a first draft only
+  fell through to Campaign/org-default when `GiftCommitmentId` was NULL
+  outright, silently dropping all designations for 3 transactions linked
+  to a Custom-type commitment with no auto-created GDD -- fixed by testing
+  `NOT EXISTS` a matching GDD at each stage instead of a bare `IS NULL`.
+
+## 2026-07-24
+* **Update**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
+  -- a real Nonprofit Cloud architect (Ali) reviewed the second rebuild's
+  live output and confirmed the whole round-robin designation-selection
+  approach was fundamentally wrong: a transaction's designations must be
+  INHERITED from its parent's real GiftDefaultDesignation(s) --
+  GiftCommitment, else Opportunity, else Campaign, else the org-wide
+  default -- mirroring the same designation(s) and split percentages, not
+  independently chosen. Confirmed live: the org-wide default is
+  identifiable dynamically via `GiftDesignation.IsDefault = true` (never a
+  hardcoded Id); GiftDefaultDesignation auto-creation correlates with
+  `ScheduleType='Recurring'` (12/15 commitments, all Recurring-type, have
+  one; the 3 Custom-type ones don't); Campaign never gets one at all (0/3).
+* **Update**: [GiftDesignation validator](GiftDesignation.md) -- added the
+  real `IsDefault = true` finding (the org-wide default lookup mechanism),
+  found while building the above. Also fixed a stale cross-reference in
+  [GiftDefaultDesignation.md](GiftDefaultDesignation.md) that claimed this
+  finding already existed here when it didn't.
+* **Update**: [GiftDefaultDesignation validator](GiftDefaultDesignation.md)
+  -- re-confirmed the auto-creation finding across all 15 real
+  GiftCommitment records (not just the original 3): auto-creation is NOT
+  universal, it correlates with `ScheduleType='Recurring'`, the same split
+  already known for GiftCommitmentSchedule auto-creation -- a consumer
+  (GiftTransactionDesignation's own transform) must replicate + `LEFT
+  JOIN`, never assume every commitment has one.
+
 ## 2026-07-21 (2)
 * **Update**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
   -- investigated the second rebuild's own P9 failure (a fresh insert,
