@@ -13,7 +13,7 @@ timestamp: "2026-07-19"
 # AccountContactRelation is auto-created on Contact insert
 
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build. An explicit `insert` of 16 `AccountContactRelation` rows
+sample data build. An explicit `insert` of 16 `AccountContactRelation` rows
 (Account/Contact pairs both already loaded earlier in the same build)
 reported `submitted: 16, succeeded: 0, failed: 0` — no error at all, a
 result that initially looked like a tooling problem rather than a

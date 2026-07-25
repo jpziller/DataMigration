@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 7 of
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 7 of
    11. Builds GiftDesignation_Load from dbo.GiftDesignation_Mock (6 rows,
    generate-related-mock-data GiftDesignation --count GiftDesignation=6).
    A standalone root object -- no in-scope parent, no self-reference.

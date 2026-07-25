@@ -14,7 +14,7 @@ timestamp: "2026-07-19"
 
 ## ParentId is polymorphic (Account or Individual) -- scope to Account only
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build. All three Contact Point objects' `ParentId` references
+sample data build. All three Contact Point objects' `ParentId` references
 either `Account` or `Individual` (a distinct standard object from
 `Contact`, used for privacy/data-protection preferences, often
 auto-created alongside a Person Account). Confirmed live via

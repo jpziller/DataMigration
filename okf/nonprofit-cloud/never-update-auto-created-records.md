@@ -32,7 +32,7 @@ rejection, depending on the object.
 
 ## The mistake this project made once, and corrected
 The first fix built for this pattern (`AccountContactRelation`, NPC
-fundraising dogfood build, 2026-07-19) was: don't insert, but DO
+fundraising sample data build, 2026-07-19) was: don't insert, but DO
 replicate the real row and UPDATE it with fields the auto-creation
 doesn't set (`IsIncludedInGroup`/`IsPrimaryMember`) -- reasoning that
 these were genuinely necessary household-membership signals with no
@@ -94,6 +94,6 @@ object entirely, not replicate-and-update it either.
 # Citations
 1. Live-confirmed, 2026-07-21, `NPC_TARGET_v2` -- both the
    `AccountContactRelation` correction and the `GiftDefaultDesignation`
-   finding, second NPC fundraising dogfood rebuild attempt
-   (`attempts/2026-07-21-npc-dogfood-v2/`).
+   finding, second NPC fundraising sample data rebuild attempt
+   (`attempts/2026-07-21-npc-sample-v2/`).
 2. User correction, same session, relayed directly.

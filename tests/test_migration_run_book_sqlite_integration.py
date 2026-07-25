@@ -146,7 +146,7 @@ def test_generate_migration_run_book_uses_script_dir_override(sqlite_engine, tmp
     this repo's own sql/transformations/, so a pass here can only mean
     the override directory was actually searched, not the default one."""
     engine, _ = sqlite_engine
-    attempt_scripts = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    attempt_scripts = tmp_path / "attempts" / "2026-07-21-npc-sample-v2" / "sql"
     attempt_scripts.mkdir(parents=True)
     (attempt_scripts / "777_account_load.sql").write_text("", encoding="utf-8")
 

@@ -27,7 +27,7 @@ def resolve_dir(target_dir):
     shortcut keywords ("transformations", "source_ingestion") map to this
     project's own sql/ subfolders, exactly as every existing caller
     already expects. Anything else is treated as a literal path (relative
-    to cwd, or absolute) -- e.g. "attempts/2026-07-21-npc-dogfood-v2/sql",
+    to cwd, or absolute) -- e.g. "attempts/2026-07-21-npc-sample-v2/sql",
     a per-attempt workspace kept separate from the shared library (see
     CLAUDE.md's "Library vs. attempts workspace" section). Purely string
     logic -- doesn't check the path exists; callers already handle a

@@ -13,7 +13,7 @@ timestamp: "2026-07-24"
 # GiftDefaultDesignation validator
 
 ## The platform auto-creates a 100% default designation on GiftCommitment insert -- never insert or update
-**Found:** 2026-07-21, second NPC fundraising dogfood rebuild attempt.
+**Found:** 2026-07-21, second NPC fundraising sample data rebuild attempt.
 An explicit insert of one GiftDefaultDesignation per GiftCommitment (15
 rows, round-robin across this build's own 6 GiftDesignation_Load rows,
 each at 100%) failed 15 of 15 live with:

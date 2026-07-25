@@ -288,5 +288,5 @@ def test_resolve_dir_passes_through_literal_path():
     literal directory path, unchanged -- e.g. an attempts workspace's own
     script folder (see CLAUDE.md's "Library vs. attempts workspace"
     section)."""
-    literal = os.path.join("attempts", "2026-07-21-npc-dogfood-v2", "sql")
+    literal = os.path.join("attempts", "2026-07-21-npc-sample-v2", "sql")
     assert sn.resolve_dir(literal) == literal

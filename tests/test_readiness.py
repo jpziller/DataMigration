@@ -81,7 +81,7 @@ def test_sort_gate_passes_when_sort_column_present(sqlite_engine):
 
 
 def test_sort_gate_not_applicable_when_only_self_reference_edges(sqlite_engine):
-    # Found via a real dogfood run: analyze-load-order records Account's
+    # Found via a real sample data run: analyze-load-order records Account's
     # own self-reference edges (ParentId/MasterRecordId, both
     # Account -> Account) in ObjectDependency -- these are two-pass-load
     # fields (load_order.py's own self_references tracking), never a real
@@ -220,7 +220,7 @@ def test_mapping_balance_gate_uses_script_dir_override(tmp_path):
     test_mapping_balance_gate_reports_bad_mapping_path_cleanly_not_a_crash
     already uses."""
     sf = _StubSF("Account", _ACCOUNT_FIELDS)
-    attempt_scripts = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    attempt_scripts = tmp_path / "attempts" / "2026-07-21-npc-sample-v2" / "sql"
     attempt_scripts.mkdir(parents=True)
     (attempt_scripts / "777_account_load.sql").write_text("", encoding="utf-8")
 
@@ -237,7 +237,7 @@ def test_mapping_balance_gate_script_dir_override_reports_no_script_found(tmp_pa
     the same "no script found" outcome the default directory already
     gives -- not silently fall back to _TRANSFORMS_DIR."""
     sf = _StubSF("Account", _ACCOUNT_FIELDS)
-    empty_dir = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    empty_dir = tmp_path / "attempts" / "2026-07-21-npc-sample-v2" / "sql"
     empty_dir.mkdir(parents=True)
 
     result = rd._mapping_balance_gate(

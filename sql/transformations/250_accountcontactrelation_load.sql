@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   PROMOTED (2026-07-25) from attempts/2026-07-21-npc-dogfood-v2/sql/ --
+   PROMOTED (2026-07-25) from attempts/2026-07-21-npc-sample-v2/sql/ --
    the Replace-model promotion described in CLAUDE.md's "Library vs.
    attempts workspace" section. This replaces the library's own earlier
    version, which REPLICATED the real auto-created AccountContactRelation
@@ -9,7 +9,7 @@
    auto-created record). See validators/AccountContactRelation.md and
    okf/nonprofit-cloud/never-update-auto-created-records.md.
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 2 of
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 2 of
    11.
 
    CORRECTED live (2026-07-21, second rebuild pass): Salesforce

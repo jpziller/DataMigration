@@ -68,7 +68,7 @@ FROM (
     (SELECT * FROM dbo."Task_Mock" WHERE "_ParentType" = 'Account' LIMIT 14)
     UNION ALL
     -- Excludes the 13 Opportunity LoadIds that failed earlier (pre-existing
-    -- MigrationID__c collision with the original SQL Server dogfood pass,
+    -- MigrationID__c collision with the original SQL Server sample data pass,
     -- see this pass's own findings) -- otherwise an unlucky unordered LIMIT
     -- could sample only Tasks whose parent Opportunity never got a real Id,
     -- leaving WhatId NULL for the whole Opportunity-cohort half of the

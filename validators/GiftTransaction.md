@@ -83,7 +83,7 @@ platform) actually created it.
 
 ## TransactionDueDate is required for commitment-linked transactions, and must not precede the schedule's StartDate
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build. `TransactionDueDate` is required specifically when
+sample data build. `TransactionDueDate` is required specifically when
 `GiftCommitmentId` is set (an installment payment needs a due date) --
 `INVALID_INPUT: "Complete this field."` on every commitment-linked row
 that omitted it; a standalone (non-commitment) transaction doesn't need

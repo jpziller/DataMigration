@@ -92,7 +92,7 @@ silently producing zero designation rows. Mirror each GDD's own
 `AllocatedPercentage` onto the corresponding `GiftTransactionDesignation`
 row (see the rounding rule below for multi-way splits). Implementation:
 `sql/transformations/430_gifttransactiondesignation_load.sql` --
-**PROMOTED 2026-07-24** from `attempts/2026-07-21-npc-dogfood-v2/` once
+**PROMOTED 2026-07-24** from `attempts/2026-07-21-npc-sample-v2/` once
 proven live (see `CLAUDE.md`'s "Library vs. attempts workspace" section);
 this is now the one canonical copy, the attempts-workspace copy was
 removed per the Replace-model convention.
@@ -116,7 +116,7 @@ alone, independent of which `GiftDesignationId` is sent.
 
 ## A split's two Amounts must sum to exactly the transaction's OriginalAmount
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build -- 1 of 60 generated rows (a 60/40 split across two
+sample data build -- 1 of 60 generated rows (a 60/40 split across two
 designations) failed `FIELD_INTEGRITY_EXCEPTION: "Adjust the designations
 so that the total designation amount doesn't exceed the transaction
 amount."` Root cause: computing each share independently as
@@ -153,7 +153,7 @@ delete-and-reinsert approach documented for the other two cases before
 assuming it's a different root cause.
 
 ## SECOND, SEPARATE occurrence (2026-07-21) -- corrects the "locked after Status change" theory above, still unresolved
-**Found:** second NPC fundraising dogfood rebuild attempt, a completely
+**Found:** second NPC fundraising sample data rebuild attempt, a completely
 fresh insert this time (not a follow-up correction like LoadId 38
 above) -- `P9`, a standalone (no split, no `S9` counterpart) 100%
 designation, failed on its very first insert attempt with the identical

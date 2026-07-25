@@ -1,4 +1,4 @@
-# Post-Mortem: NPC Fundraising/Donor-Management Snowfakery Dogfood Recipe
+# Post-Mortem: NPC Fundraising/Donor-Management Snowfakery Sample Data Recipe
 
 **Date:** 2026-07-19
 **Scope:** Ignore NPSP entirely — use this framework's own
@@ -9,7 +9,7 @@ own §5/§7 list — not just the 11 objects the earlier PoC's NPSP-sourced
 data happened to route through), prefixed `Snowfake-`, loaded all the
 way to a real completion in `NPC_TARGET_v2` per Hard Rule 11's explicit
 exception for framework-generated data. PR #20
-(`feature/npc-fundraising-dogfood-recipe`).
+(`feature/npc-fundraising-sample-recipe`).
 
 ## What went well
 
@@ -148,7 +148,7 @@ exception for framework-generated data. PR #20
 - `force-app/main/default/objects/{ContactContactRelation,ContactPointAddress,ContactPointPhone,ContactPointEmail,GiftRefund,GiftSoftCredit,GiftDefaultDesignation}/fields/MigrationID__c.field-meta.xml`
   + the extended `MigrationFieldAccess` permission set — 7 new objects,
   joining the PoC's original 13.
-- `migration_run_book.xlsx`, tab `NPC_Fundraising_Dogfood`.
+- `migration_run_book.xlsx`, tab `NPC_Fundraising_Sample`.
 - Two real `bulkops.py` fixes (`_writeback_inplace()`'s `COALESCE` and
   per-row `execute()`) and one `snowfakery_data.py` fix (createable-only
   edge filtering) — these benefit every future user of
@@ -156,7 +156,7 @@ exception for framework-generated data. PR #20
 
 Full account of what transfers directly to the next rebuild pass vs. what
 would need redoing for a real client's own data:
-[okf/nonprofit-cloud/fundraising-dogfood-reference-implementation.md](../okf/nonprofit-cloud/fundraising-dogfood-reference-implementation.md).
+[okf/nonprofit-cloud/fundraising-sample-reference-implementation.md](../okf/nonprofit-cloud/fundraising-sample-reference-implementation.md).
 
 ## Target-platform-only knowledge extracted
 

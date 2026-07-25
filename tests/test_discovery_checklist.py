@@ -126,7 +126,7 @@ def test_self_reference_generates_no_dependency_question():
 
 
 def test_polymorphic_reference_collapses_into_one_question_not_one_per_target():
-    """Found in review (real dogfooding, not a hypothetical): Task.WhatId
+    """Found in review (real self-testing, not a hypothetical): Task.WhatId
     has ~90 referenceTo targets -- the original flat-target design
     generated one "confirm X is in scope" line per target, producing ~90
     near-identical lines for a single field and drowning out every other

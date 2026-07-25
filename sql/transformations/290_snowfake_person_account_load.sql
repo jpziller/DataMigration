@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 4 of
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 4 of
    11. Builds PersonAccount_Load from dbo.Contact_Mock (10 fresh
    standalone Contact rows -- `generate-related-mock-data Contact
    --count Contact=10` -- deliberately generated as Contact shapes, then

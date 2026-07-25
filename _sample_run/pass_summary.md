@@ -1,4 +1,4 @@
-# Migration Pass Summary -- Full Pipeline Dogfood Run
+# Migration Pass Summary -- Full Pipeline Sample Run
 
 **Target environment:** D360_PLAYGROUND
 

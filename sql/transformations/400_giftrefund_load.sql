@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 10
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 10
    of 11 -- companion to 390. Builds GiftRefund_Load from
    dbo.GiftRefund_Mock (25 rows, nested under GiftTransaction in the same
    generate-related-mock-data call -- _ParentMockRef resolves to

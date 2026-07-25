@@ -12,7 +12,7 @@ timestamp: "2026-07-19"
 
 ## RecipientId is an Account, not a Contact
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build, confirmed via `sample-reference-records GiftSoftCredit`
+sample data build, confirmed via `sample-reference-records GiftSoftCredit`
 against real, non-migrated data in `NPC_TARGET_v2` (Phase 0 recon) --
 real `RecipientId` values are `001`-prefixed (Account), not
 `003`-prefixed (Contact). Makes sense under the Person Account model: the

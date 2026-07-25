@@ -59,7 +59,7 @@ docs:
   `"operation": "Readonly"` (correctly signals "don't write to this
   object, it's already fully loaded"). With all three, a real target Id
   flows through with zero errors/warnings -- verified directly against
-  Contact_Load/Account_Load from this project's own dogfood data.
+  Contact_Load/Account_Load from this project's own sample data.
 
   Each declared parent also needs its OWN source CSV (the distinct,
   already-resolved parent Ids actually referenced) -- without one, SFDMU

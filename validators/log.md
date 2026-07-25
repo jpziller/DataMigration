@@ -2,7 +2,7 @@
 
 ## 2026-07-25
 * **Consolidated (Replace model)**: promoted the last two corrected
-  scripts from `attempts/2026-07-21-npc-dogfood-v2/sql/` into
+  scripts from `attempts/2026-07-21-npc-sample-v2/sql/` into
   `sql/transformations/` -- `250_accountcontactrelation_load.sql` and
   `420_giftdefaultdesignation_load.sql`, both now the doc-only "never
   insert/update an auto-created record" versions (the library still held
@@ -18,7 +18,7 @@
 
 ## 2026-07-24 (3)
 * **Promoted**: `430_gifttransactiondesignation_load.sql` moved from
-  `attempts/2026-07-21-npc-dogfood-v2/sql/` into `sql/transformations/`
+  `attempts/2026-07-21-npc-sample-v2/sql/` into `sql/transformations/`
   (the Replace model, `CLAUDE.md`'s "Library vs. attempts workspace"
   section), now that the inheritance fix below is proven live (39/40).
   This replaces the library's own older, round-robin version -- only this
@@ -28,7 +28,7 @@
 
 ## 2026-07-24 (2)
 * **Resolved live**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
-  -- `attempts/2026-07-21-npc-dogfood-v2/sql/430_gifttransactiondesignation_load.sql`
+  -- `attempts/2026-07-21-npc-sample-v2/sql/430_gifttransactiondesignation_load.sql`
   rewritten for the confirmed inheritance rule (see the 2026-07-24 entry
   below), Hard Rules 6/7/12 all re-passed, then run live against
   `NPC_TARGET_v2`: the 59 wrong round-robin rows deleted, 39 of 40
@@ -88,8 +88,8 @@
   GiftCommitment is inserted; an explicit insert collided
   (FIELD_INTEGRITY_EXCEPTION, "Designations can't exceed 100%"), 15 of
   15 failed cleanly. Never insert or update this object. Found during
-  the second NPC fundraising dogfood rebuild attempt
-  (`attempts/2026-07-21-npc-dogfood-v2/`).
+  the second NPC fundraising sample data rebuild attempt
+  (`attempts/2026-07-21-npc-sample-v2/`).
 * **Update (correction)**: [AccountContactRelation validator](AccountContactRelation.md)
   -- the first build's own fix (replicate + update IsIncludedInGroup/
   IsPrimaryMember) was itself wrong, caught directly by the user: no
@@ -171,7 +171,7 @@
   [okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md](../okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md)
   -- the "Recurring-type GiftCommitment always auto-creates its own
   schedule" finding (confirmed 3/3 and 6/6 in two earlier sessions) does
-  NOT hold universally. This session's NPC dogfood build inserted 12
+  NOT hold universally. This session's NPC sample data build inserted 12
   fresh Recurring-type commitments and got zero auto-created schedules,
   verified multiple ways. Root platform cause still unclear (Tooling-API-
   invisible). Corrected guidance: check what's actually missing (replicate
@@ -191,7 +191,7 @@
 ## 2026-07-19
 * **Update**: [AccountContactRelation validator](AccountContactRelation.md)
   -- three new findings from the NPC fundraising/donor-management
-  Snowfakery dogfood build: the platform auto-creates this row itself on
+  Snowfakery sample data build: the platform auto-creates this row itself on
   Contact insert (never insert explicitly, always update -- the same
   auto-creation pattern already known for GiftCommitmentSchedule); a
   boolean field's Salesforce-reformatted echo can silently break

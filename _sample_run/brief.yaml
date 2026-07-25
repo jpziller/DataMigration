@@ -1,4 +1,4 @@
-project: Full Pipeline Dogfood Run
+project: Full Pipeline Sample Run
 ticket: none (mock/practice exercise, no ticket system in use)
 target_org_alias: D360_PLAYGROUND
 objects:

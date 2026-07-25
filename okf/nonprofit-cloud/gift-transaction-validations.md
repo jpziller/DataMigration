@@ -72,7 +72,7 @@ builds a schedule per transaction instead of per parent. See
 `okf/npsp-to-npc/opportunity-routing.md`.
 
 **Confirmed a second time, independently** (NPC fundraising/donor-
-management Snowfakery dogfood build, 2026-07-19 — a different dataset,
+management Snowfakery sample data build, 2026-07-19 — a different dataset,
 different session, same org): "Transaction Due Date Required" and "Due
 Date vs. Schedule Start Date" both fired live on freshly-generated data
 that omitted/misordered `TransactionDueDate`, exactly as this table

@@ -42,7 +42,7 @@ visible via the Tooling API. See the OKF finding's own note on this and
 `ROADMAP.md` #79.
 
 ## CORRECTION (2026-07-19): the auto-creation is not reliably reproducible -- check what's missing, don't assume either way
-**Found:** NPC fundraising/donor-management Snowfakery dogfood build,
+**Found:** NPC fundraising/donor-management Snowfakery sample data build,
 same session as the [ContactContactRelation](ContactContactRelation.md)/
 [AccountContactRelation](AccountContactRelation.md) findings. This
 build's own 12 Recurring-type `GiftCommitment` inserts got ZERO

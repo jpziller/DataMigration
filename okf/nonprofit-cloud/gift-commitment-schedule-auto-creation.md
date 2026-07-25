@@ -81,7 +81,7 @@ this is core managed-package platform behavior, not client-configured
 automation), the check infers it empirically instead: sample real,
 non-migrated `GiftCommitment` records and see what fraction already have a
 real `GiftCommitmentSchedule`.
-Live dogfooding this against `NPC_TARGET_v2` found a real calibration gap
+Live self-testing this against `NPC_TARGET_v2` found a real calibration gap
 before it found the right answer: this org's broader real `GiftCommitment`
 population mixes `Recurring`/`Custom` types together, so only 6 of 10
 sampled real records showed a real schedule (60%) — below the tool's
@@ -95,7 +95,7 @@ account.
 
 **CORRECTION (2026-07-19):** this "always auto-creates" rule does not
 hold universally. A later session's NPC fundraising/donor-management
-Snowfakery dogfood build inserted 12 fresh Recurring-type
+Snowfakery sample data build inserted 12 fresh Recurring-type
 `GiftCommitment` records into the same org and got ZERO auto-created
 schedules -- verified from both directions, confirmed stable over an
 extended period (not an async delay), and confirmed that updating an
@@ -115,7 +115,7 @@ corrected implementation.
 
 **UPDATE (2026-07-19, later same day): real mechanism identified via
 official docs + a human SME, resolving most of the correction above.**
-Two real, documented mechanisms exist, and the dogfood build's own
+Two real, documented mechanisms exist, and the sample data build's own
 inserts went through neither before this project's own workaround
 inserted a competing schedule:
 
@@ -176,7 +176,7 @@ explicitly `INSERT` a competing `GiftCommitmentSchedule` for a
 Recurring-type commitment without first confirming, live, that this
 specific org/pass didn't already get one through path (a) or (b).
 
-**UPDATE (2026-07-21, second NPC fundraising dogfood rebuild attempt):
+**UPDATE (2026-07-21, second NPC fundraising sample data rebuild attempt):
 the Action was actually tried live for the first time, not just
 researched.** Called `POST
 /services/data/v67.0/actions/standard/manageRcrGiftCmtSchd` for all 12

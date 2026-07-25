@@ -1,6 +1,6 @@
 """Reset-dev-cycle command (roadmap #63).
 
-Codifies the manual reset ritual this project's own dogfooding did by
+Codifies the manual reset ritual this project's own self-testing did by
 hand, repeatedly, across earlier sessions (see docs/ORCHESTRATOR_DESIGN.md's
 field notes: "a full reset -- org records deleted, scripts/docs/SQLite
 wiped -- before each of three consecutive full Dev-tier cycles") into one

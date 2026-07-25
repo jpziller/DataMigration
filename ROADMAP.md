@@ -98,7 +98,7 @@ summarizes.
 | 60 | Discovery question checklist generator | **Built** | `generate-discovery-checklist <Objects> [--output path.md]` | Given a candidate object list, generates the per-object questions an architect should ask the client — driven by real signals this framework already computes (active validation rules' `ErrorDisplayField`, `RecordTypeId` presence, out-of-scope lookup dependencies), not a generic template. Read-only, no engine dependency. |
 | 61 | Bulk-load failure triage assistant | **Built** | `triage-failures <table> [--object] [--mapping-path]` | Groups a load's failures by normalized error signature (`_normalize_error_signature()`) and maps common Salesforce error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`, `INVALID_CROSS_REFERENCE_KEY`, etc.) to a likely root cause and which existing command to run next — turning "N rows failed" into "1 root cause, here's where to look." `--object`/`--mapping-path` enable real cross-references (mapping-doc/`ObjectAutomationRisk`) instead of static text alone. |
 | 62 | Adversarial mock data generation | **Built** | `generate-adversarial-mock-data <Object> --count N --scenario scenario:field:rows` | A companion to `generate-mock-data` that deliberately provokes known failure classes (duplicate migration keys, oversized strings, invalid picklist values, missing required fields, bad lookup references) so validation-rule collisions surface during Dev testing, not during a real client load. Writes to `<Object>_Mock_Adversarial`, tagged via a `REF_`-prefixed column so the same table can go straight into a real `bulkops` call. |
-| 63 | Reset-dev-cycle command | **Built** | `reset-dev-cycle --objects Account Contact [--purge-org-where Object:WHERE] [--dry-run]` | Codifies the manual reset ritual this project did by hand every dogfooding cycle: drops every `_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given objects and clears their profiling rows (mirror-DB-only, always safe); `--purge-org-where` optionally also purges matching org test data via the same `bulkops delete --where` mechanism (#32) — hard rule 2 applies in full. No skill wrapper, same as `bulkops` itself. |
+| 63 | Reset-dev-cycle command | **Built** | `reset-dev-cycle --objects Account Contact [--purge-org-where Object:WHERE] [--dry-run]` | Codifies the manual reset ritual this project did by hand every self-testing cycle: drops every `_Mock`/`_Mock_Adversarial`/`_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given objects and clears their profiling rows (mirror-DB-only, always safe); `--purge-org-where` optionally also purges matching org test data via the same `bulkops delete --where` mechanism (#32) — hard rule 2 applies in full. No skill wrapper, same as `bulkops` itself. |
 | 64 | Row-count reconciliation report | **Built** | `reconcile-load-counts <Objects> [--mapping-path] [--load-table Object=Table]` | Cross-checks source row count → Load table row count → `bulkops`' most recent submitted/succeeded/failed counts per object, flagging anywhere they don't reconcile (missing Load table, dropped rows, never loaded, or a stale prior run) — a data-completeness auditor, not a per-tool spot check. |
 | 65 | Migration readiness score | **Built** | `assess-migration-readiness <Objects> [--migration-key Object=Field] [--mapping-path] [--load-table Object=Table]` | One aggregate READY/NOT READY view per object across hard rules 6/7/12, `analyze-org-risk` coverage, `check-mapping-balance`, Email Deliverability attestation, and #64's row-count reconciliation — a "not checked" gate never blocks the verdict by itself, only an explicit failure does. |
 | 66 | Auto-drafted client-facing pass summary | **Built** | `generate-pass-summary <path> --tab <name> --output <path.md> [--load-table Object=Table]` | Drafts a plain-English "here's what happened this pass" summary from the Migration Run Book's own Load-phase results, ready to send a client stakeholder. `--load-table` optionally enriches any object's failures with a plain-language root cause via `triage-failures` (#61) instead of just a raw failed count — never guessed from the Run Book's own Object cell. |
@@ -453,7 +453,7 @@ its own Contact's Account) and confirmed the ancestor-chain fix above:
 all 12 generated Cases' Account reference matched their own Contact's
 Account exactly after nesting `Case` under `Contact` instead of `Account`.
 
-**Found and fixed three more real bugs via a full end-to-end dogfood run**
+**Found and fixed three more real bugs via a full end-to-end sample data run**
 (bootstrap-project through a live `bulkops` load, not a synthetic test):
 Snowfakery's combined JSON output unions every requested object type's
 columns into one flat DataFrame, and `run_recipe()`'s own column-keeping
@@ -485,7 +485,7 @@ a genuine, tz-naive pandas `datetime64` column
 `sql_dialect.py`'s own `MssqlDialect.normalize_datetime_columns()` is a
 documented no-op that assumes exactly that dtype already. All three only
 ever surfaced against the real `mssql` backend (SQLite has no strict
-column typing to violate) — a genuine argument for occasionally dogfooding
+column typing to violate) — a genuine argument for occasionally self-testing
 this module against SQL Server directly rather than only via its SQLite
 integration tests.
 
@@ -522,7 +522,7 @@ row's datetime field back reformatted (e.g. with milliseconds/`Z`), unlike
 a failed one. `cli.py bulkops` already has the documented escape hatch for
 exactly this (`--fingerprint-columns`, "the migration key column alone is
 normally the safest choice") — used for the remaining Opportunity/Task
-loads in this same dogfood run, both of which succeeded cleanly first
+loads in this same sample data run, both of which succeeded cleanly first
 try. Worth calling out here since this is genuinely easy to trip on the
 first time a load table sends any datetime field at all, not just under
 Snowfakery: **any object with a sent datetime-typed field should pass
@@ -1540,7 +1540,7 @@ one piece of `data_cloud.py` still in that state, since building even a
 minimal real Data Graph needs more Setup work (primary + related DMOs,
 levels) than the other findings' test artifacts did. No CLI command
 wired up for it yet for that reason — code exists, hasn't earned "real
-command" status by this module's own dogfooding standard.
+command" status by this module's own self-testing standard.
 
 **Note (not a reason to redo any of the above)**: `forcedotcom/sf-skills`
 (Salesforce's official Agent Skills library, discovered while building
@@ -2823,8 +2823,8 @@ itself, now **Hard Rule 11** in `CLAUDE.md`, not just a note here:
 - **Mock/test data this framework generated itself** (`generate-mock-
   data`/`generate-related-mock-data`): the ground truth is already known
   (we made it up), so a mapping *can* be carried all the way to complete
-  autonomously — for practice, testing new tooling, and dogfooding
-  ("we have to build it before we can dogfood it"). This is the
+  autonomously — for practice, testing new tooling, and self-testing
+  ("we have to build it before we can self-test it"). This is the
   deliberate, narrow exception, never extended to a real engagement.
 
 The **narrower piece this item was originally about** still stands as a
@@ -3044,7 +3044,7 @@ coarse-approval mechanism (`bulkops-under-plan`, a PreToolUse hook,
 for the narrow Hard-Rule-2 exception, and the `docs/SECURITY_OVERVIEW.md`
 update for the hook as a new trust boundary) doesn't exist yet, and
 shouldn't until Stage 1 shadow mode has actually run against a real
-UAT-tier project — everything done so far has been Dev-tier dogfooding,
+UAT-tier project — everything done so far has been Dev-tier self-testing,
 permanently out of this design's scope. See `docs/ORCHESTRATOR_DESIGN.md`
 section 5 (deferred items) for the full list.
 
@@ -3339,7 +3339,7 @@ raw SQL-Server-only T-SQL onto `sql_dialect.py` (same pattern as
 real-SQLite-testable, and `load_order.py` had zero test coverage for its
 database-writing half before this (only the pure `compute_load_order()`/
 `_group_cycle_members()` functions had tests). Both are now covered
-against a real SQLite engine. Dogfooded live against this project's own
+against a real SQLite engine. Self-tested live against this project's own
 org: confirmed a real object, caught a deliberately-typo'd one, and
 scaffolded a real Run Book tab with the correct script filename linked.
 
@@ -3373,7 +3373,7 @@ generic template a human has to remember:
   `referenceTo` target — e.g. `Task.WhatId`'s ~90 possible types, see
   `validators/Task.md`) collapses into a single question naming the
   field and a truncated target list, rather than one question per
-  target — found via a real full-pipeline dogfood run, not a synthetic
+  target — found via a real full-pipeline sample data run, not a synthetic
   test: the original flat-target design produced ~90 near-identical
   lines for `WhatId` alone, drowning out every other, genuinely
   actionable question for that object.
@@ -3391,7 +3391,7 @@ live Tooling API scan directly instead. Plain Markdown output for v1,
 same "ship the simple version, decide on polish later" discipline as
 #52/#66's own v1 framing — landing questions as starter rows in a
 Migration Run Book's Pre-Migration phase instead (or in addition) remains
-a future enhancement, not built here. Dogfooded live against this
+a future enhancement, not built here. Self-tested live against this
 project's own org: correctly flagged Account's real out-of-scope lookup
 dependencies (`DandBCompany`/`OperatingHours`/`User`) when run alone, and
 correctly suppressed the `Account` dependency once `Contact` was checked
@@ -3450,7 +3450,7 @@ not "was this target field mapped by anyone"); `--object` alone pulls
 that object. Read-only, advisory only — never changes data, never
 re-runs `bulkops` — same "suggests, never auto-fixes" posture as
 `auto_mapper.py`. Verified via real `bulk_op()` runs against a SQLite
-engine (`tests/test_failure_triage.py`), not yet dogfooded against a
+engine (`tests/test_failure_triage.py`), not yet self-tested against a
 live Salesforce failure — there was no real failure sitting in the
 mirror DB to point it at when this was built, and manufacturing one
 against the live org wasn't judged worth a real write just for a demo.
@@ -3515,7 +3515,7 @@ API call or a schema change to that table. A natural follow-up once
 
 ## 63. Reset-dev-cycle command — BUILT (`dev_cycle.py`)
 
-Codifies a ritual this project's own dogfooding did by hand, repeatedly,
+Codifies a ritual this project's own self-testing did by hand, repeatedly,
 across earlier sessions (see `docs/ORCHESTRATOR_DESIGN.md`'s field notes:
 "a full reset — org records deleted, scripts/docs/SQLite wiped — before
 each of three consecutive full Dev-tier cycles"). `reset_dev_cycle_tables()`
@@ -3627,11 +3627,11 @@ isn't a readiness *failure*) — found and fixed via this module's own
 test suite before it shipped. Aggregate into a per-object checklist plus
 one overall verdict — read-only, no new checks invented, purely a
 re-presentation of gates this framework already enforces individually.
-Dogfooded live against this project's own org and mirror DB, including
+Self-tested live against this project's own org and mirror DB, including
 watching the verdict flip from NOT READY to READY after a real
 `analyze-org-risk` run.
 
-**Two more real bugs found via the full pipeline dogfood run** (bootstrap
+**Two more real bugs found via the full pipeline sample data run** (bootstrap
 through a live 4-object `bulkops` load, `analyze-org-risk`,
 `reconcile-load-counts`, and `generate-pass-summary`):
 
@@ -3675,12 +3675,12 @@ show up in `mapping_balance`'s `not_a_real_field` list for every object,
 in every project using this convention — there's currently no equivalent
 of `bulk_op()`'s own `key_column`/`id_column`/`error_column`/`ref_prefix`
 exclusion list for `check_mapping_balance()`. Confirmed live: every one of
-this dogfood run's 4 objects reported `NOT READY` on this gate alone, a
+this sample data run's 4 objects reported `NOT READY` on this gate alone, a
 false alarm each time (`LoadId` is expected and correct, not a mapping
 mistake) — a real usability problem for `assess-migration-readiness`'s
 whole "one aggregate go/no-go view" premise if every real project
 permanently shows `NOT READY` on a benign, unavoidable finding. Worth
-fixing before this command is relied on for a real (non-dogfood) project:
+fixing before this command is relied on for a real (non-sample (real)) project:
 thread the load table's own bookkeeping column names (and/or the `REF_`
 prefix) through to `check_mapping_balance()` the same way `bulk_op()`
 already excludes them, rather than reporting them as an ordinary
@@ -3771,7 +3771,7 @@ exists and what's newly captured above rather than restating either:
    signature and maps it to a likely root cause instead of leaving that
    to manual error-string reading. A reset-dev-cycle command (#63)
    codifies the "wipe and try again" ritual this project's own
-   dogfooding has done by hand every iteration. The standing goal stated
+   self-testing has done by hand every iteration. The standing goal stated
    directly: our data should land looking indistinguishable from a
    record created natively in the org — the migration key is the *only*
    thing that should ever tell the two apart.
@@ -3827,7 +3827,7 @@ Two separate deliverables, not one document at two zoom levels:
    transforms), the end-to-end flow (bootstrap → discovery → profiling →
    mapping → transform build → hard-rule gates 6/7/12/15 → load →
    readiness/reconciliation → pass summary — the same sequence #53's
-   orchestrator and this session's full dogfood run both exercise),
+   orchestrator and this session's full sample data run both exercise),
    and a walk through every command surface (`cli.py` verb, matching
    `.claude/commands/*.md` skill) grouped by phase rather than
    alphabetically. Diagrams should reuse this framework's own generation
@@ -4359,7 +4359,7 @@ data survives the idempotent-restart check (step 7) unchanged.
 
 **Follow-up (2026-07-14): the actual migration methodology has since been
 run through this container and confirmed.** Reusing the exact recipe from
-the prior real dogfood pass (`_dogfood/brief.yaml` → discovery checklist →
+the prior real sample data pass (`_sample_run/brief.yaml` → discovery checklist →
 mapping → transforms → live `bulkops` insert against `D360_PLAYGROUND` →
 pass summary, commit `3314caf`) — same org, same four objects — this pass
 built four new Postgres-flavored transform scripts
@@ -4388,7 +4388,7 @@ calling convention rather than the real library's actual signature (both
 now fixed, and the stub's own regression-test gap this created was later
 found and closed by a ruthless review pass, see #71's account of that
 review). `migration_run_book.xlsx` gained a `Postgres1` tab (recipe carried
-forward from `Dogfood1`); its Load-phase rows are blank since
+forward from `Sample1`); its Load-phase rows are blank since
 `BulkOpsLog` logging wasn't enabled until after these loads ran.
 
 ## 70. FAQ: Fivetran / Apache Hop — why they're not part of this framework (researched — not pursued, out of scope)
@@ -4533,7 +4533,7 @@ never applied to this second export path until it failed live here too
 (`Contact.EmailBouncedDate` on every one of 8 rows in this integration's
 own first real test run).
 
-**Confirmed end-to-end** against real dogfood data in `D360_PLAYGROUND`:
+**Confirmed end-to-end** against real sample data in `D360_PLAYGROUND`:
 `bulkops Contact upsert Contact_Load --engine sfdmu --external-id
 MigrationID__c` — 8/8 succeeded, real Ids and the resolved `AccountId`
 lookup both landed correctly in the same SQL Load table.
@@ -4811,7 +4811,7 @@ survives past the conversation that produced it.
 
 Evaluated `dbt-core` as a candidate replacement for the numbered-script
 `sql/transformations/` convention, across all three `sql_dialect.py`
-backends. The full spike (8 commits, real dogfood data, all three
+backends. The full spike (8 commits, real sample data, all three
 backends) lives on a separate git worktree/branch,
 `worktree-spike-dbt-evaluation` — kept isolated from `main` per this
 project's own "genuinely exploratory/risky work gets a worktree" default,
@@ -5436,7 +5436,7 @@ existing consumer (`sample-reference-records`'s own automation summary,
 `cli.py`'s `analyze-org-risk` command gained `--skip-child-shape-check`
 (opt-out) and a new console output line per finding.
 
-**Live-verified against real ground truth, and the dogfooding actually
+**Live-verified against real ground truth, and the self-testing actually
 found a real calibration bug** (not just a synthetic test pass): the
 first live run of `analyze-org-risk GiftCommitment GiftCommitmentSchedule
 GiftTransaction --org target` against `NPC_TARGET_v2` did **not** flag
@@ -5470,7 +5470,7 @@ throughout.
 ## 80. Found live: `check-mapping-balance` mis-parses a CTE-based transform script (BUILT 2026-07-19)
 
 Discovered during the NPC fundraising/donor-management Snowfakery
-dogfood build, wrapping up for repo sharing: `check-mapping-balance`
+sample data build, wrapping up for repo sharing: `check-mapping-balance`
 against `GiftCommitment`'s own `360_snowfake_giftcommitment_load.sql`
 reported nonsensical output — `AccountSeq`/`CampaignSeq` (real CTE
 column aliases) and even a raw fragment of SQL punctuation

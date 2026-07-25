@@ -236,7 +236,7 @@ client project's scripts persist and are never erased without explicit
 approval, even to remove just one.
 
 One deliberate exception to "not this framework's shared template repo":
-scripts that are themselves this framework's own dogfooding/reference
+scripts that are themselves this framework's own self-testing/reference
 examples rather than a real client's real work -- the Snowfakery mock
 scripts (`010`-`040`), their Postgres-flavored siblings (`050`-`080`), and
 the NPSP-to-NPC migration proof-of-concept (`090`-`220`) all stay in this
@@ -471,7 +471,7 @@ than upsert/update's real external-id match). A polymorphic lookup field
 relationship engine correctly resolves an already-loaded parent's real
 target Id into a child's lookup field (e.g. `Contact_Load.AccountId`,
 already populated by Account's own earlier load) — confirmed live against
-this project's own dogfood data, not assumed from docs — via a specific,
+this project's own sample data, not assumed from docs — via a specific,
 non-obvious declaration `sfdmu_bridge.py` builds automatically: the parent
 object's query needs more than just `Id` (a bare-`Id` query makes SFDMU
 treat it as degenerate and exclude it, silently stripping the child's

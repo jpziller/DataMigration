@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 5 of
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 5 of
    11. Builds ContactPointAddress_Load from dbo.ContactPointAddress_Mock
    (35 standalone rows -- Account wasn't in the same
    generate-related-mock-data call, so ParentId is naturally skipped by
