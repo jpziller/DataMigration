@@ -51,6 +51,19 @@ for you, and it'll stick for future sessions too.
   `docs/SECURITY_OVERVIEW.md` — not just correctness and doc consistency.
   This repo is meant to be opened up to others; it stays clean continuously,
   not just before a visibility change.
+- **Gather the relevant OKF/validators knowledge before building, never
+  after a mistake.** `describe()` tells you an org's *structure*; the
+  `okf/` and `validators/` bundles hold its learned *behavior* —
+  auto-created records, platform validations, real join/cardinality
+  quirks, and (in `okf/synthetic-data-recipes/`) whether a vetted external
+  recipe already exists for a cloud. Before building a transform or a new
+  cloud's sample-data recipe, run `gather-okf --objects <Object> ...` (and
+  `check-validators <Object>`) and actually read the hits — this is
+  captured precisely so the next person (or the next pass) doesn't
+  rediscover it on a live org. Don't treat these as optional background;
+  the Standard Workflow's step 1 makes consulting them a required step, and
+  `orchestrator-assess` surfaces them too. Applies most sharply the first
+  time this repo touches an unfamiliar cloud.
 - **Make sure a Migration Run Book exists once a real migration project starts.**
   After the first `analyze-load-order` for a new project, check whether a
   Migration Run Book workbook exists yet and offer `generate-migration-run-book` if not — this
@@ -886,7 +899,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
 `/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
 `/reconcile-load-counts`, `/assess-migration-readiness`, `/bootstrap-project`,
-`/generate-discovery-checklist`
+`/generate-discovery-checklist`, `/gather-okf`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -1079,11 +1092,24 @@ the same parse-then-present pattern OKF's own reference consumer uses.
 ## Standard workflow: building a new load-table script
 When asked to build a script/transform for a new object, follow this order —
 don't jump straight to writing SQL:
-1. **Check the validators library first** — read `validators/<Object>.md`
-   if one exists for this object (a project-specific gotcha found the hard
-   way last time), and skim `validators/system/` if this is your first
-   pass through this project. Cheaper to learn a known issue from a doc
-   than to rediscover it on a live org.
+1. **Gather the knowledge that already exists — validators AND OKF — before
+   writing anything.** This step is not optional and not a skim-past: the
+   whole point of these bundles is that a known issue is learned from a doc,
+   not rediscovered on a live org after a failed load.
+   - **Validators**: read `validators/<Object>.md` if one exists (a
+     project-specific gotcha found the hard way last time), and skim
+     `validators/system/` on your first pass through this project.
+     `check-validators <Object>` retrieves both.
+   - **OKF**: run `gather-okf --objects <Object> [<Object> ...]` to surface
+     the target-platform behavior relevant to these objects — auto-created
+     records, platform validations, real join/cardinality quirks — that
+     `describe()` alone can't tell you, plus (via
+     `okf/synthetic-data-recipes/`) whether a vetted **external recipe**
+     already exists for this cloud before you author one from scratch. Read
+     the hits it returns; do not proceed past a relevant one unread. This is
+     the same knowledge the orchestrator gathers when it assesses a load —
+     surfaced up front here so you head off the issue instead of scoring it
+     after the fact.
 2. **Profile the source table first** (`profile-sql-table`) — auto-mapping
    and any real mapping-quality judgment depend on knowing how populated a
    field actually is, not just what it's named. Don't skip to mapping
@@ -1280,6 +1306,17 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   are excluded from the system-validator listing. Purely a lookup
   convenience; writing a new validator entry is always a deliberate
   manual edit, never automated.
+- `okf_lookup.py` — `gather-okf`'s read-only retrieval logic for the
+  `okf/` bundle (roadmap #83): surfaces the OKF docs relevant to a set of
+  objects (matched against each doc's frontmatter title/description/tags)
+  or a whole subject area, so target-platform behavior and external recipe
+  sources are consulted **before** building, not rediscovered after a
+  mistake — the OKF-side counterpart to `validators_lookup.py`. Reuses
+  that module's `parse_frontmatter()`/`_RESERVED` rather than duplicating
+  frontmatter handling. Called by CLAUDE.md's Standard Workflow step 1 and
+  by `orchestrator-assess` (which surfaces an object's relevant OKF as
+  part of its assessment). Purely a lookup convenience; writing a new OKF
+  entry is always a deliberate manual edit.
 - `orchestrator.py` — `orchestrator-assess`'s logic (roadmap #53, Phase 1
   only): `assess_tier()`, the deterministic Tier 1 (Continue Silently)
   through Tier 4 (Full Stop) assessment `docs/ORCHESTRATOR_DESIGN.md`'s
@@ -1441,9 +1478,14 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   content has no SQL table behind it at all) or `load_order.py` (strictly
   `describe()`-driven against a live org, no static-sequence input hook)
   — those tools do their real job correctly; this data just isn't their
-  input shape. No reader/CLI command for `okf/` itself yet, deliberately
-  — OKF's own design point is "no required tooling," and nothing has
-  needed one so far. Second subject area: `okf/nonprofit-cloud/` — split
+  input shape. `okf/` stayed reader-less for a while by design (OKF's own
+  point is "no required tooling"), but roadmap #83 added one deliberately
+  — `gather-okf` (`okf_lookup.py`) — not to *require* tooling, but because
+  a passively-present doc gets glossed over: the command actively surfaces
+  the OKF relevant to the objects in play, and CLAUDE.md's Standard
+  Workflow + `orchestrator-assess` both call it so the knowledge is
+  consulted before a mistake, not after. Second subject area:
+  `okf/nonprofit-cloud/` — split
   out of `okf/npsp-to-npc/` once that bundle's own platform-validation
   docs turned out to have zero NPSP-specific content. Deliberately
   source-agnostic: knowledge true of the Nonprofit Cloud/AFNP target

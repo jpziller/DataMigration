@@ -64,6 +64,7 @@ import load_table_prep as ltp
 import orchestrator as orch
 import script_numbering as sn
 import validators_lookup as vl
+import okf_lookup as okf
 import failure_triage as ft
 import adversarial_mock_data as amd
 import pass_summary as ps
@@ -261,6 +262,52 @@ def check_validators_cmd(object_name):
             click.echo(f"  Resource: {meta['resource']}")
         click.echo("")
     click.echo(body)
+
+
+@cli.command("gather-okf")
+@click.option("--objects", "objects", multiple=True,
+              help="Object or term to match against OKF titles/descriptions/tags (repeatable).")
+@click.option("--subject-area", "subject_area", default=None,
+              help="Restrict to one okf/<area>/ subject area (e.g. nonprofit-cloud, synthetic-data-recipes).")
+@click.option("--okf-dir", "okf_dir", default="okf", help="OKF bundle directory (default: okf).")
+def gather_okf_cmd(objects, subject_area, okf_dir):
+    """Surface the OKF knowledge relevant to the objects (or subject area)
+    in play -- run BEFORE building a transform/recipe so target-platform
+    behavior and external recipe sources are consulted up front, not
+    rediscovered after a mistake (Standard Workflow step 1; ROADMAP.md
+    #83). Read-only, no org connection needed."""
+    matches = okf.gather_okf(
+        objects=list(objects) or None, subject_area=subject_area, okf_dir=okf_dir)
+    if objects:
+        click.echo(f"OKF knowledge relevant to: {', '.join(objects)}\n")
+    elif subject_area:
+        click.echo(f"OKF subject area: {subject_area}\n")
+    else:
+        click.echo("Full OKF catalog (pass --objects or --subject-area to narrow):\n")
+    if not matches:
+        click.echo("No matching OKF docs. If you learn something durable while "
+                   "building, capture it in okf/<cloud>/ or validators/ -- don't "
+                   "let the next pass rediscover it.")
+        return
+    for m in matches:
+        meta = m["meta"]
+        title = meta.get("title") or os.path.basename(m["path"])
+        click.echo(f"- {title}")
+        click.echo(f"    path:    {m['path']}")
+        if meta.get("type"):
+            click.echo(f"    type:    {meta['type']}")
+        tags = meta.get("tags")
+        if isinstance(tags, list) and tags:
+            click.echo(f"    tags:    {', '.join(str(t) for t in tags)}")
+        elif tags:
+            click.echo(f"    tags:    {tags}")
+        if meta.get("resource"):
+            click.echo(f"    source:  {meta['resource']}")
+        if meta.get("description"):
+            click.echo(f"    summary: {' '.join(str(meta['description']).split())}")
+        click.echo("")
+    click.echo(f"{len(matches)} doc(s). Read the relevant ones before building -- "
+               "this is knowledge captured so you don't rediscover it after a mistake.")
 
 
 @cli.command("record-counts")
@@ -751,6 +798,21 @@ def orchestrator_assess_cmd(object_name, log_id, schema, environment):
         click.echo(f"  - {reason}")
     click.echo(f"Coarse-approval eligible: {result['coarse_approval_eligible']}"
                + ("" if result["coarse_approval_eligible"] else " (no prior history for this object -- Stage 1/shadow mode only)"))
+
+    # Gather any relevant OKF knowledge for this object (ROADMAP.md #83).
+    # The orchestrator's job isn't only to score a run -- it's to make sure
+    # the platform knowledge that would explain or prevent a failure is
+    # surfaced, not glossed over. Advisory only; never changes the tier.
+    okf_hits = okf.gather_okf(objects=[object_name])
+    if okf_hits:
+        click.echo("")
+        click.echo(f"Relevant OKF knowledge for {object_name} (read before the next load):")
+        for m in okf_hits:
+            title = m["meta"].get("title") or os.path.basename(m["path"])
+            click.echo(f"  - {title}  [{m['path']}]")
+        click.echo("  (run `gather-okf --objects "
+                   f"{object_name}` for the full summaries.)")
+
     logged = orch.log_run_event(engine, resolved_log_id, object_name, result, schema=schema, environment=environment)
     if not logged:
         click.echo(f"(Not logged -- run enable-orchestrator-logging --schema {schema} to keep a shadow-mode history.)")
