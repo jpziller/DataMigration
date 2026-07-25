@@ -491,7 +491,8 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             key_column="LoadId", id_column="Id", error_column="Error",
             ref_prefix="REF_", schema="dbo", stage_dir="_stage",
             email_deliverability=None, confirm_external_email_risk=False,
-            batch_size="auto", run_book_path=None, run_book_tab=None):
+            batch_size="auto", run_book_path=None, run_book_tab=None,
+            hard_delete=False):
     """See this module's docstring for the full design.
 
     fingerprint_columns (optional, must be a subset of the sent columns):
@@ -682,7 +683,21 @@ def bulk_op(sf, engine, object_name, operation, source_table,
             results = handler.upsert(csv_file=csv_path, external_id_field=external_id,
                                       batch_size=resolved_batch_size)
         else:  # delete
-            results = handler.delete(csv_file=csv_path, batch_size=resolved_batch_size)
+            # hard_delete uses Bulk API 2.0's hardDelete operation, which
+            # PERMANENTLY removes records, bypassing the Recycle Bin
+            # entirely. Needed for a full reset of object families whose
+            # platform validation counts even soft-deleted (Recycle Bin /
+            # queryAll-retained) children as still "associated" with a
+            # parent -- confirmed live on Nonprofit Cloud's GiftCommitment,
+            # whose delete is blocked by soft-deleted GiftTransactions that
+            # emptyRecycleBin() itself can't clear (Bulk-API-deleted records
+            # aren't in the user-scoped recycle bin). Requires the "Bulk API
+            # Hard Delete" user permission; the API surfaces a clear error
+            # if it's missing. See ROADMAP.md #84.
+            if hard_delete:
+                results = handler.hard_delete(csv_file=csv_path, batch_size=resolved_batch_size)
+            else:
+                results = handler.delete(csv_file=csv_path, batch_size=resolved_batch_size)
         job_count = len(results)
 
         # Collect per-job successful + failed records. _fetch_job_results()
@@ -861,7 +876,7 @@ def bulk_op(sf, engine, object_name, operation, source_table,
 
 def purge_by_filter(sf, engine, object_name, where, schema="dbo",
                     stage_dir="_stage", batch_size="auto", dry_run=False,
-                    run_book_path=None, run_book_tab=None):
+                    run_book_path=None, run_book_tab=None, hard_delete=False):
     """Bulk test-data cleanup by SOQL filter (ROADMAP #32): resolve every
     Id matching `where` via SOQL, materialize them into
     [schema].[<Object>_Purge], and delegate to the normal bulk_op() delete
@@ -878,10 +893,16 @@ def purge_by_filter(sf, engine, object_name, where, schema="dbo",
     no SQL table, no API call. Run that first; this is a destructive
     command.
 
-    v1 non-goal: no hard-delete (Bulk API hard delete needs its own org
-    permission and skips the Recycle Bin). A standard delete is
-    recoverable from the Recycle Bin, which is the right default for a
-    cleanup command.
+    Standard delete (the default) is recoverable from the Recycle Bin,
+    the right default for routine cleanup. `hard_delete=True` uses Bulk
+    API 2.0's hardDelete to PERMANENTLY remove the matched records,
+    bypassing the Recycle Bin -- needed for a full reset of object
+    families whose platform validation counts soft-deleted children as
+    still blocking a parent delete (confirmed live on Nonprofit Cloud
+    GiftCommitment/GiftTransaction, ROADMAP.md #84). Requires the "Bulk
+    API Hard Delete" user permission; the API surfaces a clear error if
+    it's missing. Irreversible -- the caller (the CLI) is responsible for
+    the Hard-Rule-2 confirmation, same as any delete.
     """
     if not where or not str(where).strip():
         raise ValueError(
@@ -910,9 +931,12 @@ def purge_by_filter(sf, engine, object_name, where, schema="dbo",
 
     summary = bulk_op(sf, engine, object_name, "delete", purge_table,
                       schema=schema, stage_dir=stage_dir, batch_size=batch_size,
-                      run_book_path=run_book_path, run_book_tab=run_book_tab)
+                      run_book_path=run_book_path, run_book_tab=run_book_tab,
+                      hard_delete=hard_delete)
     summary["where"] = where
     summary["matched"] = len(ids)
+    if hard_delete:
+        summary["hard_delete"] = True
     return summary
 
 

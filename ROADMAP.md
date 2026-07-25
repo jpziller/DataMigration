@@ -5639,6 +5639,52 @@ orchestrator needs to be to gather any relevant OKF."
 **Deliberately not done (yet)**: a *structured, machine-readable*
 data-shape profile per object (the "auto-created children / real
 cardinality / defaulted-in-practice" facts as data a tool can score
-against, not prose) — that's the larger #84-class idea this sets up. This
-entry does the retrieval/surfacing half; the prose docs remain the source
-of truth for now, gathered actively instead of passively.
+against, not prose) — the larger structured-data-shape-profile idea this
+sets up. This entry does the retrieval/surfacing half; the prose docs
+remain the source of truth for now, gathered actively instead of passively.
+
+## 84. `bulkops delete --hard-delete` for a clean reset (BUILT 2026-07-25; live re-run pending an async platform purge)
+
+Found while live-testing the sample-data reset+reload cycle (the polish
+goal — "functions clean for anyone cloning"): the reverse-dependency reset
+**can't cleanly delete `GiftCommitment`** because the framework only ever
+soft-deletes (by deliberate design), and Nonprofit Cloud's platform
+validation counts even *soft*-deleted child `GiftTransaction`s as still
+"associated" — `DELETE_FAILED: ...associated with the following gift
+transactions`. Confirmed live, and worse: once soft-deleted via the Bulk
+API, those children can't be cleared on demand — `emptyRecycleBin()` →
+`INVALID_ID_FIELD: no recycle bin entry found`, `undelete()` →
+`UNDELETE_FAILED: Entity is not in the recycle bin` (Bulk-API-deleted
+records don't sit in the user-scoped recycle bin; once it's emptied they
+enter an async physical-purge limbo that's still `queryAll`-visible and
+still blocking, and **can't be forced** — only Salesforce's background
+purge clears them).
+
+**Fix built**: a `--hard-delete` flag on `bulkops <Object> delete`
+(purge-by-`--where` and delete-by-table both), threading a `hard_delete`
+param through `purge_by_filter()` → `bulk_op()`, which routes to
+simple-salesforce's `SFBulk2Type.hard_delete` (Bulk API 2.0 `hardDelete`)
+instead of `delete`. Removes records permanently, bypassing the Recycle
+Bin, so no residue is ever left to block a parent. CLI prints a clear
+"PERMANENT delete" warning; requires the load user's **"Bulk API Hard
+Delete"** permission (the API errors clearly otherwise); irreversible, so
+the Hard-Rule-2 confirmation applies in full. `--hard-delete` is delete-only
+and not supported under `--engine sfdmu`. Tests: routes-to-hard-delete,
+default-does-not, and `purge_by_filter` pass-through (`tests/
+test_bulkops_sqlite_integration.py`), plus a `hard_delete` method on the
+bulk-handler stub. Reset doc + `sample_data/README.md` updated to use
+`--hard-delete` for the fundraising family.
+
+**Deliberate scope note**: this is a scoped, opt-in departure from the
+framework's standing "no hard-delete" default (`purge_by_filter`'s old v1
+non-goal) — justified because a *reset/purge* of test data has no reason
+to keep records recoverable, and soft-delete demonstrably can't reset this
+object graph. Standard soft-delete stays the default everywhere.
+
+**Live status**: unit-validated; the full live re-run against
+`NPC_TARGET_v2` is blocked only by this org's *pre-existing* limbo records
+(62 transactions soft-deleted in earlier passes, now past API recovery,
+blocking 10 commitments until the async purge clears). A fresh clone using
+`--hard-delete` from the start never creates that residue, so the clone
+experience is fixed; this one org just has to wait out its legacy state
+before its own reset can finish.

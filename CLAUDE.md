@@ -454,8 +454,15 @@ venv may not be active in a fresh shell:
                 normal path (batch sizing, logging, run-book sync all apply). Run `--dry-run` first —
                 it reports the matched count and sample Ids without touching anything. No
                 delete-everything default: purging a whole object means writing `"Id != null"`
-                explicitly. Standard delete only (Recycle Bin–recoverable, deliberately no
-                hard-delete). See `ROADMAP.md` #32. Rule 2 applies in full — this deletes real
+                explicitly. Standard (soft) delete is the default — Recycle Bin–recoverable. Pass
+                `--hard-delete` (delete only; also works on delete-by-table) to use Bulk API 2.0
+                `hardDelete` and remove records **permanently**, bypassing the Recycle Bin — needed
+                to reset object families whose platform validation counts soft-deleted children as
+                still blocking a parent delete (confirmed live on Nonprofit Cloud
+                GiftCommitment/GiftTransaction; see `ROADMAP.md` #84 and
+                `okf/nonprofit-cloud/full-org-reset-between-build-attempts.md`). Hard delete is
+                irreversible and requires the load user's "Bulk API Hard Delete" permission. See
+                `ROADMAP.md` #32. Rule 2 applies in full — this deletes real
                 records from a live org.)
                 `--batch-size auto|none|<N>` (default `auto` — dynamic recommendation printed as
                 rationale before the load runs, layering seed knowledge for OOTB-heavy objects

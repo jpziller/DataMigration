@@ -169,6 +169,13 @@ class StubBulkHandler:
     def delete(self, csv_file=None, batch_size=None):
         return self._submit(csv_file)
 
+    def hard_delete(self, csv_file=None, batch_size=None):
+        # Real SFBulk2Type exposes hard_delete alongside delete; bulk_op()
+        # routes to it when hard_delete=True. Records the call so a test
+        # can assert the hardDelete path was taken.
+        self.hard_delete_called = True
+        return self._submit(csv_file)
+
     def _submit(self, csv_path):
         if self._results_by_job is not None:
             raise RuntimeError(

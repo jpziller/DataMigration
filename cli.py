@@ -449,6 +449,7 @@ def disable_source_ingestion_logging_cmd(schema):
 @click.argument("source_table", required=False, default=None)
 @click.option("--where", default=None, help="Purge mode (delete only, no source table): SOQL WHERE clause selecting the records to delete, e.g. \"AccountNumber LIKE 'MOCKACCT-%'\". Matching Ids are resolved via SOQL into <Object>_Purge, then deleted through the normal path. No delete-everything default -- purging a whole object means writing \"Id != null\" explicitly.")
 @click.option("--dry-run", is_flag=True, help="With --where: report the matched count and sample Ids without touching SQL Server or Salesforce.")
+@click.option("--hard-delete", "hard_delete", is_flag=True, help="Delete only: use Bulk API 2.0 hardDelete to PERMANENTLY remove records, bypassing the Recycle Bin. Needed to reset object families whose platform validation counts soft-deleted children as still blocking a parent delete (e.g. Nonprofit Cloud GiftCommitment/GiftTransaction). Irreversible; requires the 'Bulk API Hard Delete' user permission.")
 @click.option("--external-id", default=None, help="External id field (upsert; also delete -- resolved to real Ids via a query first, since Bulk API 2.0's delete only ever accepts Id).")
 @click.option("--key-column", default="LoadId", help="Local unique key for in-place writeback.")
 @click.option("--fingerprint-columns", default=None, help="Comma-separated subset of the sent columns to match results on, instead of every sent column. Use this when a sent column can come back from Salesforce reformatted (e.g. a datetime echoed as '...+00:00' -> '...000Z') -- the default fingerprint (every sent column) would then fail to match that row at all. The migration key column alone (e.g. MigrationID__c) is normally the safest choice.")
@@ -472,7 +473,7 @@ def disable_source_ingestion_logging_cmd(schema):
                    "--external-id, and skips any polymorphic lookup field (e.g. Task.WhatId), same "
                    "restrictions --where/purge mode has. Id/Error still land in the same SQL Load "
                    "table either way; see sfdmu_bridge.py's module docstring for the full design.")
-def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_id,
+def bulkops_cmd(object_name, operation, source_table, where, dry_run, hard_delete, external_id,
                 key_column, fingerprint_columns, ref_prefix, schema, email_deliverability, confirm_external_email_risk,
                 batch_size, run_book_path, run_book_tab, engine):
     fingerprint_columns = [c.strip() for c in fingerprint_columns.split(",")] if fingerprint_columns else None
@@ -480,6 +481,10 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
         raise click.BadParameter("--run-book and --run-book-tab must be given together.")
     if where and operation != "delete":
         raise click.UsageError("--where is purge mode and only valid with the delete operation.")
+    if hard_delete and operation != "delete":
+        raise click.UsageError("--hard-delete is only valid with the delete operation.")
+    if hard_delete and engine == "sfdmu":
+        raise click.UsageError("--hard-delete isn't supported by --engine sfdmu -- use the default python engine.")
     if where and source_table:
         raise click.UsageError("--where and a source table are mutually exclusive -- "
                                "purge mode builds its own <Object>_Purge table from the filter.")
@@ -495,13 +500,16 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
         if not external_id:
             raise click.UsageError("--engine sfdmu requires --external-id.")
     s, sf, engine_conn = _ctx()
+    if hard_delete and not dry_run:
+        click.echo("[hard-delete] PERMANENT delete (bypasses the Recycle Bin) -- records cannot be recovered.")
 
     if where:
         summary = bo.purge_by_filter(sf, engine_conn, object_name, where,
                                      schema=schema, stage_dir=s.stage_dir,
                                      batch_size=batch_size, dry_run=dry_run,
                                      run_book_path=run_book_path,
-                                     run_book_tab=run_book_tab)
+                                     run_book_tab=run_book_tab,
+                                     hard_delete=hard_delete)
     elif engine == "sfdmu":
         summary = sfdmu.run_sfdmu_upsert(sf, engine_conn, object_name, operation, source_table,
                                          external_id, s.sf_org_alias, key_column=key_column,
@@ -518,7 +526,7 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, external_i
                              email_deliverability=email_deliverability,
                              confirm_external_email_risk=confirm_external_email_risk,
                              batch_size=batch_size, run_book_path=run_book_path,
-                             run_book_tab=run_book_tab)
+                             run_book_tab=run_book_tab, hard_delete=hard_delete)
     warnings = summary.pop("preflight_warnings", [])
     rationale = summary.pop("batch_size_rationale", [])
     if rationale:
