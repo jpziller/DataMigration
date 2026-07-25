@@ -54,6 +54,28 @@ For every object except `AccountContactRelation`, this is a plain
 `bulkops <Object> delete --where "MigrationID__c != null"` — `--dry-run`
 first, confirm the matched count looks right, then the real delete.
 
+**Use `--hard-delete` for this whole family (added ROADMAP #84, found
+live 2026-07-25).** A plain (standard) delete only soft-deletes —
+recoverable from the Recycle Bin — and that residue **blocks the reset**:
+`GiftCommitment` deletion fails with `DELETE_FAILED: ...associated with
+the following gift transactions` when its child `GiftTransaction`s are
+merely *soft*-deleted, because the platform's association validation
+counts Recycle-Bin / `queryAll`-retained children. Worse, once
+soft-deleted via the Bulk API those children can't be cleared on demand:
+`emptyRecycleBin()` returns `INVALID_ID_FIELD: no recycle bin entry
+found` and `undelete()` returns `UNDELETE_FAILED: Entity is not in the
+recycle bin` (Bulk-API-deleted records don't sit in the user-scoped
+recycle bin, and once it's emptied they enter an async physical-purge
+limbo that is still `queryAll`-visible, still blocking, and **cannot be
+forced** — you must wait for Salesforce's background purge). Avoid the
+whole trap by hard-deleting from the start:
+`bulkops <Object> delete --where "MigrationID__c != null" --hard-delete`,
+which uses Bulk API 2.0 `hardDelete` to remove records permanently,
+bypassing the Recycle Bin, so no residue is ever left to block a parent.
+**Prerequisite:** the load user needs the **"Bulk API Hard Delete"**
+system permission enabled, or the API rejects the call. Hard delete is
+irreversible — the Live-Org Write Confirmation Rule (#2) applies in full.
+
 # Two real platform quirks found live while doing this
 
 ## `GiftDesignation` can't be deleted while `IsActive = true`

@@ -124,6 +124,64 @@ def test_build_retry_table_captures_only_failed_rows(sqlite_engine, tmp_path):
     assert list(retry_df["LegacyId__c"]) == ["A2"]
 
 
+def test_hard_delete_routes_to_hard_delete_handler(sqlite_engine, tmp_path):
+    """bulk_op(..., hard_delete=True) must call the handler's hard_delete
+    (Bulk API 2.0 hardDelete), not delete -- the reset-fix for object
+    families whose platform validation counts soft-deleted children as
+    still blocking a parent delete (ROADMAP #84)."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({"LoadId": [1], "Id": ["001XXXXXXXXXXXAAA"], "Error": [None]})
+    df.to_sql("Account_Purge", engine, schema="dbo", if_exists="replace", index=False)
+
+    handler = StubBulkHandler("sf__Id\n001XXXXXXXXXXXAAA\n", "")
+    sf = _stub_sf(handler)
+    bo.bulk_op(
+        sf, engine, "Account", "delete", "Account_Purge",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+        hard_delete=True,
+    )
+    assert getattr(handler, "hard_delete_called", False) is True
+
+
+def test_standard_delete_does_not_hard_delete(sqlite_engine, tmp_path):
+    """Default (hard_delete=False) must NOT take the hardDelete path --
+    standard, Recycle-Bin-recoverable delete stays the default."""
+    engine, _ = sqlite_engine
+    df = pd.DataFrame({"LoadId": [1], "Id": ["001XXXXXXXXXXXAAA"], "Error": [None]})
+    df.to_sql("Account_Purge", engine, schema="dbo", if_exists="replace", index=False)
+
+    handler = StubBulkHandler("sf__Id\n001XXXXXXXXXXXAAA\n", "")
+    sf = _stub_sf(handler)
+    bo.bulk_op(
+        sf, engine, "Account", "delete", "Account_Purge",
+        key_column="LoadId", schema="dbo", stage_dir=str(tmp_path / "_stage"),
+    )
+    assert getattr(handler, "hard_delete_called", False) is False
+
+
+def test_purge_by_filter_threads_hard_delete(sqlite_engine, tmp_path, monkeypatch):
+    """purge_by_filter(hard_delete=True) must pass it through to bulk_op so
+    the CLI --hard-delete flag reaches the hardDelete path."""
+    engine, _ = sqlite_engine
+    captured = {}
+
+    def fake_bulk_op(*args, **kwargs):
+        captured["hard_delete"] = kwargs.get("hard_delete")
+        return {"submitted": 1, "succeeded": 1, "failed": 0}
+
+    monkeypatch.setattr(bo, "bulk_op", fake_bulk_op)
+
+    class _Q:
+        def query_all_iter(self, soql):
+            return [{"Id": "001XXXXXXXXXXXAAA"}]
+
+    summary = bo.purge_by_filter(_Q(), engine, "Account", "Id != null",
+                                 schema="dbo", stage_dir=str(tmp_path / "_stage"),
+                                 hard_delete=True)
+    assert captured["hard_delete"] is True
+    assert summary["hard_delete"] is True
+
+
 def test_two_schema_logging_isolation(sqlite_engine, tmp_path):
     engine, _ = sqlite_engine
     bo.enable_bulkops_logging(engine, schema="dbo")

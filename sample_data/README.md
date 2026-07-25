@@ -143,6 +143,14 @@ reverse-dependency sequence in
 `okf/nonprofit-cloud/full-org-reset-between-build-attempts.md`. Every delete
 there is a real live-org write — confirm the target org first (Hard Rule 2).
 
+**Use `--hard-delete` for the fundraising family.** A standard delete only
+soft-deletes, and the Recycle-Bin residue blocks the reset (a
+`GiftCommitment` won't delete while its `GiftTransaction`s are merely
+soft-deleted, and those can't be cleared on demand afterward). Delete with
+`bulkops <Object> delete --where "MigrationID__c != null" --hard-delete` so
+records are removed permanently — the load user needs the **"Bulk API Hard
+Delete"** permission enabled. See the reset doc for the full finding.
+
 ## Notes on the reference implementation
 
 The transform scripts, mapping workbook (`mapping/npc_fundraising_sample_mapping.xlsx`),
