@@ -5554,3 +5554,45 @@ riskier — could silently truncate real data). `--raw` is a safe,
 available workaround for any object that hits this in the meantime; a
 real fix should confirm against `describe()`'s own `precision`/`scale`
 fields for the affected field type before choosing either direction.
+
+## 82. Committed, shareable NPC fundraising sample dataset (`sample_data/`) — BUILT 2026-07-25
+
+The NPC fundraising reference implementation (`sql/transformations/230-430`,
+roadmap #77/#79 and `okf/nonprofit-cloud/fundraising-sample-reference-implementation.md`)
+consumes synthetic Snowfakery mock data — but that recipe lived **only in
+gitignored `_stage/`**, as ~10 ad-hoc fragment files generated across
+sessions. A fresh clone therefore had **no recipe at all** and couldn't
+reproduce the dataset — defeating the whole point of a shareable reference
+implementation people are meant to load into a test org.
+
+**Built**: `sample_data/`, a committed, curated bundle:
+- `sample_data/recipes/01-10_*.recipe.yml` — the 10 Snowfakery recipes
+  (one per build group that generates data), numbered to match the
+  `230-430` build order, each with a header comment naming what it
+  generates and which transform(s) it feeds. Verified all 10 run
+  standalone via `snowfakery run` (no live org needed for generation).
+  Fully synthetic — no real client data.
+- `sample_data/README.md` — the ordered "generate the mock data + load a
+  fresh test org" runbook: the two generation paths (framework
+  `generate-related-mock-data`, which regenerates from live `describe()`
+  and never drifts from the org schema, vs. standalone `snowfakery run`
+  on the committed recipes), the full 11-group load sequence with its
+  mid-stream `replicate` steps, expected counts, and a pointer to the
+  reset doc.
+
+**Naming**: built as part of the same effort that standardized the
+sample-data naming repo-wide (the dataset is consistently "sample data"
+throughout). The recipes are the data-generation companion to
+`fundraising-sample-reference-implementation.md`'s transform-side artifacts.
+
+**Deliberately not done**: the recipes are captured snapshots, not
+seed-pinned — Snowfakery/Faker output varies run-to-run (same shape and
+counts, fresh values), documented as expected in the README. Making the
+dataset bit-for-bit reproducible would mean committing generated seed data
+(CSV) too; not needed for a test-org sample, where "same shape" is the
+requirement, not "identical values." Also deliberately kept the existing
+`Account_Mock`-overloading design (household and organization cohorts use
+the one table sequentially, with transforms run in between) rather than
+refactoring `230`/`280` to separate mock tables — the runbook documents
+the correct interleaved order, and reworking committed reference
+transforms for cosmetic cleanliness wasn't worth the churn.

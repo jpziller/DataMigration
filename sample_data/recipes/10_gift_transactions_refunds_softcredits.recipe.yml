@@ -1,0 +1,204 @@
+# =====================================================================
+# NPC fundraising sample dataset -- recipe 10 of 10
+# GiftTransaction (40), each with 0-1 nested GiftRefund and 0-1 nested GiftSoftCredit. The transforms filter refunds/soft credits to only the ones that satisfy the platform's real constraints, so fewer land than are generated (realistic -- most gifts aren't refunded).
+# Feeds transform script(s): 390 (GiftTransaction) + 400 (GiftRefund) + 410 (GiftSoftCredit)
+#
+# Part of sample_data/ -- see sample_data/README.md for the full,
+# ordered generate + load sequence. Fully synthetic data (no real
+# client data). Runs standalone with `snowfakery run <this file>`, or
+# is regenerated from the target org's describe() via the
+# generate-related-mock-data command shown in the README.
+# =====================================================================
+- snowfakery_version: 3
+- object: GiftTransaction
+  count: 40
+  fields:
+    Name:
+      fake: Company
+    Description:
+      fake: Paragraph
+    DonorCoverAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TransactionDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    Status:
+      random_choice:
+      - Unpaid
+      - Paid
+      - Failed
+      - Fully Refunded
+      - Written-Off
+      - Canceled
+      - Pending
+    PaymentMethod:
+      random_choice:
+      - Unknown
+      - Check
+      - Credit Card
+      - ACH
+      - Cash
+      - In-Kind
+      - Stock
+      - Asset
+      - Cryptocurrency
+      - PayPal
+      - Venmo
+    AcknowledgementStatus:
+      random_choice:
+      - To Be Sent
+      - Sent
+      - Don't Send
+    OriginalAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    PaymentIdentifier:
+      fake: Word
+    CheckDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    AcknowledgementDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    GiftType:
+      random_choice:
+      - Individual
+      - Organizational
+    TransactionDueDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    GatewayTransactionFee:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    ProcessorTransactionFee:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    ProcessorReference:
+      fake: Word
+    GatewayReference:
+      fake: Word
+    LastGatewayResponseCode:
+      fake: Word
+    LastGatewayErrorMessage:
+      fake: Word
+    LastGatewayProcessedDate:
+      fake.DateTimeBetween:
+        start_date: -3y
+        end_date: +1y
+    NonTaxDeductibleAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TaxReceiptStatus:
+      random_choice:
+      - To Be Sent
+      - Sent
+      - Don't Send
+    GenerationalCohort:
+      random_choice:
+      - Silent Generation (1928-1945)
+      - Baby Boomers (1946-1964)
+      - Generation X (1965-1980)
+      - Millennials (1981-1996)
+      - Generation Z (1997-2012)
+      - Generation Alpha (2013-2025)
+    Gift_Entry_Date__c:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    MigrationID__c:
+      fake: Word
+    _children_GiftRefund:
+    - object: GiftRefund
+      count: ${{random_number(min=0,max=1)}}
+      fields:
+        Date:
+          fake.DateBetween:
+            start_date: -3y
+            end_date: +1y
+        Amount:
+          fake.Pyfloat:
+            left_digits: 5
+            right_digits: 2
+            positive: true
+        Reason:
+          random_choice:
+          - Incorrect Amount
+          - Donor Request
+        Status:
+          random_choice:
+          - Initiated
+          - Completed
+          - Failed
+        GatewayTransactionFee:
+          fake.Pyfloat:
+            left_digits: 5
+            right_digits: 2
+            positive: true
+        ProcessorTransactionFee:
+          fake.Pyfloat:
+            left_digits: 5
+            right_digits: 2
+            positive: true
+        LastGatewayResponseCode:
+          fake: Word
+        LastGatewayErrorMessage:
+          fake: Word
+        LastGatewayProcessedDate:
+          fake.DateTimeBetween:
+            start_date: -3y
+            end_date: +1y
+        MigrationID__c:
+          fake: Word
+        _ParentMockRef:
+          reference: GiftTransaction
+    _children_GiftSoftCredit:
+    - object: GiftSoftCredit
+      count: ${{random_number(min=0,max=1)}}
+      fields:
+        Role:
+          random_choice:
+          - Household Member
+          - Influencer
+          - Solicitor
+          - Matched Donor
+          - Soft Credit
+          - Honoree
+          - Third Party Donor
+          - Other
+        PartialAmount:
+          fake.Pyfloat:
+            left_digits: 5
+            right_digits: 2
+            positive: true
+        PartialPercent:
+          fake.Pyfloat:
+            left_digits: 1
+            right_digits: 2
+            positive: true
+        GenerationalCohort:
+          random_choice:
+          - Silent Generation (1928-1945)
+          - Baby Boomers (1946-1964)
+          - Generation X (1965-1980)
+          - Millennials (1981-1996)
+          - Generation Z (1997-2012)
+          - Generation Alpha (2013-2025)
+        MigrationID__c:
+          fake: Word
+        _ParentMockRef:
+          reference: GiftTransaction

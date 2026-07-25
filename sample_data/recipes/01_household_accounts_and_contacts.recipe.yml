@@ -1,0 +1,430 @@
+# =====================================================================
+# NPC fundraising sample dataset -- recipe 01 of 10
+# Household Accounts (8), each with 1-3 nested Contacts.
+# Feeds transform script(s): 230 (HouseholdAccount) + 240 (Contact)
+#
+# Part of sample_data/ -- see sample_data/README.md for the full,
+# ordered generate + load sequence. Fully synthetic data (no real
+# client data). Runs standalone with `snowfakery run <this file>`, or
+# is regenerated from the target org's describe() via the
+# generate-related-mock-data command shown in the README.
+# =====================================================================
+- snowfakery_version: 3
+- object: Account
+  count: 8
+  fields:
+    Name:
+      fake: Company
+    LastName:
+      fake: LastName
+    FirstName:
+      fake: FirstName
+    Salutation:
+      random_choice:
+      - Mr.
+      - Ms.
+      - Mrs.
+      - Dr.
+      - Prof.
+      - Mx.
+    Type:
+      random_choice:
+      - Analyst
+      - Competitor
+      - Customer
+      - Integrator
+      - Investor
+      - Partner
+      - Press
+      - Prospect
+      - Reseller
+      - Other
+    BillingStreet:
+      fake: StreetAddress
+    BillingCity:
+      fake: City
+    BillingState:
+      fake: StateAbbr
+    BillingPostalCode:
+      fake: Postcode
+    BillingCountry:
+      fake: CountryCode
+    BillingGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    ShippingStreet:
+      fake: StreetAddress
+    ShippingCity:
+      fake: City
+    ShippingState:
+      fake: StateAbbr
+    ShippingPostalCode:
+      fake: Postcode
+    ShippingCountry:
+      fake: CountryCode
+    ShippingGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    Phone:
+      fake: PhoneNumber
+    Fax:
+      fake: PhoneNumber
+    AccountNumber:
+      fake: Word
+    Website:
+      fake: Url
+    Sic:
+      fake: Word
+    Industry:
+      random_choice:
+      - Agriculture
+      - Apparel
+      - Banking
+      - Biotechnology
+      - Chemicals
+      - Communications
+      - Construction
+      - Consulting
+      - Education
+      - Electronics
+      - Energy
+      - Engineering
+      - Entertainment
+      - Environmental
+      - Finance
+      - Food & Beverage
+      - Government
+      - Healthcare
+      - Hospitality
+      - Insurance
+      - Machinery
+      - Manufacturing
+      - Media
+      - Not For Profit
+      - Other
+      - Recreation
+      - Retail
+      - Shipping
+      - Technology
+      - Telecommunications
+      - Transportation
+      - Utilities
+    AnnualRevenue:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    NumberOfEmployees:
+      fake.RandomInt:
+        min: 0
+        max: 1000
+    Ownership:
+      random_choice:
+      - Public
+      - Private
+      - Subsidiary
+      - Other
+    TickerSymbol:
+      fake: Word
+    Description:
+      fake: Paragraph
+    Rating:
+      random_choice:
+      - Hot
+      - Warm
+      - Cold
+    Site:
+      fake: Word
+    SourceSystemIdentifier:
+      fake: Word
+    PersonMailingStreet:
+      fake: StreetAddress
+    PersonMailingCity:
+      fake: City
+    PersonMailingState:
+      fake: StateAbbr
+    PersonMailingPostalCode:
+      fake: Postcode
+    PersonMailingCountry:
+      fake: CountryCode
+    PersonMailingGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    PersonOtherStreet:
+      fake: StreetAddress
+    PersonOtherCity:
+      fake: City
+    PersonOtherState:
+      fake: StateAbbr
+    PersonOtherPostalCode:
+      fake: Postcode
+    PersonOtherCountry:
+      fake: CountryCode
+    PersonOtherGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    PersonMobilePhone:
+      fake: PhoneNumber
+    PersonHomePhone:
+      fake: PhoneNumber
+    PersonOtherPhone:
+      fake: PhoneNumber
+    PersonAssistantPhone:
+      fake: PhoneNumber
+    PersonEmail:
+      fake: Email
+    PersonTitle:
+      fake: Word
+    PersonDepartment:
+      fake: Word
+    PersonAssistantName:
+      fake: Company
+    PersonLeadSource:
+      random_choice:
+      - Advertisement
+      - Employee Referral
+      - External Referral
+      - Partner
+      - Public Relations
+      - Seminar - Internal
+      - Seminar - Partner
+      - Trade Show
+      - Web
+      - Word of mouth
+      - Other
+    PersonBirthdate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    PersonEmailBouncedReason:
+      fake: Email
+    PersonEmailBouncedDate:
+      fake.DateTimeBetween:
+        start_date: -3y
+        end_date: +1y
+    PersonMaritalStatus:
+      random_choice:
+      - Married
+      - Single
+      - Divorced
+      - Widowed
+      - Separated
+    PersonGenderIdentity:
+      random_choice:
+      - Male
+      - Female
+      - Nonbinary
+      - Not Listed
+    AccountSource:
+      random_choice:
+      - Advertisement
+      - Employee Referral
+      - External Referral
+      - Partner
+      - Public Relations
+      - Seminar - Internal
+      - Seminar - Partner
+      - Trade Show
+      - Web
+      - Word of mouth
+      - Other
+    SicDesc:
+      fake: Word
+    Preferred_Contact_Method__c:
+      random_choice:
+      - Email
+      - None
+      - Phone
+    MigrationID__c:
+      fake: Word
+    MigrationID__pc:
+      fake: Word
+    _children_Contact:
+    - object: Contact
+      count: ${{random_number(min=1,max=3)}}
+      fields:
+        LastName:
+          fake: LastName
+        FirstName:
+          fake: FirstName
+        Salutation:
+          random_choice:
+          - Mr.
+          - Ms.
+          - Mrs.
+          - Dr.
+          - Prof.
+          - Mx.
+        OtherStreet:
+          fake: StreetAddress
+        OtherCity:
+          fake: City
+        OtherState:
+          fake: StateAbbr
+        OtherPostalCode:
+          fake: Postcode
+        OtherCountry:
+          fake: CountryCode
+        OtherGeocodeAccuracy:
+          random_choice:
+          - Address
+          - NearAddress
+          - Block
+          - Street
+          - ExtendedZip
+          - Zip
+          - Neighborhood
+          - City
+          - County
+          - State
+          - Unknown
+        MailingStreet:
+          fake: StreetAddress
+        MailingCity:
+          fake: City
+        MailingState:
+          fake: StateAbbr
+        MailingPostalCode:
+          fake: Postcode
+        MailingCountry:
+          fake: CountryCode
+        MailingGeocodeAccuracy:
+          random_choice:
+          - Address
+          - NearAddress
+          - Block
+          - Street
+          - ExtendedZip
+          - Zip
+          - Neighborhood
+          - City
+          - County
+          - State
+          - Unknown
+        Phone:
+          fake: PhoneNumber
+        Fax:
+          fake: PhoneNumber
+        MobilePhone:
+          fake: PhoneNumber
+        HomePhone:
+          fake: PhoneNumber
+        OtherPhone:
+          fake: PhoneNumber
+        AssistantPhone:
+          fake: PhoneNumber
+        Email:
+          fake: Email
+        Title:
+          fake: Word
+        Department:
+          fake: Word
+        AssistantName:
+          fake: Company
+        LeadSource:
+          random_choice:
+          - Advertisement
+          - Employee Referral
+          - External Referral
+          - Partner
+          - Public Relations
+          - Seminar - Internal
+          - Seminar - Partner
+          - Trade Show
+          - Web
+          - Word of mouth
+          - Other
+        Birthdate:
+          fake.DateBetween:
+            start_date: -3y
+            end_date: +1y
+        Description:
+          fake: Paragraph
+        EmailBouncedReason:
+          fake: Email
+        EmailBouncedDate:
+          fake.DateTimeBetween:
+            start_date: -3y
+            end_date: +1y
+        MaritalStatus:
+          random_choice:
+          - Married
+          - Single
+          - Divorced
+          - Widowed
+          - Separated
+        GenderIdentity:
+          random_choice:
+          - Male
+          - Female
+          - Nonbinary
+          - Not Listed
+        ContactSource:
+          random_choice:
+          - Auto Create
+          - Email Message
+          - Meeting Digest
+          - Seller Home
+        TitleType:
+          random_choice:
+          - ceo
+          - executive
+          - vp
+          - directorOrManager
+          - individualContributor
+        DepartmentGroup:
+          random_choice:
+          - chiefExecutive
+          - sales
+          - finance
+          - tech
+          - support
+          - legal
+          - humanResources
+          - customerSuccess
+          - marketing
+          - other
+        MigrationID__c:
+          fake: Word
+        _ParentMockRef:
+          reference: Account

@@ -1,0 +1,133 @@
+# =====================================================================
+# NPC fundraising sample dataset -- recipe 09 of 10
+# GiftCommitment (15) -- a mix of Recurring and Custom schedule types.
+# Feeds transform script(s): 360 (GiftCommitment); 370 handles schedules
+#
+# Part of sample_data/ -- see sample_data/README.md for the full,
+# ordered generate + load sequence. Fully synthetic data (no real
+# client data). Runs standalone with `snowfakery run <this file>`, or
+# is regenerated from the target org's describe() via the
+# generate-related-mock-data command shown in the README.
+# =====================================================================
+- snowfakery_version: 3
+- object: GiftCommitment
+  count: 15
+  fields:
+    Name:
+      fake: Company
+    IsAssetTransferExpected:
+      fake: Boolean
+    Description:
+      fake: Paragraph
+    ExpectedTotalCmtAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    EffectiveStartDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    Status:
+      random_choice:
+      - Active
+      - Closed
+      - Lapsed
+      - Failing
+      - Paused
+      - Draft
+    FulfillmentType:
+      random_choice:
+      - Unconditional
+      - Conditional
+    FormalCommitmentType:
+      random_choice:
+      - Verbal
+      - Written
+    GiftVehicleType:
+      random_choice:
+      - Immediate Gift Annuity
+      - Flexible Gift Annuity
+      - Deferred Gift Annuity
+      - Charitable Lead Trust
+      - Charitable Remainder Trust
+      - Other
+    NextTransactionAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    NextTransactionDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    ExpectedAssetTransferDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    ScheduleType:
+      random_choice:
+      - Recurring
+      - Custom
+    ExpectedEndDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    GiftVehicle:
+      random_choice:
+      - Charitable Gift Annuity
+      - Trust
+      - Pooled Income Fund
+      - Donor Advised Fund
+      - Life Insurance
+      - Bequest
+      - Other
+    TotalAssetPresentValue:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TotExpcAssetTransferVal:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TotExpcAssetMaturityVal:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    ExpectedAssetMaturityDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    TotalCurrentMonth:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TotalCurrentQuarter:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TotalCurrentYear:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TotalNextYear:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    LastNextGenCmtProcError:
+      fake: Word
+    LastNextGenCmtProcDtTm:
+      fake.DateTimeBetween:
+        start_date: -3y
+        end_date: +1y
+    Location__c:
+      fake: Word
+    MigrationID__c:
+      fake: Word
