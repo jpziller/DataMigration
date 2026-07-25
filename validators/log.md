@@ -1,5 +1,21 @@
 # Validators bundle update log
 
+## 2026-07-25
+* **Consolidated (Replace model)**: promoted the last two corrected
+  scripts from `attempts/2026-07-21-npc-dogfood-v2/sql/` into
+  `sql/transformations/` -- `250_accountcontactrelation_load.sql` and
+  `420_giftdefaultdesignation_load.sql`, both now the doc-only "never
+  insert/update an auto-created record" versions (the library still held
+  the older wrong logic: 250 replicated + UPDATEd the auto-created ACR
+  row; 420 explicitly INSERTed a GiftDefaultDesignation). With
+  `430_gifttransactiondesignation_load.sql` already promoted (2026-07-24),
+  the entire attempts workspace was now byte-identical to or superseded by
+  the library, so it was removed per the Replace model's "one canonical
+  copy, no second live copy" rule (recoverable via git history). This
+  closes the exact drift that had left the library's own 430 stale after
+  its fix merged. Discovered while assessing readiness for a clean, fresh
+  Snowfakery -> NPC reload.
+
 ## 2026-07-24 (3)
 * **Promoted**: `430_gifttransactiondesignation_load.sql` moved from
   `attempts/2026-07-21-npc-dogfood-v2/sql/` into `sql/transformations/`
