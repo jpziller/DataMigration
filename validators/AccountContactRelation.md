@@ -54,7 +54,7 @@ way Hard Rules 6/7/12/15 are.
 
 ## Salesforce auto-creates the row itself -- never insert, always update
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build -- an explicit `insert` of AccountContactRelation collided
+sample data build -- an explicit `insert` of AccountContactRelation collided
 with a real, already-existing row (submitted 16, succeeded 0, failed 0,
 no error). The platform auto-creates an AccountContactRelation
 (`IsDirect = true`) the instant a Contact is inserted with a real
@@ -116,7 +116,7 @@ separate delete attempt needed. See
 full reverse-dependency purge sequence this was found while building.
 
 ## CORRECTION (2026-07-21): never update the auto-created row either -- IsIncludedInGroup/IsPrimaryMember stay False/False on real data
-**Found:** second NPC fundraising dogfood rebuild attempt, caught directly
+**Found:** second NPC fundraising sample data rebuild attempt, caught directly
 by the user rather than discovered independently: "you shouldn't be
 updating auto created records... not even to add a migration id to
 it... the rule to not update the created records is all created records

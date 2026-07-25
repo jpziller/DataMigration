@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 1 of
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 1 of
    11 -- companion to 230. Builds Contact_Load from dbo.Contact_Mock,
    resolving the real AccountId via the Mock table's own _ParentMockRef
    bookkeeping column (an integer pointing at HouseholdAccount_Load's

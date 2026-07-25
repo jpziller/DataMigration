@@ -3,7 +3,7 @@ type: PlatformFinding
 title: GiftRefund/GiftSoftCredit/GiftTransactionDesignation -- real validation rules found live
 description: Real platform-enforced validation rules on GiftRefund,
   GiftSoftCredit, and GiftTransactionDesignation, found live during the
-  NPC fundraising/donor-management Snowfakery dogfood build -- these
+  NPC fundraising/donor-management Snowfakery sample data build -- these
   three objects are not covered by the migration guide's own extracted
   Appendix B validation tables (Gift Transaction/Gift Commitment/Gift
   Commitment Schedule only).

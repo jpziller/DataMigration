@@ -39,7 +39,7 @@ for you, and it'll stick for future sessions too.
   behaving unexpectedly, check developer.salesforce.com/docs or
   help.salesforce.com (WebFetch/WebSearch) rather than guessing from
   possibly-stale training data.
-- **Dogfood built commands.** Once something gets built into a real `cli.py`
+- **Use the commands you build.** Once something gets built into a real `cli.py`
   command during a session, use *that* command to verify results and report
   findings going forward — not the ad hoc script that helped research/build
   it, even if that script still works fine. Retire the scratch script once
@@ -502,7 +502,7 @@ venv may not be active in a fresh shell:
                 `bulkops-retry` already reads.)
 - Reset a Dev cycle: `.venv/Scripts/python.exe cli.py reset-dev-cycle --objects Account Contact
                 [--purge-org-where "Account:AccountNumber LIKE 'MOCKACCT-%'"] [--dry-run]`
-                (roadmap #63: codifies the manual reset ritual this project's own dogfooding did by
+                (roadmap #63: codifies the manual reset ritual this project's own self-testing did by
                 hand, repeatedly, across earlier sessions — drops every `_Mock`/`_Mock_Adversarial`/
                 `_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given
                 objects, and clears their `dbo.FieldProfile`/`FieldProfileValues` rows so the next
@@ -850,7 +850,7 @@ boolean field as a Python `0`/`1` integer, which SQL Server's `BIT` and
 SQLite's `INTEGER` both tolerate but Postgres's native `BOOLEAN` column
 rejects outright — fixed to write real Python `True`/`False`, which all
 three backends' drivers adapt correctly. **A full Docker+Snowfakery+full-methodology end-to-end pass against a live
-org has since been run and confirmed** (2026-07-14, same dogfood recipe
+org has since been run and confirmed** (2026-07-14, same sample data recipe
 and org as the original SQL Server pass, `D360_PLAYGROUND`): Snowfakery
 mock data generation, four new Postgres-flavored transform scripts
 (`sql/transformations/050-080_*_postgres.sql`), Hard Rules 6/7/12, and real
@@ -985,7 +985,7 @@ project-specific validator found for one particular object.
     deliberate exception: data this framework generated itself
     (`generate-mock-data`/`generate-related-mock-data`) has known ground
     truth, so a mapping may be carried all the way to complete for
-    practice, testing, and dogfooding new tooling — never for a live
+    practice, testing, and self-testing new tooling — never for a live
     engagement's actual data. See `ROADMAP.md` #48.
 12. **Live Migration Key Validation Rule** (System Validator —
     `validators/system/external-id-validation.md`). Before any `bulkops
@@ -1174,9 +1174,9 @@ throughout a project, not just once.
 ## Library vs. attempts workspace
 Once a project has produced a real, proven set of transform scripts,
 mapping workbook, and Migration Run Book tab (e.g. this repo's own NPC
-fundraising dogfood build, `sql/transformations/230-430`, committed as a
+fundraising sample data build, `sql/transformations/230-430`, committed as a
 reference implementation rather than disposable client work — see
-`okf/nonprofit-cloud/fundraising-dogfood-reference-implementation.md`),
+`okf/nonprofit-cloud/fundraising-sample-reference-implementation.md`),
 a **second rebuild attempt against a freshly reset org must not overwrite
 that reference state.** This is the same experience a new engineer
 picking up this repo would have: use its knowledge and artifacts to
@@ -1190,7 +1190,7 @@ future pass of this same project) still need.
   once a new attempt's findings are worth folding back in (see
   "Promotion" below).
 - **Attempts workspace** — a new top-level `attempts/<date>-<slug>/`
-  folder (e.g. `attempts/2026-07-21-npc-dogfood-v2/`), mirroring `sql/`
+  folder (e.g. `attempts/2026-07-21-npc-sample-v2/`), mirroring `sql/`
   and `mapping/` inside it, for a new rebuild attempt's own scripts,
   mapping doc, and Run Book tab (or file) built *from* the library's
   knowledge without touching it:

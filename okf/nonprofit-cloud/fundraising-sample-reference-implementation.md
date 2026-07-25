@@ -1,24 +1,24 @@
 ---
 type: MigrationPattern
-title: NPC fundraising/donor-management Snowfakery dogfood -- reference implementation
+title: NPC fundraising/donor-management Snowfakery sample data -- reference implementation
 description: The concrete, live-verified artifacts this repo's own
-  Snowfakery-driven dogfood build produced across NPC's full
+  Snowfakery-driven sample data build produced across NPC's full
   fundraising/donor-management object surface (20 objects, no NPSP
   source at all) -- transform scripts, the recipe-generation sequence,
   and every real fix baked in -- and how the next rebuild pass (a
   planned clean-org reload) should reuse them.
-tags: [npc, afnp, fundraising, snowfakery, reference-implementation, reusable, dogfood]
+tags: [npc, afnp, fundraising, snowfakery, reference-implementation, reusable, sample-data]
 timestamp: "2026-07-19"
 ---
-# NPC fundraising/donor-management Snowfakery dogfood -- reference implementation
+# NPC fundraising/donor-management Snowfakery sample data -- reference implementation
 
 This repo ran a full, live, Snowfakery-driven build across NPC's entire
 fundraising/donor-management object surface — not sourced from NPSP or
 any real client system, generated fresh via `generate-related-mock-data`
 per Hard Rule 11's explicit exception for framework-generated data
 (CLAUDE.md), loaded all the way to a real completion in `NPC_TARGET_v2`.
-Postmortem: `postmortems/2026-07-19-npc-fundraising-dogfood-recipe.md`.
-PR #20 (`feature/npc-fundraising-dogfood-recipe`).
+Postmortem: `postmortems/2026-07-19-npc-fundraising-sample-recipe.md`.
+PR #20 (`feature/npc-fundraising-sample-recipe`).
 
 **A second pass is already planned** (per the user, 2026-07-19): purge
 every migrated record from `NPC_TARGET_v2` and rebuild from a blank
@@ -33,8 +33,8 @@ rediscover.
 | Artifact | Location | Covers |
 |---|---|---|
 | Transform scripts | `sql/transformations/230-430_*.sql` | 20 scripts, 11 build groups, all 20 objects, real dependency order (`380` deliberately skipped — see the numbering note below). |
-| Mapping workbook | `mapping/npc_dogfood_mapping.xlsx` | One tab per object with a real Mock source table (Hard Rule 11 — carried to completion, not a first-draft). |
-| Migration Run Book tab | `migration_run_book.xlsx`, tab `NPC_Fundraising_Dogfood` | Real load-order data and every real `bulkops` result from this pass. |
+| Mapping workbook | `mapping/npc_fundraising_sample_mapping.xlsx` | One tab per object with a real Mock source table (Hard Rule 11 — carried to completion, not a first-draft). |
+| Migration Run Book tab | `migration_run_book.xlsx`, tab `NPC_Fundraising_Sample` | Real load-order data and every real `bulkops` result from this pass. |
 | Migration-key metadata | `force-app/main/default/objects/*/fields/MigrationID__c.field-meta.xml` (20 objects total, 13 from the earlier PoC + 7 new this pass) + the extended `MigrationFieldAccess` permission set | The migration-key field + FLS grant on every object this build writes to. |
 | Framework fixes | `snowfakery_data.py` (createable-edge filtering), `bulkops.py` (`_writeback_inplace()`'s `COALESCE` + per-row `execute()`) | Benefit every future `generate-related-mock-data`/`bulkops` call, not just this build. |
 
@@ -166,7 +166,7 @@ genuinely new script inserted between `370` and `390` in a future pass.
   assumes each group's counts stay proportionally similar (e.g.
   `GiftCommitment`'s `--count` relative to the Account pool size).
 - **The mapping workbook's own field-level decisions**
-  (`mapping/npc_dogfood_mapping.xlsx`) reflect what THIS pass's
+  (`mapping/npc_fundraising_sample_mapping.xlsx`) reflect what THIS pass's
   `auto-map`/manual review chose — a rebuild reusing the same scripts
   doesn't need to regenerate these unless the scripts themselves change,
   but any script edit should get a corresponding mapping-doc update via
@@ -174,7 +174,7 @@ genuinely new script inserted between `370` and `390` in a future pass.
 
 # Citations
 
-1. `postmortems/2026-07-19-npc-fundraising-dogfood-recipe.md` — the full
+1. `postmortems/2026-07-19-npc-fundraising-sample-recipe.md` — the full
    narrative account, including what went well/poorly.
 2. Every `okf/nonprofit-cloud/*.md` file dated 2026-07-19 — the
    individual real findings this build produced.

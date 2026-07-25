@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 2 of
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 2 of
    11. Pure SQL, no Mock table -- one relationship per household with 2+
    members, self-joining Contact_Load within the same AccountId (real
    Snowfakery can't express "two distinct fields on one child both

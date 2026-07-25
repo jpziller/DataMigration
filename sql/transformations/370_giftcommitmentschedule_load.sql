@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 9 of
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 9 of
    11.
 
    CORRECTED live (real finding, contradicts the earlier NPSP-to-NPC

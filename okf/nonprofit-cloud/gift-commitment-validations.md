@@ -33,7 +33,7 @@ accept that some of these transitions become permanently blocked once
 downstream Gift Transactions/Schedules are created.
 
 **A related field-semantics note, not a confirmed validation rule**
-(NPC fundraising/donor-management Snowfakery dogfood build, 2026-07-19):
+(NPC fundraising/donor-management Snowfakery sample data build, 2026-07-19):
 `RecurrenceType` auto-defaults to `'OpenEnded'` on a Recurring-type
 commitment when left unsent (`defaultedOnCreate: True`, confirmed live).
 `'OpenEnded'` recurrence is semantically "no end date," so a real,

@@ -17,7 +17,7 @@ timestamp: "2026-07-19"
 NPC/AFNP-specific — both are general Salesforce Bulk API 2.0 behavior,
 true for any object on any org. Documented here (rather than a
 not-yet-existing general-Salesforce OKF bundle) because both were found
-live during the NPC fundraising/donor-management Snowfakery dogfood
+live during the NPC fundraising/donor-management Snowfakery sample data
 build (2026-07-19) and are directly relevant to any future session
 loading data into this or another NPC org with this framework's own
 `bulkops` tooling.

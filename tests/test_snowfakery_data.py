@@ -50,7 +50,7 @@ def test_no_op_when_column_not_present():
 
 
 def test_parse_datetime_fields_produces_real_tz_naive_datetime64():
-    # Found via a real dogfood run, not a synthetic test: a plain string
+    # Found via a real sample data run, not a synthetic test: a plain string
     # (even a correctly T-separated one) bound against a real mssql
     # DATETIME2 column via pyodbc's fast_executemany breaks outright
     # ("Invalid character value for cast specification") -- confirmed via
@@ -235,7 +235,7 @@ def sqlite_engine(tmp_path):
 
 
 def test_run_recipe_does_not_leak_polymorphic_cohort_columns_into_plain_child(tmp_path, sqlite_engine):
-    # Found via a real dogfood run, not a synthetic test: Snowfakery's
+    # Found via a real sample data run, not a synthetic test: Snowfakery's
     # combined JSON output unions every object type's columns into one
     # DataFrame (NaN-filled per row where irrelevant) -- run_recipe() used
     # to keep any "_SecondaryParentRef_*"/"_ParentType" column merely

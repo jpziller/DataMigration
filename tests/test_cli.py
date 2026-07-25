@@ -1,5 +1,5 @@
 """Coverage for cli.py's own pure helper functions -- this project has
-never unit-tested cli.py directly before (every command is dogfooded
+never unit-tested cli.py directly before (every command is self-tested
 live instead), but _parse_object_value_pairs() is a pure, reusable
 utility with no Salesforce/SQL dependency, so it's worth testing in
 isolation rather than only through a live command invocation.

@@ -165,7 +165,7 @@ def _parse_datetime_fields_to_real_datetime64(df, mapped_fields):
     string parameter bound against a DATETIME2 column instead breaks
     pyodbc's fast_executemany outright (mssql "Invalid character value for
     cast specification") -- confirmed via a minimal repro, not assumed;
-    found via a real dogfood run, not a synthetic test. Tz-naive
+    found via a real sample data run, not a synthetic test. Tz-naive
     specifically: DATETIME2 has no offset component, and a tz-aware
     Timestamp bound via fast_executemany separately breaks with a
     different error ("String data, right truncation"), also confirmed via
@@ -484,7 +484,7 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, primary_pare
     object's ROWS (`_table == name`), the DataFrame still carries every
     OTHER object's bookkeeping columns too (row-filtering doesn't drop
     columns from a pandas DataFrame built from the union of every record
-    type) -- found via a real dogfood run, not a synthetic test: Task's
+    type) -- found via a real sample data run, not a synthetic test: Task's
     own cohort-only columns (`_ParentType`, `_SecondaryParentRef_Contact`,
     `_SecondaryParentRef_Account`) were leaking into `Contact_Mock` as
     entirely-NULL columns, and an all-NULL column defeats pyodbc's
@@ -551,7 +551,7 @@ def run_recipe(engine, recipe_path, object_names, fields_by_object, primary_pare
         # int 1. Binding a float against a genuinely INT-typed SQL Server
         # column breaks pyodbc's fast_executemany parameter binding
         # (mssql "Invalid character value for cast specification") --
-        # found via a real dogfood run, not a synthetic test. Cast to
+        # found via a real sample data run, not a synthetic test. Cast to
         # pandas' nullable Int64 so a real value round-trips as a real
         # int and a missing one round-trips as NULL, not NaN-as-float.
         int_bookkeeping_cols = [c for c in ("_MockRowId", "_ParentMockRef", *secondary_cols)

@@ -472,7 +472,7 @@ def _format_datetime_columns_for_csv(payload):
     space-separated, no 'T' -- which is a real XSD dateTime parse failure
     against the Bulk API ("is not a valid value for the type
     xsd:dateTime"), not merely non-canonical. Confirmed live via a real
-    dogfood run: Contact.EmailBouncedDate failed on every submitted row
+    sample data run: Contact.EmailBouncedDate failed on every submitted row
     this way. sql_dialect.py's own normalize_datetime_columns() only fixes
     this on the WRITE side (into a mirror-DB table); this is the
     outbound-to-Salesforce side, a pre-existing gap this framework hadn't

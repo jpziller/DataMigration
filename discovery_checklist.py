@@ -54,7 +54,7 @@ def _out_of_scope_dependencies(sf, object_name, in_scope_names):
     them, so the real question is "which of these does the client's data
     actually use," not "confirm every possible type is in scope" repeated
     once per target (found in review: the original flat-set design did
-    exactly that -- dogfooding this against a real Task object produced
+    exactly that -- self-testing this against a real Task object produced
     ~90 near-identical lines, drowning out every other, genuinely
     actionable question for that object)."""
     desc = getattr(sf, object_name).describe()

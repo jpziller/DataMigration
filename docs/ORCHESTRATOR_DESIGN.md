@@ -131,7 +131,7 @@ failures already appears in this object's `BulkOpsLog`/Run-Book history for
 this project (a "known, previously-accepted" error signature) **and**
 `ambiguous == 0`.
 
-The 2% figure isn't arbitrary: it's grounded in this project's own dogfood
+The 2% figure isn't arbitrary: it's grounded in this project's own sample data
 run (ROADMAP #14) — 5 of 100 mock `Account` inserts failed on a known,
 understood `DUPLICATE_VALUE:...:Jigsaw` cause. That's exactly the shape tier
 2 is meant to cover: a low, already-diagnosed failure class that shouldn't
@@ -549,7 +549,7 @@ shadow-mode observation record §5 calls for). **Zero change to Hard Rule
 always was; this only observes and reports after the fact.
 
 Live-validated against this project's own real `BulkOpsLog` history (5
-rows from four Dev-tier dogfooding cycles): all three of Account/Contact/
+rows from four Dev-tier self-testing cycles): all three of Account/Contact/
 Opportunity's first-ever loads correctly assessed as tier 1; Task's real
 100%-failure run (a genuine, novel systemic error) correctly assessed as
 tier 4; Task's successful retry correctly assessed as tier 1. The
@@ -568,12 +568,12 @@ for the narrow Hard-Rule-2 exception, and the `docs/SECURITY_OVERVIEW.md`
 update for the hook as a new trust boundary — none of this exists yet, on
 purpose. Stage 2+'s actual coarse-approval mechanism only gets built once
 Stage 1 shadow mode has run against a real UAT pass, which doesn't exist
-yet — everything this project has done so far is Dev-tier dogfooding,
+yet — everything this project has done so far is Dev-tier self-testing,
 permanently out of this design's scope (§1's own framing).
 
 ---
 
-## 9. Field notes from dogfooding (2026-07-11)
+## 9. Field notes from self-testing (2026-07-11)
 
 Three consecutive full Dev-tier cycles were run manually against a real org
 (D360_PLAYGROUND) this session — generate mock data, build numbered
@@ -601,7 +601,7 @@ scanned by analyze-org-risk yet" note and fell back to seed-knowledge
 defaults. Under this design, **none of these three runs would have been
 eligible for anything beyond Stage 1 (shadow mode)** — confirming §6's
 stricter-than-`batch_advisor.py` bar is not just a theoretical tightening,
-it's a real gate a real dogfooding project would hit immediately. Worth
+it's a real gate a real self-testing project would hit immediately. Worth
 building as a clear, actionable plan-generation error ("run
 `analyze-org-risk <objects>` first") rather than a silent fallback, since
 the natural failure mode (confirmed here) is simply forgetting to run it.

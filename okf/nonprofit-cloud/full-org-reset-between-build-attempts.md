@@ -17,11 +17,11 @@ timestamp: "2026-07-20"
 reload" section:** that section covers fixing a specific data-shape bug
 in records a migration already loaded (delete and reinsert just the
 affected rows). This pattern is for the different, earlier-stage case —
-wiping an entire practice/dogfood/PoC pass's worth of migrated data
+wiping an entire practice/sample-data/PoC pass's worth of migrated data
 completely, so the next attempt starts from a genuinely clean org rather
 than layering on top of (or half-overwriting) the previous one. Real
 use case: the user's own explicit instruction (2026-07-20) after the NPC
-fundraising Snowfakery dogfood build (PR #20) — "wipe out everything
+fundraising Snowfakery sample data build (PR #20) — "wipe out everything
 with a migrated ID in the org... put the org back to the start with just
 human created data... any script we have is reference/artifact."
 

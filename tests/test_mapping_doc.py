@@ -57,7 +57,7 @@ def test_extract_insert_columns_matches_sqlite_bare_double_quoted_table_no_schem
 
 
 def test_extract_insert_columns_matches_mssql_select_into():
-    # Found via a real dogfood run: sql_dialect.py's own
+    # Found via a real sample data run: sql_dialect.py's own
     # MssqlDialect.create_table_as_select_sql() -- this project's actual
     # canonical mssql *_Load-building pattern -- was never recognized at
     # all; check-mapping-balance raised "No INSERT INTO statement found"
@@ -108,7 +108,7 @@ def test_extract_insert_columns_matches_sqlite_create_table_as_select():
 
 
 def test_extract_insert_columns_ignores_prose_in_header_comment_mentioning_select_into():
-    # Found via a real dogfood run -- a genuinely embarrassing bug: this
+    # Found via a real sample data run -- a genuinely embarrassing bug: this
     # project's own real 010_account_load.sql header comment describes the
     # SELECT...INTO port in English prose ("SELECT ... INTO is the
     # equivalent"), and the unstripped-comment regex matched that PROSE as
@@ -305,7 +305,7 @@ def test_set_transform_script_uses_script_dir_override_outside_sql_tree(tmp_path
     section)."""
     mapping_path = tmp_path / "mapping.xlsx"
     _write_mapping_workbook(mapping_path, "Account", [("first_name", "Yes", "Name")])
-    attempt_dir = tmp_path / "attempts" / "2026-07-21-npc-dogfood-v2" / "sql"
+    attempt_dir = tmp_path / "attempts" / "2026-07-21-npc-sample-v2" / "sql"
     attempt_dir.mkdir(parents=True)
     (attempt_dir / "010_account_load.sql").write_text("", encoding="utf-8")
     # A file of the same name under sql/transformations/ too, to prove

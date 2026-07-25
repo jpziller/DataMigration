@@ -57,7 +57,7 @@ def _sort_column_gate(engine, d, schema, object_name, load_table):
         return {"ok": None, "detail": "dbo.ObjectDependency doesn't exist yet -- run analyze-load-order first."}
     with engine.connect() as cx:
         # Exclude a self-reference (ChildObject == ParentObject, e.g.
-        # Account.ParentId/MasterRecordId) -- found via a real dogfood
+        # Account.ParentId/MasterRecordId) -- found via a real sample-data
         # run: a self-referencing object has no actual CROSS-object parent
         # to batch against (that's a two-pass-load field, never mocked --
         # see load_order.py's own self_references tracking), so it was

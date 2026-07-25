@@ -115,7 +115,7 @@ _INSERT_INTO_RE = re.compile(
 # either backend -- is neither of these forms; a plain INSERT INTO (...)
 # VALUES-shaped statement (what _INSERT_INTO_RE above matches) never
 # appears in a real sql/transformations/*.sql script at all. Found via a
-# real dogfood run: check-mapping-balance/assess-migration-readiness's
+# real sample data run: check-mapping-balance/assess-migration-readiness's
 # mapping_balance gate raised "No INSERT INTO statement found" against
 # every one of this project's own real, working scripts.
 #
@@ -397,7 +397,7 @@ _LINE_COMMENT_RE = re.compile(r"--[^\n]*")
 
 def _strip_sql_comments(sql_text):
     """Strip /* ... */ block comments and -- line comments before any
-    pattern match below -- found via a real dogfood run, a genuinely
+    pattern match below -- found via a real sample data run, a genuinely
     embarrassing bug: this project's own header comments describe the
     SELECT...INTO port in English prose (literally "SELECT ... INTO is
     the equivalent"), and _SELECT_INTO_RE matched that PROSE as if it
@@ -466,7 +466,7 @@ def extract_insert_columns(sql_text, table_name=None):
       - SELECT col1, col2 AS alias, ... INTO table FROM ... -- mssql's own
         canonical *_Load-building idiom (sql_dialect.py's
         MssqlDialect.create_table_as_select_sql()); found via a real
-        dogfood run that this form was never recognized at all before,
+        sample data run that this form was never recognized at all before,
         so check-mapping-balance raised "No INSERT INTO statement found"
         against every one of this project's own real, working scripts.
       - CREATE TABLE table AS SELECT col1, col2 AS alias, ... FROM ... --

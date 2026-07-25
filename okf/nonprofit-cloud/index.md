@@ -18,7 +18,7 @@ platform-level, not NPSP-source-specific.
 
 # Migration patterns
 
-* [Fundraising/donor-management Snowfakery dogfood — reference implementation](fundraising-dogfood-reference-implementation.md) -
+* [Fundraising/donor-management Snowfakery sample data — reference implementation](fundraising-sample-reference-implementation.md) -
   what's reusable from the full 20-object, source-free Snowfakery build
   (2026-07-19) — transform scripts, the generation sequence, every real
   fix baked in — and what a next rebuild pass needs to redo or
@@ -57,7 +57,7 @@ these objects from any source).
 
 Real, live-confirmed characteristics of the platform itself. Most were
 discovered during this repo's own NPSP-to-NPC proof-of-concept
-(2026-07-17/18) or the later full-surface Snowfakery dogfood build
+(2026-07-17/18) or the later full-surface Snowfakery sample data build
 (2026-07-19), but none are tied to either pass's own source data —
 that's exactly why they live here rather than in a source-specific
 bundle.

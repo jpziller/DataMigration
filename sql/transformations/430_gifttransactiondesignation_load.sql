@@ -1,6 +1,6 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   PROMOTED (2026-07-24) from attempts/2026-07-21-npc-dogfood-v2/sql/ --
+   PROMOTED (2026-07-24) from attempts/2026-07-21-npc-sample-v2/sql/ --
    the Replace-model promotion described in CLAUDE.md's "Library vs.
    attempts workspace" section, now that this fix is proven live (39/40
    corrected rows loaded against NPC_TARGET_v2). This replaces the
@@ -13,7 +13,7 @@
    unpromoted, parallel to this library's earlier (first-build) versions
    of the same objects.
 
-   NPC fundraising/donor-management Snowfakery dogfood recipe, group 11
+   NPC fundraising/donor-management Snowfakery sample data recipe, group 11
    of 11 (final group).
 
    CORRECTED live (2026-07-24): a real Nonprofit Cloud architect (Ali)

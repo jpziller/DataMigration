@@ -11,7 +11,7 @@ timestamp: "2026-07-19"
 
 ## Three real constraints tying a refund to its parent GiftTransaction
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build -- a real insert against 25 generated rows failed
+sample data build -- a real insert against 25 generated rows failed
 `FIELD_INTEGRITY_EXCEPTION` on every row that violated any of three
 independent rules:
 1. The parent `GiftTransaction.Status` must already be `'Paid'` --

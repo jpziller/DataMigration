@@ -12,7 +12,7 @@ timestamp: "2026-07-19"
 # Contact Points (Address/Phone/Email) -- shape and scoping
 
 **Found:** 2026-07-19, NPC fundraising/donor-management Snowfakery
-dogfood build — the first time this repo's own tooling built real
+sample data build — the first time this repo's own tooling built real
 transforms for these three objects. New in Nonprofit Cloud, with no
 NPSP equivalent: NPSP carries mailing/billing address as compound fields
 directly on `Account`/`Contact`; NPC models an address, phone, or email

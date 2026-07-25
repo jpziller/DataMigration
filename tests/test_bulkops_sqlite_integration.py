@@ -75,7 +75,7 @@ def test_create_table_replicate_bulk_op_writeback_roundtrip(sqlite_engine, tmp_p
 
 
 def test_format_datetime_columns_for_csv_reformats_real_datetime64():
-    # Found via a real dogfood run, not a synthetic test: a load table
+    # Found via a real sample data run, not a synthetic test: a load table
     # column that's a genuine pandas datetime64 dtype (e.g. read back from
     # a real SQL datetime/datetime2 column, not a pre-formatted string)
     # used to serialize via payload.to_csv()'s own default -- space-
