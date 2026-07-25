@@ -419,6 +419,21 @@ projects, not just a one-way ratchet.
   applies today, deliberately, given the higher stakes.
 - `dbo.ObjectLoadOrder` / `dbo.ObjectDependency` (`analyze-load-order`) —
   the sequencing input to a plan, unchanged.
+- `okf_lookup.gather_okf()` (`gather-okf`, ROADMAP #83) — **the orchestrator
+  gathers relevant OKF knowledge as part of assessing an object**, not just
+  as a human convenience. `orchestrator-assess` already surfaces an
+  object's relevant OKF docs (auto-created records, platform validations,
+  join quirks) alongside its tier and reasons — advisory, never changing
+  the deterministic tier, but ensuring the knowledge that would *explain or
+  prevent* a failure is put in front of the operator rather than glossed
+  over. Plan generation (Phase 2) should do the same at the plan level:
+  before offering a plan for approval, gather the OKF relevant to every
+  object in scope so a known platform behavior (e.g. an auto-created child
+  that must never be inserted) is surfaced up front, not discovered mid-run.
+  This is deliberately read-only prose retrieval today; a future
+  structured, machine-readable data-shape profile (ROADMAP #83's "not done
+  yet" note) could let a tier actually *reason* over it rather than just
+  display it.
 
 **New state this design introduces (nothing today covers these):**
 - `dbo.OrchestratorRunPlan` and `dbo.OrchestratorRunEvent` (§3).

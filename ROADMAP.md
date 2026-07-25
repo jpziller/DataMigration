@@ -5596,3 +5596,49 @@ the one table sequentially, with transforms run in between) rather than
 refactoring `230`/`280` to separate mock tables — the runbook documents
 the correct interleaved order, and reworking committed reference
 transforms for cosmetic cleanliness wasn't worth the churn.
+
+## 83. Actively gather OKF knowledge, don't gloss over it (`gather-okf`) — BUILT 2026-07-25
+
+The `okf/` bundle had grown into real, hard-won target-platform knowledge
+(auto-created records, platform validations, join quirks) — but it was
+**passively present**: a clone's Claude could build a transform, hit a
+failure, and only *then* discover the doc that already explained it. OKF's
+own "no required tooling" design point had left it un-surfaced. The user's
+direction (2026-07-25): make sure a clone doesn't just *have* the
+reference but actually consults it *before* the mistake, and "part of the
+orchestrator needs to be to gather any relevant OKF."
+
+**Built**:
+- **New OKF subject area** `okf/synthetic-data-recipes/` — a
+  describe-and-link catalog of the external Snowfakery recipe libraries
+  that already exist (SFDO Community-Sprints, CumulusCI datasets,
+  Snowfakery itself), with per-cloud coverage + gaps (Consumer Goods /
+  Sales / Service largely uncovered), and the key limit that upstream
+  recipes give *structure*, not the auto-creation *behavior* this repo
+  learns empirically. Researched live; sources cited per OKF's `resource:`
+  convention. This is the "check for an upstream recipe before authoring
+  one" knowledge the user asked to tie in.
+- **`gather-okf` command + `okf_lookup.py`** — the retrieval primitive
+  (the OKF-side counterpart to `validators_lookup.py`/`check-validators`):
+  surfaces the OKF docs relevant to a set of objects (matched against each
+  doc's frontmatter title/description/tags, hyphen/case-normalized) or a
+  whole subject area. Read-only, no org needed. Reuses
+  `validators_lookup.parse_frontmatter()`/`_RESERVED`.
+- **Wired so it isn't glossed over**: CLAUDE.md's Standard Workflow step 1
+  now requires running `gather-okf`/`check-validators` and reading the
+  hits before building; a new behavior default states the OKF-first
+  discipline generally; and **`orchestrator-assess` now surfaces an
+  object's relevant OKF as part of its assessment** — the orchestrator's
+  job isn't only to score a completed run, it's to make sure the knowledge
+  that would explain or prevent a failure is gathered. Advisory only;
+  never changes the deterministic tier.
+- `/gather-okf` skill, `tests/test_okf_lookup.py` (object/tag matching,
+  normalization, reserved-file exclusion, subject-area listing), full
+  suite green.
+
+**Deliberately not done (yet)**: a *structured, machine-readable*
+data-shape profile per object (the "auto-created children / real
+cardinality / defaulted-in-practice" facts as data a tool can score
+against, not prose) — that's the larger #84-class idea this sets up. This
+entry does the retrieval/surfacing half; the prose docs remain the source
+of truth for now, gathered actively instead of passively.
