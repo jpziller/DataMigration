@@ -90,11 +90,12 @@ commitment CAN be linked but still have no GDD (the Custom-type gap
 above), and that case must still fall through the chain instead of
 silently producing zero designation rows. Mirror each GDD's own
 `AllocatedPercentage` onto the corresponding `GiftTransactionDesignation`
-row (see the rounding rule below for multi-way splits). Corrected
-implementation lands first in
-`attempts/2026-07-21-npc-dogfood-v2/sql/430_gifttransactiondesignation_load.sql`
-(the attempts workspace, not yet promoted to the shared library) -- see
-`CLAUDE.md`'s "Library vs. attempts workspace" section.
+row (see the rounding rule below for multi-way splits). Implementation:
+`sql/transformations/430_gifttransactiondesignation_load.sql` --
+**PROMOTED 2026-07-24** from `attempts/2026-07-21-npc-dogfood-v2/` once
+proven live (see `CLAUDE.md`'s "Library vs. attempts workspace" section);
+this is now the one canonical copy, the attempts-workspace copy was
+removed per the Replace-model convention.
 
 **RESOLVED live, 2026-07-24:** the corrected transform ran against
 `NPC_TARGET_v2` -- the 59 wrong (round-robin) rows were deleted and 40

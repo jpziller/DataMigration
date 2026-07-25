@@ -1,5 +1,15 @@
 # Validators bundle update log
 
+## 2026-07-24 (3)
+* **Promoted**: `430_gifttransactiondesignation_load.sql` moved from
+  `attempts/2026-07-21-npc-dogfood-v2/sql/` into `sql/transformations/`
+  (the Replace model, `CLAUDE.md`'s "Library vs. attempts workspace"
+  section), now that the inheritance fix below is proven live (39/40).
+  This replaces the library's own older, round-robin version -- only this
+  one script promoted, not the rest of that rebuild attempt. Updated
+  [GiftTransactionDesignation validator](GiftTransactionDesignation.md)'s
+  implementation pointer accordingly.
+
 ## 2026-07-24 (2)
 * **Resolved live**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
   -- `attempts/2026-07-21-npc-dogfood-v2/sql/430_gifttransactiondesignation_load.sql`

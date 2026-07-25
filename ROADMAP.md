@@ -5518,3 +5518,39 @@ workbook now reports only genuine, expected drift (bookkeeping columns
 like `LoadId`, deliberately-excluded rollup fields, SQL-joined columns
 with no source-table analog) — no more garbled output. Full suite green
 throughout (438 passed, 6 skipped).
+
+## 81. Found live: typed `replicate` can overflow SQL Server's inferred `NUMERIC` precision on a real decimal rollup field (workaround documented, root cause not yet fixed)
+
+Discovered 2026-07-24, building the corrected `GiftTransactionDesignation`
+inheritance logic (see `validators/GiftTransactionDesignation.md` and
+`sql/transformations/430_gifttransactiondesignation_load.sql`): a plain
+`replicate GiftDesignation` (typed mode, the default) against
+`NPC_TARGET_v2` failed outright with
+`pyodbc.ProgrammingError: ('Converting decimal loses precision', 'HY000')`
+on the `INSERT` batch, not on table creation — the target `NUMERIC`
+column this backend inferred for a decimal rollup field (e.g.
+`AverageTransactionAmount`) is too narrow for the real precision/scale a
+couple of long-lived, real `GiftDesignation` records actually carry.
+`replicate GiftCommitmentSchedule`/`GiftDefaultDesignation` — replicated
+earlier in this same session, against the same org — did **not** hit
+this, so it's data-shape-dependent (a rollup field's precision growing
+with real transaction history), not universal to every decimal column.
+
+**Workaround used, not a fix**: `replicate <Object> --raw` (the existing
+`raw=True` path in `replicate.py` — every column stored as this
+backend's "store anything as text" type, per its own docstring)
+sidesteps the type inference entirely. Used for `GiftDesignation` in the
+430 script above; boolean columns then read back as the literal text
+`'true'`/`'false'` rather than a native bit, which the corrected 430
+script accounts for directly (`WHERE [IsDefault] = 'true'`).
+
+**Not yet root-caused or fixed**: which exact `sf_type_to_sql()` mapping
+(`type_map.py`, the SQL Server flavor — see the "SQL backend" section of
+`CLAUDE.md`) under-sizes the `NUMERIC` precision for a decimal field
+whose real `describe()` metadata should already state its true
+precision/scale, and whether the fix belongs in that mapping (widen the
+inferred type) or in `typed_value_coercers()` (round/clamp on write,
+riskier — could silently truncate real data). `--raw` is a safe,
+available workaround for any object that hits this in the meantime; a
+real fix should confirm against `describe()`'s own `precision`/`scale`
+fields for the affected field type before choosing either direction.
