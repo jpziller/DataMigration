@@ -1,0 +1,84 @@
+# =====================================================================
+# NPC fundraising sample dataset -- recipe 08 of 10
+# GiftDesignation / funds (6).
+# Feeds transform script(s): 350 (GiftDesignation)
+#
+# Part of sample_data/ -- see sample_data/README.md for the full,
+# ordered generate + load sequence. Fully synthetic data (no real
+# client data). Runs standalone with `snowfakery run <this file>`, or
+# is regenerated from the target org's describe() via the
+# generate-related-mock-data command shown in the README.
+# =====================================================================
+- snowfakery_version: 3
+- object: GiftDesignation
+  count: 6
+  fields:
+    Name:
+      fake: Company
+    Description:
+      fake: Paragraph
+    IsActive:
+      fake: Boolean
+    IsDefault:
+      fake: Boolean
+    AverageTransactionAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    FirstPaidTransactionDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    LastPaidTransactionDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    LastYearTransactionCount:
+      fake.RandomInt:
+        min: 0
+        max: 1000
+    CurrentYearTransactionCount:
+      fake.RandomInt:
+        min: 0
+        max: 1000
+    LastTwoYearTrxnCount:
+      fake.RandomInt:
+        min: 0
+        max: 1000
+    TotalTransactionCount:
+      fake.RandomInt:
+        min: 0
+        max: 1000
+    LowestTransactionAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    HighestTransactionAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    LastYearTrxnAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    CurrentYearTrxnAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    LastTwoYearTrxnAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    TotalTransactionAmount:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    MigrationID__c:
+      fake: Word

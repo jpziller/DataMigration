@@ -1457,6 +1457,20 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   retrospective account, not a structured lookup entry. Its job is to be
   the prompt that produces new `validators/`/`okf/`/`ROADMAP.md` entries,
   not a standalone archive.
+- `sample_data/` — the committed, shareable **NPC fundraising sample
+  dataset** (roadmap #82): `sample_data/recipes/*.recipe.yml` are the 10
+  numbered, curated Snowfakery recipes that generate the fully-synthetic
+  mock data the `sql/transformations/230-430` reference implementation
+  consumes, and `sample_data/README.md` is the ordered "generate the mock
+  data + load a fresh test org" runbook. This is what makes the dataset
+  reproducible in a clone (the recipes used to live only in gitignored
+  `_stage/`, so a clone couldn't rebuild the data at all). The recipes run
+  standalone via `snowfakery run`, or are regenerated fresh from the
+  target org's `describe()` via the `generate-related-mock-data` commands
+  in the README — the framework path never drifts from the org schema.
+  Fully synthetic, no real client data; safe to commit and share. Pairs
+  with `okf/nonprofit-cloud/fundraising-sample-reference-implementation.md`
+  (the transform-side reference) — this is the data-generation side.
 - `reference/field_synonyms.json` — git-tracked field-name synonym
   thesaurus used by `auto_mapper.py` (e.g. `zip`/`postal`/`postcode` all
   resolve to `BillingPostalCode`). This is template content — always

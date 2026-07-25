@@ -1,0 +1,85 @@
+# =====================================================================
+# NPC fundraising sample dataset -- recipe 07 of 10
+# Campaigns (4), each with 3-8 nested CampaignMembers.
+# Feeds transform script(s): 330 (Campaign) + 340 (CampaignMember)
+#
+# Part of sample_data/ -- see sample_data/README.md for the full,
+# ordered generate + load sequence. Fully synthetic data (no real
+# client data). Runs standalone with `snowfakery run <this file>`, or
+# is regenerated from the target org's describe() via the
+# generate-related-mock-data command shown in the README.
+# =====================================================================
+- snowfakery_version: 3
+- object: Campaign
+  count: 4
+  fields:
+    Name:
+      fake: Company
+    Type:
+      random_choice:
+      - Advertisement
+      - Email
+      - Telemarketing
+      - Banner Ads
+      - Seminar / Conference
+      - Public Relations
+      - Partners
+      - Referral Program
+      - Other
+    Status:
+      random_choice:
+      - In Progress
+      - Completed
+      - Aborted
+      - Planned
+    StartDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    EndDate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    ExpectedRevenue:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    BudgetedCost:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    ActualCost:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    ExpectedResponse:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    NumberSent:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    IsActive:
+      fake: Boolean
+    Description:
+      fake: Paragraph
+    MigrationID__c:
+      fake: Word
+    _children_CampaignMember:
+    - object: CampaignMember
+      count: ${{random_number(min=3,max=8)}}
+      fields:
+        Status:
+          random_choice:
+          - Responded
+          - Sent
+        MigrationID__c:
+          fake: Word
+        _ParentMockRef:
+          reference: Campaign

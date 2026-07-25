@@ -33,6 +33,7 @@ rediscover.
 | Artifact | Location | Covers |
 |---|---|---|
 | Transform scripts | `sql/transformations/230-430_*.sql` | 20 scripts, 11 build groups, all 20 objects, real dependency order (`380` deliberately skipped — see the numbering note below). |
+| Sample-data recipes + runbook | `sample_data/recipes/*.recipe.yml` + `sample_data/README.md` | The 10 committed, curated Snowfakery recipes that generate the synthetic mock data these transforms consume, plus the ordered "generate + load a fresh test org" runbook. The data-generation side of this reference implementation (roadmap #82); makes the dataset reproducible in a clone. |
 | Mapping workbook | `mapping/npc_fundraising_sample_mapping.xlsx` | One tab per object with a real Mock source table (Hard Rule 11 — carried to completion, not a first-draft). |
 | Migration Run Book tab | `migration_run_book.xlsx`, tab `NPC_Fundraising_Sample` | Real load-order data and every real `bulkops` result from this pass. |
 | Migration-key metadata | `force-app/main/default/objects/*/fields/MigrationID__c.field-meta.xml` (20 objects total, 13 from the earlier PoC + 7 new this pass) + the extended `MigrationFieldAccess` permission set | The migration-key field + FLS grant on every object this build writes to. |

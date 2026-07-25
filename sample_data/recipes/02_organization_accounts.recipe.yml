@@ -1,0 +1,281 @@
+# =====================================================================
+# NPC fundraising sample dataset -- recipe 02 of 10
+# Organization Accounts (5).
+# Feeds transform script(s): 280 (OrganizationAccount)
+#
+# Part of sample_data/ -- see sample_data/README.md for the full,
+# ordered generate + load sequence. Fully synthetic data (no real
+# client data). Runs standalone with `snowfakery run <this file>`, or
+# is regenerated from the target org's describe() via the
+# generate-related-mock-data command shown in the README.
+# =====================================================================
+- snowfakery_version: 3
+- object: Account
+  count: 5
+  fields:
+    Name:
+      fake: Company
+    LastName:
+      fake: LastName
+    FirstName:
+      fake: FirstName
+    Salutation:
+      random_choice:
+      - Mr.
+      - Ms.
+      - Mrs.
+      - Dr.
+      - Prof.
+      - Mx.
+    Type:
+      random_choice:
+      - Analyst
+      - Competitor
+      - Customer
+      - Integrator
+      - Investor
+      - Partner
+      - Press
+      - Prospect
+      - Reseller
+      - Other
+    BillingStreet:
+      fake: StreetAddress
+    BillingCity:
+      fake: City
+    BillingState:
+      fake: StateAbbr
+    BillingPostalCode:
+      fake: Postcode
+    BillingCountry:
+      fake: CountryCode
+    BillingGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    ShippingStreet:
+      fake: StreetAddress
+    ShippingCity:
+      fake: City
+    ShippingState:
+      fake: StateAbbr
+    ShippingPostalCode:
+      fake: Postcode
+    ShippingCountry:
+      fake: CountryCode
+    ShippingGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    Phone:
+      fake: PhoneNumber
+    Fax:
+      fake: PhoneNumber
+    AccountNumber:
+      fake: Word
+    Website:
+      fake: Url
+    Sic:
+      fake: Word
+    Industry:
+      random_choice:
+      - Agriculture
+      - Apparel
+      - Banking
+      - Biotechnology
+      - Chemicals
+      - Communications
+      - Construction
+      - Consulting
+      - Education
+      - Electronics
+      - Energy
+      - Engineering
+      - Entertainment
+      - Environmental
+      - Finance
+      - Food & Beverage
+      - Government
+      - Healthcare
+      - Hospitality
+      - Insurance
+      - Machinery
+      - Manufacturing
+      - Media
+      - Not For Profit
+      - Other
+      - Recreation
+      - Retail
+      - Shipping
+      - Technology
+      - Telecommunications
+      - Transportation
+      - Utilities
+    AnnualRevenue:
+      fake.Pyfloat:
+        left_digits: 5
+        right_digits: 2
+        positive: true
+    NumberOfEmployees:
+      fake.RandomInt:
+        min: 0
+        max: 1000
+    Ownership:
+      random_choice:
+      - Public
+      - Private
+      - Subsidiary
+      - Other
+    TickerSymbol:
+      fake: Word
+    Description:
+      fake: Paragraph
+    Rating:
+      random_choice:
+      - Hot
+      - Warm
+      - Cold
+    Site:
+      fake: Word
+    SourceSystemIdentifier:
+      fake: Word
+    PersonMailingStreet:
+      fake: StreetAddress
+    PersonMailingCity:
+      fake: City
+    PersonMailingState:
+      fake: StateAbbr
+    PersonMailingPostalCode:
+      fake: Postcode
+    PersonMailingCountry:
+      fake: CountryCode
+    PersonMailingGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    PersonOtherStreet:
+      fake: StreetAddress
+    PersonOtherCity:
+      fake: City
+    PersonOtherState:
+      fake: StateAbbr
+    PersonOtherPostalCode:
+      fake: Postcode
+    PersonOtherCountry:
+      fake: CountryCode
+    PersonOtherGeocodeAccuracy:
+      random_choice:
+      - Address
+      - NearAddress
+      - Block
+      - Street
+      - ExtendedZip
+      - Zip
+      - Neighborhood
+      - City
+      - County
+      - State
+      - Unknown
+    PersonMobilePhone:
+      fake: PhoneNumber
+    PersonHomePhone:
+      fake: PhoneNumber
+    PersonOtherPhone:
+      fake: PhoneNumber
+    PersonAssistantPhone:
+      fake: PhoneNumber
+    PersonEmail:
+      fake: Email
+    PersonTitle:
+      fake: Word
+    PersonDepartment:
+      fake: Word
+    PersonAssistantName:
+      fake: Company
+    PersonLeadSource:
+      random_choice:
+      - Advertisement
+      - Employee Referral
+      - External Referral
+      - Partner
+      - Public Relations
+      - Seminar - Internal
+      - Seminar - Partner
+      - Trade Show
+      - Web
+      - Word of mouth
+      - Other
+    PersonBirthdate:
+      fake.DateBetween:
+        start_date: -3y
+        end_date: +1y
+    PersonEmailBouncedReason:
+      fake: Email
+    PersonEmailBouncedDate:
+      fake.DateTimeBetween:
+        start_date: -3y
+        end_date: +1y
+    PersonMaritalStatus:
+      random_choice:
+      - Married
+      - Single
+      - Divorced
+      - Widowed
+      - Separated
+    PersonGenderIdentity:
+      random_choice:
+      - Male
+      - Female
+      - Nonbinary
+      - Not Listed
+    AccountSource:
+      random_choice:
+      - Advertisement
+      - Employee Referral
+      - External Referral
+      - Partner
+      - Public Relations
+      - Seminar - Internal
+      - Seminar - Partner
+      - Trade Show
+      - Web
+      - Word of mouth
+      - Other
+    SicDesc:
+      fake: Word
+    Preferred_Contact_Method__c:
+      random_choice:
+      - Email
+      - None
+      - Phone
+    MigrationID__c:
+      fake: Word
+    MigrationID__pc:
+      fake: Word
