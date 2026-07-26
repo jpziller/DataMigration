@@ -5681,10 +5681,26 @@ non-goal) — justified because a *reset/purge* of test data has no reason
 to keep records recoverable, and soft-delete demonstrably can't reset this
 object graph. Standard soft-delete stays the default everywhere.
 
-**Live status**: unit-validated; the full live re-run against
-`NPC_TARGET_v2` is blocked only by this org's *pre-existing* limbo records
-(62 transactions soft-deleted in earlier passes, now past API recovery,
-blocking 10 commitments until the async purge clears). A fresh clone using
-`--hard-delete` from the start never creates that residue, so the clone
-experience is fixed; this one org just has to wait out its legacy state
-before its own reset can finish.
+**Live status**: `--hard-delete` is now **live-validated end to end** —
+the full reset of the NPC sample-data family against `NPC_TARGET_v2`
+completed cleanly (0 of 16 objects remaining), hard-deleting 16
+transactions, 9 commitments, and the rest.
+
+**CORRECTION (2026-07-26)** — the block that motivated the "async purge"
+framing above was **misdiagnosed**. The real cause was not Recycle-Bin/
+async-purge residue: it was **live, auto-generated `GiftTransaction`s** a
+recurring `GiftCommitment`'s `CreateTransactions` schedule had generated
+across its date range (past *and* future), which carry **no
+`MigrationID__c`** — so the `MigrationID__c != null` delete never saw them,
+and they stayed live and blocked every commitment delete. The fix was to
+scope the transaction delete by the real relationship
+(`GiftCommitmentId IN (SELECT Id FROM GiftCommitment WHERE MigrationID__c
+!= null)`), which caught the keyless auto-generated children (only 16, once
+scoped to *our* commitments). `--hard-delete` is still the right tool (it
+avoids the separate Recycle-Bin-residue trap, which is real), but it was
+not the primary blocker. Generalized as a cross-cloud pattern in
+`okf/salesforce-platform/blocked-by-platform-managed-records-or-state.md`,
+and the NPC reset doc is corrected. Diagnostic lesson: a delete error
+names the blocking children but not their live/deleted status — confirm by
+querying the relationship (`queryAll`, `IsDeleted`, the key), don't trust a
+migration-key-scoped count.

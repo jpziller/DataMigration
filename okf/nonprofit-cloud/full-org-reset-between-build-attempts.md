@@ -50,32 +50,61 @@ Contact
 Account
 ```
 
-For every object except `AccountContactRelation`, this is a plain
-`bulkops <Object> delete --where "MigrationID__c != null"` — `--dry-run`
-first, confirm the matched count looks right, then the real delete.
+For most objects this is a plain
+`bulkops <Object> delete --where "MigrationID__c != null" --hard-delete` —
+`--dry-run` first, confirm the matched count, then the real delete. Two
+objects need special handling, below (`GiftTransaction` scope, and
+`AccountContactRelation` traced by relationship), plus `GiftDesignation`
+must be deactivated first.
 
-**Use `--hard-delete` for this whole family (added ROADMAP #84, found
-live 2026-07-25).** A plain (standard) delete only soft-deletes —
-recoverable from the Recycle Bin — and that residue **blocks the reset**:
-`GiftCommitment` deletion fails with `DELETE_FAILED: ...associated with
-the following gift transactions` when its child `GiftTransaction`s are
-merely *soft*-deleted, because the platform's association validation
-counts Recycle-Bin / `queryAll`-retained children. Worse, once
-soft-deleted via the Bulk API those children can't be cleared on demand:
-`emptyRecycleBin()` returns `INVALID_ID_FIELD: no recycle bin entry
-found` and `undelete()` returns `UNDELETE_FAILED: Entity is not in the
-recycle bin` (Bulk-API-deleted records don't sit in the user-scoped
-recycle bin, and once it's emptied they enter an async physical-purge
-limbo that is still `queryAll`-visible, still blocking, and **cannot be
-forced** — you must wait for Salesforce's background purge). Avoid the
-whole trap by hard-deleting from the start:
-`bulkops <Object> delete --where "MigrationID__c != null" --hard-delete`,
-which uses Bulk API 2.0 `hardDelete` to remove records permanently,
-bypassing the Recycle Bin, so no residue is ever left to block a parent.
+## `GiftCommitment` is blocked by auto-generated `GiftTransaction`s that carry no migration key — scope the transaction delete by `GiftCommitmentId`
+**Found live 2026-07-26** (this is a correction — an earlier version of
+this doc misdiagnosed the block as Recycle-Bin/async-purge residue; that
+was wrong). A recurring `GiftCommitment`'s schedule (`Type =
+CreateTransactions`) **auto-generates real, live `GiftTransaction` records
+across the schedule's whole date range** — past *and* future. These are
+platform-created, so they carry **no `MigrationID__c`**, and a
+`GiftTransaction delete --where "MigrationID__c != null"` never touches
+them. They stay live and **block every `GiftCommitment` delete**:
+
+```
+DELETE_FAILED: ...could not be completed because it is associated with the
+following gift transactions: Snowfake-Underwood LLC - 53296.19 -
+2026-08-01, Snowfake-Underwood LLC - 53296.19 - 2024-08-24
+```
+
+The tell: a migration-key-scoped `COUNT()` says **0 live GiftTransactions
+remain**, yet the delete still fails naming transactions — because your key
+is blind to the auto-generated ones. Confirm with
+`queryAll ... SELECT Id, IsDeleted, MigrationID__c FROM GiftTransaction
+WHERE GiftCommitmentId = '<id>'` — a **live child with a NULL
+MigrationID__c** is the smoking gun. This is the general
+[Blocked by platform-managed records or state](../salesforce-platform/blocked-by-platform-managed-records-or-state.md)
+pattern; NPC is one instance of it.
+
+**Fix — delete the transactions scoped by the real relationship, not by
+the key:**
+```
+bulkops GiftTransaction delete --where \
+  "GiftCommitmentId IN (SELECT Id FROM GiftCommitment WHERE MigrationID__c != null)" \
+  --hard-delete
+```
+Scoping to *your* commitments keeps the org's own reference/demo
+transactions (there can be thousands) untouched. Then the
+`GiftCommitment` delete succeeds.
+
+## `--hard-delete` is required for this family (Recycle-Bin residue also blocks a parent)
+**A second, related trap** (ROADMAP #84): a plain (soft) delete leaves
+records in the Recycle Bin, and *that* residue can also block a parent
+delete — and once soft-deleted via the Bulk API it can't be cleared on
+demand (`emptyRecycleBin()` → `no recycle bin entry found`, `undelete()` →
+`Entity is not in the recycle bin`; the records sit in an async
+physical-purge limbo that only Salesforce's background job clears). Avoid
+both traps by hard-deleting from the start: `--hard-delete` uses Bulk API
+2.0 `hardDelete` to remove records permanently, bypassing the Recycle Bin.
 **Prerequisite:** the load user needs the **"Bulk API Hard Delete"**
-system permission, or the API rejects the call — deploy and assign the
-committed `MigrationHardDelete` permission set for it (`sf project deploy
-start --source-dir
+system permission — deploy and assign the committed `MigrationHardDelete`
+permission set (`sf project deploy start --source-dir
 force-app/main/default/permissionsets/MigrationHardDelete.permissionset-meta.xml
 --target-org <alias>`, then `sf org assign permset --name
 MigrationHardDelete --target-org <alias>`; kept separate from

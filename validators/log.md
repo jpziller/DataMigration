@@ -1,5 +1,15 @@
 # Validators bundle update log
 
+## 2026-07-26
+* **Update**: [GiftCommitment validator](GiftCommitment.md) -- a recurring
+  commitment's schedule (`CreateTransactions`) auto-generates keyless
+  (no `MigrationID__c`) `GiftTransaction`s across its date range that block
+  the commitment's deletion; a reset must delete transactions scoped by
+  `GiftCommitmentId`, not the migration key. Found live during the
+  sample-data reset test; also the NPC instance of the new cross-cloud
+  pattern
+  [okf/salesforce-platform/blocked-by-platform-managed-records-or-state.md](../okf/salesforce-platform/blocked-by-platform-managed-records-or-state.md).
+
 ## 2026-07-25
 * **Consolidated (Replace model)**: promoted the last two corrected
   scripts from `attempts/2026-07-21-npc-sample-v2/sql/` into
