@@ -50,7 +50,9 @@ designations, etc.), and `bulkops` pushes each to the org in dependency order.
    may safely load into.
 3. The `MigrationID__c` external-id fields + field-level security deployed to
    that org (`force-app/main/default/objects/*` and the `MigrationFieldAccess`
-   permission set).
+   permission set). To reset/reload a test org, also deploy + assign the
+   `MigrationHardDelete` permission set (grants "Bulk API Hard Delete" — see
+   [Resetting a test org](#resetting-a-test-org-first)).
 4. If the org isn't empty, wipe prior sample records first — see
    [Resetting a test org](#resetting-a-test-org-first).
 
@@ -149,7 +151,8 @@ soft-deletes, and the Recycle-Bin residue blocks the reset (a
 soft-deleted, and those can't be cleared on demand afterward). Delete with
 `bulkops <Object> delete --where "MigrationID__c != null" --hard-delete` so
 records are removed permanently — the load user needs the **"Bulk API Hard
-Delete"** permission enabled. See the reset doc for the full finding.
+Delete"** permission (deploy + assign the committed `MigrationHardDelete`
+permission set). See the reset doc for the full finding.
 
 ## Notes on the reference implementation
 

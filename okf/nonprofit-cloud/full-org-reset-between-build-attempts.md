@@ -73,8 +73,15 @@ whole trap by hard-deleting from the start:
 which uses Bulk API 2.0 `hardDelete` to remove records permanently,
 bypassing the Recycle Bin, so no residue is ever left to block a parent.
 **Prerequisite:** the load user needs the **"Bulk API Hard Delete"**
-system permission enabled, or the API rejects the call. Hard delete is
-irreversible — the Live-Org Write Confirmation Rule (#2) applies in full.
+system permission, or the API rejects the call — deploy and assign the
+committed `MigrationHardDelete` permission set for it (`sf project deploy
+start --source-dir
+force-app/main/default/permissionsets/MigrationHardDelete.permissionset-meta.xml
+--target-org <alias>`, then `sf org assign permset --name
+MigrationHardDelete --target-org <alias>`; kept separate from
+`MigrationFieldAccess` so this irreversible permission stays opt-in). Hard
+delete is irreversible — the Live-Org Write Confirmation Rule (#2) applies
+in full.
 
 # Two real platform quirks found live while doing this
 
