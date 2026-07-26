@@ -1,5 +1,16 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
+   LOAD ORDER (resolved 2026-07-26): load THIS table BEFORE GiftRefund (400)
+   and GiftSoftCredit (410), right after GiftTransaction (390). A refund
+   asynchronously reduces GiftTransaction.CurrentAmount (= OriginalAmount -
+   RefundedAmount), and the platform caps a transaction's total designation
+   Amount at CurrentAmount -- so a designation inserted AFTER its refund
+   fails FIELD_INTEGRITY_EXCEPTION ("...doesn't exceed the transaction
+   amount"). Designating first (against the full amount) always works; the
+   refund reduces the balance afterward. The lower script number (400 < 430)
+   is dependency-build order, not load order. See
+   validators/GiftTransactionDesignation.md.
+
    PROMOTED (2026-07-24) from attempts/2026-07-21-npc-sample-v2/sql/ --
    the Replace-model promotion described in CLAUDE.md's "Library vs.
    attempts workspace" section, now that this fix is proven live (39/40

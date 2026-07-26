@@ -1,5 +1,18 @@
 # Validators bundle update log
 
+## 2026-07-26 (3)
+* **Resolved**: [GiftTransactionDesignation validator](GiftTransactionDesignation.md)
+  -- the long-open "standalone + fully-refunded designation fails" gap is
+  solved, and the old "standalone vs. commitment-linked" theory was wrong
+  (n=1-vs-n=1 coincidence). Real cause: the total designation Amount is
+  capped at `GiftTransaction.CurrentAmount` (= OriginalAmount −
+  RefundedAmount), and a refund reduces CurrentAmount asynchronously -- so
+  it's a refund-vs-designation load-order race. Fix: **load
+  GiftTransactionDesignation (430) BEFORE GiftRefund (400)**. Confirmed
+  live 2026-07-26 (GT-21 failed with CurrentAmount=0; GT-26, same
+  CurrentAmount=0, succeeded because its designation was inserted before
+  the refund landed). Runbook + `430` header updated. See ROADMAP #86.
+
 ## 2026-07-26 (2)
 * **New**: [CampaignMember validator](CampaignMember.md) -- found during
   the sample-data reload test: `340` assigns `ContactId` from a Person
