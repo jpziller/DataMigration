@@ -43,6 +43,11 @@ discovered the hard way — nothing exists preemptively.
   createable=false, ScheduleType must match its Schedule's TransactionPeriod,
   and a recurring schedule auto-generates keyless GiftTransactions that
   block deletion (reset by GiftCommitmentId, not the migration key).
+* [CampaignMember validator](CampaignMember.md) - ContactId can be a Person
+  Account's shadow Contact (PersonContactId) read from the replicated
+  Account snapshot -- re-replicate Account after Person Accounts load, or
+  it fails INVALID_CROSS_REFERENCE_KEY; ContactId/CampaignId are create-only
+  (delete+reinsert, not upsert).
 * [GiftTransaction validator](GiftTransaction.md) - Name required despite
   createable=false, GiftCommitmentId links back to an originating commitment,
   GiftCommitmentScheduleId gated by the Single-Transaction-for-Custom-Schedule rule.
