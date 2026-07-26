@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>Migration Hard Delete</label>
+    <description>Grants Bulk API Hard Delete, needed for bulkops delete --hard-delete (permanent removal) during a full org reset (ROADMAP #84). Assign directly to the load user; kept separate from MigrationFieldAccess so this irreversible permission stays opt-in.</description>
+    <hasActivationRequired>false</hasActivationRequired>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>BulkApiHardDelete</name>
+    </userPermissions>
+</PermissionSet>
