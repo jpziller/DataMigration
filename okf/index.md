@@ -26,3 +26,8 @@ described and linked to their real source rather than duplicated.
   (SFDO community, CumulusCI, Snowfakery), so a migration reuses one
   before authoring its own -- the describe-and-link companion to this
   repo's own `sample_data/` recipes.
+* [Salesforce platform (cross-cloud) patterns](salesforce-platform/index.md) -
+  migration knowledge true across Salesforce clouds, not tied to one
+  target product -- the general pattern a cloud-specific finding is an
+  example of (e.g. an operation blocked by platform-managed records or
+  state your migration key doesn't cover).

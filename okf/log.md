@@ -1,5 +1,22 @@
 # okf bundle update log
 
+## 2026-07-26
+* **New subject area**: [Salesforce platform (cross-cloud) patterns](salesforce-platform/index.md)
+  with its first pattern, [Blocked by platform-managed records or
+  state](salesforce-platform/blocked-by-platform-managed-records-or-state.md)
+  -- the generic, cross-cloud shape behind a class of resets/updates that
+  fail even though a migration-key-scoped query says the data is clean
+  (auto-generated child records with no migration key, or a state lock).
+  How to recognize, diagnose (query the real relationship, not your key),
+  and fix it. Found live during the NPC sample-data reset test (ROADMAP
+  #84); this generalizes it so the next cloud's version is recognized
+  before it bites.
+* **Correction**: [full-org-reset-between-build-attempts.md](nonprofit-cloud/full-org-reset-between-build-attempts.md)
+  -- the GiftCommitment delete block was misdiagnosed as recycle-bin/async-
+  purge residue; the real cause is live, auto-generated GiftTransactions
+  from recurring schedules (no MigrationID__c). Corrected the reset to
+  scope the GiftTransaction delete by GiftCommitmentId, plus --hard-delete.
+
 ## 2026-07-25
 * **New subject area**: [Synthetic-data recipes (external sources +
   coverage)](synthetic-data-recipes/index.md) with its first reference,

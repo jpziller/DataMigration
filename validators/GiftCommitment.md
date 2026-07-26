@@ -2,13 +2,44 @@
 type: ObjectValidator
 title: GiftCommitment validator
 description: Object-specific findings for GiftCommitment (Nonprofit Cloud/
-  AFNP) -- Name is a genuinely required field with no default, and
+  AFNP) -- Name is a genuinely required field with no default;
   ScheduleType must match the Gift Commitment Schedule's own
-  TransactionPeriod mapping.
-tags: [object-validator, gift-commitment, nonprofit-cloud, afnp, npsp-to-npc]
-timestamp: "2026-07-17"
+  TransactionPeriod mapping; and a recurring commitment's schedule
+  auto-generates keyless GiftTransactions that block its deletion, so a
+  reset must delete transactions scoped by GiftCommitmentId, not
+  MigrationID__c.
+tags: [object-validator, gift-commitment, nonprofit-cloud, afnp, npsp-to-npc, reset, auto-generated-records]
+timestamp: "2026-07-26"
 ---
 # GiftCommitment validator
+
+## A recurring commitment's schedule auto-generates GiftTransactions that block its deletion -- reset by GiftCommitmentId, not the migration key
+**Found:** 2026-07-26, full sample-data reset+reload test against
+`NPC_TARGET_v2`. A recurring `GiftCommitment`'s schedule (`Type =
+CreateTransactions`) **auto-generates real, live `GiftTransaction` records
+across the schedule's whole date range** -- past and future. These are
+platform-created, so they carry **no `MigrationID__c`**, and they block the
+`GiftCommitment` delete:
+`DELETE_FAILED: ...associated with the following gift transactions...`.
+The tell: a `MigrationID__c != null` `COUNT()` says 0 live transactions
+remain, yet the delete still fails naming transactions -- the migration key
+is blind to the auto-generated ones.
+**What to do:** in a reset, delete the transactions scoped by the real
+relationship, not the key --
+`bulkops GiftTransaction delete --where "GiftCommitmentId IN (SELECT Id
+FROM GiftCommitment WHERE MigrationID__c != null)" --hard-delete` -- which
+catches the keyless auto-generated children while leaving the org's own
+reference transactions untouched. Then the commitment deletes. Confirm
+what's really linked with `queryAll ... WHERE GiftCommitmentId = '<id>'`
+(check `IsDeleted` + `MigrationID__c`), not a key-scoped count. This is the
+NPC instance of the cross-cloud
+[Blocked by platform-managed records or state](../okf/salesforce-platform/blocked-by-platform-managed-records-or-state.md)
+pattern; see also
+`okf/nonprofit-cloud/full-org-reset-between-build-attempts.md`.
+**Load-side implication:** the same auto-generation means loading a
+recurring commitment with a `CreateTransactions` schedule makes the
+platform generate transactions -- migrating those transactions yourself
+too would duplicate them. Decide deliberately which side creates them.
 
 ## Name is a genuinely required field with no default
 **Found:** 2026-07-17, NPSP-to-NPC migration proof-of-concept, first

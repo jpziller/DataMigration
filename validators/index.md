@@ -40,7 +40,9 @@ discovered the hard way — nothing exists preemptively.
   polymorphism, the Recurrence* interdependent cluster, Subject's
   combobox type.
 * [GiftCommitment validator](GiftCommitment.md) - Name required despite
-  createable=false, ScheduleType must match its Schedule's TransactionPeriod.
+  createable=false, ScheduleType must match its Schedule's TransactionPeriod,
+  and a recurring schedule auto-generates keyless GiftTransactions that
+  block deletion (reset by GiftCommitmentId, not the migration key).
 * [GiftTransaction validator](GiftTransaction.md) - Name required despite
   createable=false, GiftCommitmentId links back to an originating commitment,
   GiftCommitmentScheduleId gated by the Single-Transaction-for-Custom-Schedule rule.
