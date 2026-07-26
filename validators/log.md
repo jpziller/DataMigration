@@ -1,5 +1,16 @@
 # Validators bundle update log
 
+## 2026-07-26 (2)
+* **New**: [CampaignMember validator](CampaignMember.md) -- found during
+  the sample-data reload test: `340` assigns `ContactId` from a Person
+  Account's platform shadow Contact (`PersonContactId`) read from the
+  replicated `dbo.Account` snapshot, which is stale until Person Accounts
+  load -- re-replicate `Account` first or it fails
+  `INVALID_CROSS_REFERENCE_KEY`. Also: `ContactId`/`CampaignId` are
+  create-only (delete + re-insert to fix a partial load, not upsert), and
+  use `--fingerprint-columns MigrationID__c` (boolean fields). See
+  ROADMAP #85.
+
 ## 2026-07-26
 * **Update**: [GiftCommitment validator](GiftCommitment.md) -- a recurring
   commitment's schedule (`CreateTransactions`) auto-generates keyless

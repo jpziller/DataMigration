@@ -98,28 +98,54 @@ loading — Hard Rule 6 (`add-bulk-load-sort-column`), Rule 7
 `bulkops <Object> insert <Object>_Load --external-id MigrationID__c
 --email-deliverability <what Setup shows>`.
 
+> **Always pass `--fingerprint-columns MigrationID__c` on these inserts.**
+> Many of these objects carry boolean fields (`IsActive`, `IsPrimary`, …).
+> Bulk API 2.0 echoes a sent boolean back in a different string form than
+> pandas wrote, which silently breaks `bulk_op()`'s default result match —
+> you'll see `submitted N, succeeded 0, failed 0`. That's not just cosmetic:
+> for a **parent** object (e.g. Campaign) it also means the real Id never
+> writes back to the Load table, so the child transform can't reference it.
+> Fingerprinting on the migration key alone avoids the whole class. (Found
+> live, 2026-07-26 reload test.)
+
 1. **Household Account + Contact** → run `230`, `240`, load Account then Contact.
 2. **AccountContactRelation / PartyRelationshipGroup / ContactContactRelation**
    → `250` (no-op — ACR is auto-created), `260`, `270`. Replicate the fixed
    `PartyRoleRelation` reference set first.
 3. **Organization Account** → `280`, load.
 4. **Person Account** → `290`, load.
+   **Then re-replicate `Account`** (`replicate Account --raw`) — the
+   CampaignMember transform (`340`) reads each Person Account's platform-
+   created shadow Contact via `PersonContactId` from the replicated
+   `dbo.Account` snapshot, which is stale until you refresh it. Skip this and
+   ~all CampaignMembers referencing a person account fail
+   `INVALID_CROSS_REFERENCE_KEY`. (Found live, 2026-07-26.)
 5. **ContactPoint Address / Phone / Email** → `300`, `310`, `320`, load each.
 6. **Campaign + CampaignMember** → `330`, `340`, load.
 7. **GiftDesignation** → `350`, load.
 8–9. **GiftCommitment (+ Schedule)** → `360`, load; then `370` **replicates**
-   `GiftCommitmentSchedule` and inserts only genuinely-missing schedules.
-10. **GiftTransaction + GiftRefund + GiftSoftCredit** → `390`, `400`, `410`, load.
+   `GiftCommitmentSchedule` and inserts only genuinely-missing schedules, load.
+10. **GiftTransaction + GiftRefund + GiftSoftCredit** →
+    **re-replicate `GiftCommitmentSchedule`** (`replicate GiftCommitmentSchedule
+    --raw`) first, so `390` can join your just-loaded schedules (the group-8–9
+    snapshot predates them); then `390`, `400`, `410`, load each.
 11. **GiftDefaultDesignation + GiftTransactionDesignation** → `420` (no-op — GDD
     is auto-created), then **replicate** `GiftDefaultDesignation` and
     `GiftDesignation --raw`, and run `430`, load.
 
-The mid-stream `replicate` steps (schedules before group 10, designations before
-group 11) exist because the platform auto-creates those child records on parent
-insert — the transforms read the real auto-created rows rather than inventing
-them. See `validators/GiftCommitmentSchedule.md`,
-`validators/GiftDefaultDesignation.md`, and
-`validators/GiftTransactionDesignation.md`.
+The mid-stream `replicate` steps exist for two reasons — the platform
+auto-creates some child records on parent insert (`GiftCommitmentSchedule`,
+`GiftDefaultDesignation`), *and* several transforms read a parent's real,
+just-loaded Id (or a platform-derived one like `PersonContactId`) back from a
+replicated snapshot, which must be **refreshed after that parent loads**. See
+`validators/GiftCommitmentSchedule.md`, `validators/GiftDefaultDesignation.md`,
+`validators/GiftCommitment.md`, and `validators/GiftTransactionDesignation.md`.
+
+**Two rows may legitimately not load** (both known, not setup errors): a
+`GiftTransaction` whose randomly-generated due date can't be reconciled to its
+schedule window (mostly fixed by `390`'s two-sided clamp), and a standalone,
+fully-refunded transaction's `GiftTransactionDesignation` (a documented
+open platform gap — see `validators/GiftTransactionDesignation.md`).
 
 ## Expected results
 

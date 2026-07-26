@@ -96,6 +96,7 @@ Assigned AS (
         CASE WHEN m._MockRowId % 5 < 3 THEN gcs.Id ELSE NULL END AS ScheduleCandidateId,
         gcs.TransactionPeriod,
         gcs.StartDate AS ScheduleStartDate,
+        gcs.EndDate AS ScheduleEndDate,
         ROW_NUMBER() OVER (PARTITION BY gcs.Id ORDER BY m._MockRowId) AS SeqWithinSchedule
     FROM [dbo].[GiftTransaction_Mock] m
     JOIN AccountPool ap ON ap.AccountSeq = ((m._MockRowId - 1) % ap.AccountCount) + 1
@@ -116,8 +117,16 @@ SELECT
     CampaignId,
     Description,
     TransactionDate,
+    -- CORRECTED again, live (2026-07-26 reload test): a commitment-linked
+    -- TransactionDueDate must fall WITHIN the schedule's StartDate..EndDate
+    -- range, not just on/after StartDate. The lower-bound clamp alone left
+    -- 1 of 40 rows failing INVALID_INPUT ("Enter a due date that's on or
+    -- between the Start Date and End Date of the schedule") when Snowfakery's
+    -- independently-generated due date landed AFTER the schedule's EndDate.
+    -- Clamp both bounds (EndDate may be NULL/open-ended -> no upper clamp).
     CASE
         WHEN ScheduleCandidateId IS NOT NULL AND ScheduleStartDate > TransactionDueDate THEN ScheduleStartDate
+        WHEN ScheduleCandidateId IS NOT NULL AND ScheduleEndDate IS NOT NULL AND ScheduleEndDate < TransactionDueDate THEN ScheduleEndDate
         ELSE TransactionDueDate
     END AS TransactionDueDate,
     Status,

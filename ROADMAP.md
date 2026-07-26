@@ -5704,3 +5704,40 @@ and the NPC reset doc is corrected. Diagnostic lesson: a delete error
 names the blocking children but not their live/deleted status — confirm by
 querying the relationship (`queryAll`, `IsDeleted`, the key), don't trust a
 migration-key-scoped count.
+
+## 85. Full sample-data reload validated live end to end; runbook + transform fixes from what it surfaced (2026-07-26)
+
+After the clean reset (#84), the entire `sample_data` reload was run live
+against `NPC_TARGET_v2` per the runbook — all 11 build groups,
+generate → transform → load, 322 records across 16 objects. The pipeline
+works, but the run surfaced several real gaps a clone would hit, now fixed:
+
+- **Stale replicated snapshot for platform-derived Ids.** The CampaignMember
+  transform (`340`) reads each Person Account's shadow Contact via
+  `PersonContactId` from the replicated `dbo.Account` snapshot; that snapshot
+  is stale until Person Accounts load, so ~10 CampaignMembers failed
+  `INVALID_CROSS_REFERENCE_KEY`. Same shape as `390` joining a pre-load
+  `GiftCommitmentSchedule` snapshot. Fix (runbook): **re-replicate the parent
+  after it loads** (`Account` after group 4, `GiftCommitmentSchedule` after
+  `370`). Captured in `validators/CampaignMember.md` (new) + `sample_data/README.md`.
+- **Boolean-field result-match / parent Id writeback.** Objects with boolean
+  fields report `submitted N, succeeded 0, failed 0` under `bulk_op()`'s
+  default fingerprint (the AccountContactRelation boolean-echo issue), and for
+  a *parent* (Campaign) that also means its real Id never writes back, breaking
+  the child load. Fix (runbook): **always pass `--fingerprint-columns
+  MigrationID__c`** on these inserts.
+- **`390` due-date clamp was one-sided.** It clamped `TransactionDueDate` up to
+  the schedule StartDate but not down to EndDate, so 1 of 40 failed
+  `INVALID_INPUT`. Fixed: two-sided clamp (EndDate may be NULL/open-ended).
+- **`430` could emit an orphan row** for a GiftTransaction that failed to load
+  (NULL Id → NULL GiftTransactionId → its own spurious failure). Fixed:
+  `WHERE GiftTransactionId IS NOT NULL`.
+
+**Result after fixes**: the only remaining expected non-load is the documented
+standalone + fully-refunded `GiftTransactionDesignation` gap
+(`validators/GiftTransactionDesignation.md`). The transform fixes land in the
+library (`sql/transformations/390`,`430`); the operational sequencing lands in
+`sample_data/README.md` so a clone runs clean. Note also confirmed live: this
+org's schedules and GiftDefaultDesignations were **not** auto-created
+immediately on commitment insert (deferred to the nightly NextGen job), so
+`370`/`430`'s check-first fallbacks behaved correctly at load time.

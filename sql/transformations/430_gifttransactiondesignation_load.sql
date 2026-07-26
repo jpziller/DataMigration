@@ -170,4 +170,10 @@ SELECT
     END AS Amount,
     AllocatedPercentage AS [Percent]
 INTO [dbo].[GiftTransactionDesignation_Load]
-FROM WithAmount;
+FROM WithAmount
+-- Defensive (found live, 2026-07-26 reload test): a GiftTransaction that
+-- FAILED to load has a NULL Id in GiftTransaction_Load, which would
+-- otherwise produce an orphan designation row here (NULL GiftTransactionId)
+-- that then fails its own insert. Exclude those so a partial transaction
+-- load never cascades a spurious failure into this table.
+WHERE GiftTransactionId IS NOT NULL;
