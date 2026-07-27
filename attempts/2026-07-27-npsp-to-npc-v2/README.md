@@ -33,13 +33,16 @@ correct.**
 | PartyRelationshipGroup | `040` | Carry forward unchanged (Category left unset / address fields already corrected 2026-07-18) |
 | Campaign | `050` | Carry forward unchanged |
 | CampaignMember | `060` | Carry forward unchanged |
-| GiftDesignation | (increment 2) | Rework — designation chain feeds GiftDefaultDesignation/GiftTransactionDesignation |
-| GiftCommitment (RD + Opportunity branches) | (increment 2) | Rework — schedule/transaction auto-creation; check-first |
-| GiftCommitmentSchedule | (increment 2) | Rework — check-first (mirror `370`), forward-window date guard |
-| GiftTransaction | (increment 2) | Rework — two-sided due-date clamp; expect keyless auto-generated transactions for recurring commitments |
-| GiftDefaultDesignation | (increment 2) | **NEW — doc-only.** Platform auto-creates it; never insert (mirror `420`) |
-| GiftTransactionDesignation | (increment 2) | Rework — inherit from GiftDefaultDesignation; respect `CurrentAmount` cap; load before refunds |
-| GiftRefund / GiftSoftCredit / ContactContactRelation / ContactPoint* | (increment 2, scope decision) | NEW scope where the NPSP source supports it |
+| GiftDesignation | `070` | Carry forward (GAU → GiftDesignation); note the auto-created GiftDefaultDesignation for the downstream consumer |
+| GiftCommitment (from RD) | `080` | Carry forward — already had the ScheduleType cross-validation |
+| GiftCommitmentSchedule (from RD) | `090` | Carry forward the check-first/Custom-only fix; **v2 add**: defensive forward-window guard on EndDate (finding 4) |
+| GiftCommitment (from Opportunity) | `100` | Carry forward |
+| GiftCommitmentSchedule (from Opportunity) | `110` | Carry forward |
+| GiftTransaction (from Opportunity) | `120` | Carry forward the live-replicate GiftCommitmentScheduleId derivation; **v2 add**: defensive two-sided due-date clamp (finding 4) |
+| GiftTransaction (from Payment) | `130` | Carry forward (Single-Transaction-for-Custom-Schedule handling); clamp documented, not baked (no schedule joined) |
+| GiftDefaultDesignation | `140` | **NEW — doc-only.** Platform auto-creates it; never insert (mirror `420`) |
+| GiftTransactionDesignation (from Allocation) | `150` | Carry forward the proportional split; **v2 add**: load-before-refunds order + `CurrentAmount` note (findings 2/3) + the Allocation-vs-default open question flagged inline |
+| GiftRefund / GiftSoftCredit / ContactContactRelation / ContactPoint* | step 3 scope | NEW scope where the NPSP source supports it — deferred; building untested transforms without the real source shape would be speculative (see below) |
 
 ## Open reconciliation questions (want architect/live confirmation — step 3)
 
@@ -59,15 +62,34 @@ correct.**
 
 ## Status
 
-- **Increment 1 (this commit):** scaffold + charter + the account/relationship
+- **Increment 1 (done):** scaffold + charter + the account/relationship
   foundation (`010-060`), carried forward with v2 headers, plus the ACR
   correction folded back into the rebuild plan.
-- **Increment 2 (next):** the gift objects with their corrections, the new
-  doc-only GiftDefaultDesignation, scope-expansion objects, the mapping
-  workbooks, and a Migration Run Book tab for this attempt.
-- **Step 3:** prove on a real/realistic NPSP source, resolve the open
-  questions above, then promote (Replace model) to the library.
+- **Increment 2 (done):** the full core gift chain (`070-150`) — carried
+  forward from the PoC's live-validated `150-220` (which already held the
+  2026-07-18 schedule-auto-creation fixes), plus the genuine v2
+  additions: the new doc-only `140` GiftDefaultDesignation, the defensive
+  date guards on `090`/`120` (finding 4), and the load-before-refunds order
+  + `CurrentAmount` note + the flagged Allocation-vs-default open question on
+  `150` (findings 2/3).
+- **Deferred to step 3 (needs the real NPSP source):**
+  - **Mapping workbooks** — the library's `mapping/npc_*_from_*.xlsx` carry
+    forward unchanged (same NPSP→NPC field mappings); regenerating a fresh
+    per-object mapping doc needs the source tables profiled, which needs a
+    real NPSP source replicated. Not a v2 change.
+  - **Migration Run Book tab** — generated for the attempt at load time
+    (`generate-migration-run-book --script-dir attempts/2026-07-27-npsp-to-npc-v2/sql`),
+    an operational artifact filled during the actual run.
+  - **Scope-expansion objects** (GiftRefund, GiftSoftCredit,
+    ContactContactRelation, ContactPoint*) — each needs a decision about the
+    NPSP source (negative payments? OCR/soft-credit objects? Contact
+    address/phone/email fields?) and would be an untested transform without
+    the real source in hand. Build them against real client data, not
+    speculatively.
+- **Step 3:** replicate a real/realistic NPSP source, run each transform,
+  resolve the two open questions, load to a target org (under the Live-Org
+  Write Confirmation Rule), then promote (Replace model) to the library as
+  the canonical NPSP-to-NPC starter kit.
 
-No live-org writes happen in step 2 — these are SQL transform scripts and
-docs. Validation loads belong to step 3, under the Live-Org Write
-Confirmation Rule.
+No live-org writes happened in step 2 — these are SQL transform scripts and
+docs. Every validation load belongs to step 3.
