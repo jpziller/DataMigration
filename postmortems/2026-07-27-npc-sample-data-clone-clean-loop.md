@@ -135,10 +135,19 @@ All written into `ROADMAP.md` with full root-cause/fix accounts:
 
 ## Open questions for next time
 
-- **Cloud-level data-shape generalization (deferred).** An org-derived
-  profile (`data_shapes/<Object>.json`) still carries org-specifics; turning
-  it into reusable `okf/<cloud>/` machine-readable IP (a "promote a profile
-  to OKF" step) is designed but unbuilt — the loop's remaining thread.
+- **~~Cloud-level data-shape generalization (deferred).~~ RESOLVED
+  2026-07-27 (PR #39, ROADMAP #83).** The "promote an org profile to
+  reusable `okf/<cloud>/` machine-readable IP" step is built:
+  `generalize-data-shape <Object> --cloud <cloud>` strips org-specifics
+  (org custom fields, this org's automation counts / field population /
+  auto-generation rates) and commits the cloud-true shape (standard/packaged
+  structure, auto-generated-child relationships, date-range pairs) to
+  `okf/<cloud>/data-shapes/`. `gather-okf` surfaces those profiles and
+  `show-data-shape --cloud` falls back to one, so a fresh clone knows an
+  object's platform behavior before profiling its own org. First IP:
+  `GiftCommitment`/`GiftCommitmentSchedule`/`GiftTransaction` for
+  `nonprofit-cloud`. Successor thread: curating profiles for a *second*
+  cloud (the mechanism is already cloud-agnostic).
 - **A harder data-shape *scoring* step.** The profile is surfaced as
   advisory today; turning a specific signal into an actual readiness/tier
   *gate* needs deciding which signals should block.
