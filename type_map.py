@@ -6,7 +6,7 @@ query them directly -- their component fields (BillingStreet, BillingCity, ...)
 are queried instead and already appear as their own describe fields.
 """
 import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Context, Decimal, InvalidOperation
 
 COMPOUND_TYPES = {"address", "location"}
 
@@ -62,13 +62,44 @@ def _to_int(v):
     return int(float(v))
 
 
-def _to_decimal(v):
-    if not isinstance(v, str):
-        return None
-    try:
-        return Decimal(v)
-    except InvalidOperation:
-        return None
+def _decimal_coercer(precision, scale):
+    """Build a coercer for a double/currency/percent field that produces a
+    value pyodbc's ``fast_executemany`` DECIMAL binding accepts.
+
+    Two facets, both found live replicating a real NPSP org's Account rollup
+    fields, both surfacing as ``pyodbc: Converting decimal loses precision``:
+
+    1. Salesforce's Bulk API 2.0 exports large values in scientific notation
+       (``"1.39E+8"``) -> a Decimal with a positive exponent.
+    2. A value can carry a different scale than its column (``"250.0"``,
+       scale 1, into a scale-0 column).
+
+    ``fast_executemany`` pre-binds each DECIMAL parameter and the driver
+    rejects any value whose exponent doesn't match the column scale. Quantizing
+    to the column's own scale fixes both at once. A field with precision
+    outside ``(0, 38]`` maps to a FLOAT column (see :func:`sf_type_to_sql`),
+    which has no fixed scale, so bind a plain float there instead.
+    """
+    if not (0 < precision <= 38):
+        def _to_float(v):
+            if not isinstance(v, str):
+                return None
+            try:
+                return float(v)
+            except ValueError:
+                return None
+        return _to_float
+
+    quantum = Decimal(1).scaleb(-scale)      # scale 2 -> 0.01 ; scale 0 -> 1
+    ctx = Context(prec=precision)            # results always fit the column
+    def _to_decimal(v):
+        if not isinstance(v, str):
+            return None
+        try:
+            return Decimal(v).quantize(quantum, context=ctx)
+        except (InvalidOperation, ValueError):
+            return None
+    return _to_decimal
 
 
 def _to_date(v):
@@ -91,22 +122,28 @@ def _to_time(v):
     return t.replace(tzinfo=None) if t.tzinfo else t
 
 
+# Types whose coercer needs no per-field parameters. double/currency/percent
+# are handled separately (scale-aware) via _decimal_coercer.
 _COERCER_BY_TYPE = {
     "int": _to_int,
-    "double": _to_decimal,
-    "currency": _to_decimal,
-    "percent": _to_decimal,
     "date": _to_date,
     "datetime": _to_datetime,
     "time": _to_time,
 }
+_DECIMAL_TYPES = {"double", "currency", "percent"}
 
 
 def typed_value_coercers(desc) -> dict:
     """Field name -> coercion function, for every column the typed replicate
-    path needs to convert out of the CSV's plain text before to_sql."""
-    return {
-        f["name"]: _COERCER_BY_TYPE[f["type"]]
-        for f in desc["fields"]
-        if f["type"] in _COERCER_BY_TYPE
-    }
+    path needs to convert out of the CSV's plain text before to_sql. Numeric
+    fields get a scale-aware coercer built from their describe precision/scale
+    so the value matches its DECIMAL column exactly (see _decimal_coercer)."""
+    coercers = {}
+    for f in desc["fields"]:
+        t = f["type"]
+        if t in _DECIMAL_TYPES:
+            coercers[f["name"]] = _decimal_coercer(
+                int(f.get("precision") or 0), int(f.get("scale") or 0))
+        elif t in _COERCER_BY_TYPE:
+            coercers[f["name"]] = _COERCER_BY_TYPE[t]
+    return coercers
