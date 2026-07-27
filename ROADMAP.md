@@ -5897,3 +5897,48 @@ standalone `snowfakery run` path, and `370`'s SQL guard is the per-object
 safety net) by fixing the generate-related-mock-data (framework) path at the
 root, for all objects. `tests/test_snowfakery_data.py` covers the pairing +
 ordering + conservatism.
+
+## 89. Known Source-Shape Fingerprints -- a source->target migration-kit registry (IDEA, 2026-07-27)
+
+User's idea, raised mid-NPSP->NPC step 3: **fingerprint a source system's
+data shape** (its objects, custom fields, and JSON structure) so that, given
+a new client's data, you can *recognize the source system and its
+customizations from the shape itself*, look up how that shape maps to a given
+target's shape, and pull a complete, OOTB **starting kit** -- transform
+scripts, mapping docs, run book -- for that specific `source -> target`
+migration. "No sense in rebuilding known details every time."
+
+**This is the source-side counterpart to #83.** #83 built machine-readable
+*target*-platform data-shape IP (`okf/<cloud>/data-shapes/*.json` --
+structure, auto-created children, date-range pairs, generalized from a live
+org with org-specifics stripped). This is the same idea pointed at the
+**source**: a fingerprint of "what an NPSP org's data actually looks like"
+(standard + `npsp__`/`npe01__`/`npe03__`/`npo02__` packaged fields, the
+household/RD/Opportunity/Payment/Allocation shape, which fields are really
+populated), keyed so a **registry** can answer: *given this source shape and
+that target shape, here is the known migration kit.* NPSP->NPC becomes the
+**first entry** in that registry, not a one-off.
+
+**Hooks that already exist** (this isn't from scratch -- it ties them
+together): `profile-salesforce`/`profile-sql-table` (real source population),
+`generate-source-data-model` (source ERD from table shape),
+`import-parquet`/`import-csv-directory` (JSON/CSV source ingestion), the
+mapping docs (source->target field mapping), and `data_shape.py`'s own
+generalize-then-commit pattern (#83). The "JSON shapes" framing matters
+because a lot of real source data arrives as JSON/files, and a JSON-schema
+fingerprint (field names/types/nesting) is a natural, tool-comparable way to
+recognize a source system + detect a client's customizations against a
+baseline.
+
+**Discipline (same as #83):** capture ONE real fingerprint from live data
+first, then generalize the tooling from it -- don't design the registry in the
+abstract. The first NPSP source fingerprint is to be captured as a byproduct
+of step 3's own source profiling (the profiling the migration needs anyway),
+so the idea proves out on real data before any registry/tooling is built.
+
+**Status: IDEA, not built.** No command, no schema, no registry yet -- this
+entry exists so the direction is captured in the repo (not just a session's
+memory) and so the step-3 NPSP profiling deliberately produces the first real
+fingerprint to generalize from later. Deliberately deferred past a single
+concrete instance, matching this repo's "don't build the framework until one
+real case proves the shape" philosophy (same as #83's own staged build).
