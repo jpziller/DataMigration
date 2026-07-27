@@ -163,6 +163,148 @@ def load_profile(object_name, output_dir="data_shapes"):
         return json.load(fh)
 
 
+def _api_name_kind(name):
+    """Classify a field/relationship API name for cloud-level portability:
+
+    - ``standard`` -- no custom suffix (``DonorId``, ``Name``, ``RecordTypeId``):
+      cloud-true, present in every org of the cloud.
+    - ``packaged`` -- namespaced custom (``ns__Foo__c``): delivered by a
+      managed package, so cloud-true for any org licensed for that package.
+    - ``org_custom`` -- un-namespaced custom (``Foo__c``, including migration
+      helpers like ``MigrationID__c``): added per-org, NOT portable.
+
+    Only ``standard`` and ``packaged`` survive generalization -- an org's own
+    custom fields and this framework's own migration-key fields don't describe
+    the *cloud*, so they'd be noise (or misleading) in shared IP.
+    """
+    n = name or ""
+    if not (n.endswith("__c") or n.endswith("__r") or n.endswith("__x")):
+        return "standard"
+    base = n.rsplit("__", 1)[0]  # 'ns__Foo' (packaged) or 'Foo' (org custom)
+    return "packaged" if "__" in base else "org_custom"
+
+
+def generalize_profile(profile, cloud):
+    """Promote an org-derived profile (:func:`build_profile`'s output) to
+    cloud-level, reusable knowledge (ROADMAP #83).
+
+    Strips everything org-specific -- the org alias, org/admin custom fields,
+    *this* org's active-automation counts, *this* org's field population, and
+    the numeric auto-generation rates -- and keeps only what's true of the
+    **cloud itself** for any org on it: the standard/packaged structure, the
+    auto-generated-child *relationships* (which children, not the rate), and
+    the same-object date-range pairs. The result is committed, shareable IP a
+    NEW project on the same cloud can consult before it has ever touched its
+    own org. No org connection needed -- this reads an already-built profile.
+    """
+    st = profile.get("structure", {})
+    key_fields = [f for f in st.get("key_fields", [])
+                  if _api_name_kind(f.get("name")) != "org_custom"]
+    parent_lookups = [p for p in st.get("parent_lookups", [])
+                      if _api_name_kind(p.get("field")) != "org_custom"]
+    children = [c.get("child") for c in profile.get("auto_generated_children", [])
+                if c.get("child")]
+    return {
+        "object": profile["object"],
+        "cloud": cloud,
+        "kind": "cloud-data-shape",
+        "generalized": datetime.date.today().isoformat(),
+        "note": (
+            "Cloud-level data shape, generalized from a live org profile with "
+            "org-specific detail removed (org custom fields, this org's active "
+            "automation counts, field population, and numeric auto-generation "
+            "rates). Structure, auto-generated-child relationships, and "
+            "date-range pairs are platform-standard and portable; automation "
+            "and population are org config/data -- run analyze-org-risk and "
+            "profile-salesforce against your own org."
+        ),
+        "structure": {
+            "custom_object": st.get("custom", False),
+            "key_fields": key_fields,
+            "parent_lookups": parent_lookups,
+            "date_range_pairs": st.get("date_range_pairs", []),
+        },
+        "auto_generated_children": children,
+    }
+
+
+def cloud_profile_path(object_name, cloud, okf_dir="okf"):
+    return os.path.join(okf_dir, cloud, "data-shapes", f"{object_name}.json")
+
+
+def write_cloud_profile(cloud_profile, okf_dir="okf"):
+    path = cloud_profile_path(cloud_profile["object"], cloud_profile["cloud"], okf_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(cloud_profile, fh, indent=2)
+    return path
+
+
+def load_cloud_profile(object_name, cloud, okf_dir="okf"):
+    path = cloud_profile_path(object_name, cloud, okf_dir)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def find_cloud_profiles(objects=None, okf_dir="okf"):
+    """Committed cloud-level profiles (``okf/<cloud>/data-shapes/<Object>.json``)
+    matching any of ``objects`` (exact object-name match, case-insensitive),
+    or all of them when ``objects`` is falsy. Lets ``gather-okf`` surface the
+    machine-readable cloud shape alongside the prose OKF docs -- knowledge a
+    fresh clone HAS (these are committed) even before it profiles its own org.
+    Returns dicts: ``{path, object, cloud, profile}``.
+    """
+    if not os.path.isdir(okf_dir):
+        return []
+    wanted = {str(o).lower() for o in (objects or []) if o and str(o).strip()}
+    found = []
+    for cloud in sorted(os.listdir(okf_dir)):
+        ds_dir = os.path.join(okf_dir, cloud, "data-shapes")
+        if not os.path.isdir(ds_dir):
+            continue
+        for fname in sorted(os.listdir(ds_dir)):
+            if not fname.lower().endswith(".json"):
+                continue
+            obj = fname[:-5]
+            if wanted and obj.lower() not in wanted:
+                continue
+            path = os.path.join(ds_dir, fname)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    profile = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            found.append({
+                "path": path.replace(os.sep, "/"),
+                "object": obj,
+                "cloud": cloud,
+                "profile": profile,
+            })
+    return found
+
+
+def cloud_summary_lines(cp):
+    """Compact, human-readable lines for a cloud-level profile -- the
+    generalize/show/gather commands' shared renderer, mirroring
+    :func:`summary_lines` for org profiles."""
+    st = cp.get("structure", {})
+    lines = [
+        f"structure: {len(st.get('key_fields', []))} standard/packaged key "
+        f"field(s), {len(st.get('parent_lookups', []))} standard/packaged "
+        f"parent lookup(s), custom_object={st.get('custom_object')}",
+    ]
+    drp = st.get("date_range_pairs") or []
+    if drp:
+        lines.append("date-range pairs (end must be >= start): "
+                     + ", ".join(f"{p['start']}->{p['end']}" for p in drp))
+    ch = cp.get("auto_generated_children") or []
+    lines.append("auto-generated children (platform-created -- plan for them, "
+                 "don't insert blindly): " + (", ".join(ch) if ch else "none"))
+    return lines
+
+
 def summary_lines(profile):
     """Compact, human-readable lines describing a profile -- shared by the
     build and show CLI commands."""

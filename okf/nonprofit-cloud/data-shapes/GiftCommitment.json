@@ -1,0 +1,110 @@
+{
+  "object": "GiftCommitment",
+  "cloud": "nonprofit-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-27",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "DonorId",
+        "type": "reference",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "OwnerId",
+        "references": [
+          "Group",
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "DonorId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Donor"
+      },
+      {
+        "field": "OpportunityId",
+        "references": [
+          "Opportunity"
+        ],
+        "relationshipName": "Opportunity"
+      },
+      {
+        "field": "CampaignId",
+        "references": [
+          "Campaign"
+        ],
+        "relationshipName": "Campaign"
+      },
+      {
+        "field": "CurrentGiftCmtScheduleId",
+        "references": [
+          "GiftCommitmentSchedule"
+        ],
+        "relationshipName": "CurrentGiftCmtSchedule"
+      },
+      {
+        "field": "PartyPhilanthropicRsrchPrflId",
+        "references": [
+          "PartyPhilanthropicRsrchPrfl"
+        ],
+        "relationshipName": "PartyPhilanthropicRsrchPrfl"
+      },
+      {
+        "field": "GiftAgreementId",
+        "references": [
+          "GiftAgreement"
+        ],
+        "relationshipName": "GiftAgreement"
+      },
+      {
+        "field": "DonorGiftConceptId",
+        "references": [
+          "DonorGiftConcept"
+        ],
+        "relationshipName": "DonorGiftConcept"
+      },
+      {
+        "field": "PlannedGiftId",
+        "references": [
+          "PlannedGift"
+        ],
+        "relationshipName": "PlannedGift"
+      }
+    ],
+    "date_range_pairs": [
+      {
+        "start": "EffectiveStartDate",
+        "end": "ExpectedEndDate"
+      },
+      {
+        "start": "EffectiveStartDate",
+        "end": "ExpectedAssetMaturityDate"
+      }
+    ]
+  },
+  "auto_generated_children": [
+    "GiftCommitmentSchedule",
+    "GiftTransaction"
+  ]
+}

@@ -1,6 +1,16 @@
 # okf bundle update log
 
 ## 2026-07-27
+* **New (machine-readable IP)**: cloud-level data-shape profiles under
+  [nonprofit-cloud/data-shapes/](nonprofit-cloud/index.md) — `GiftCommitment`,
+  `GiftCommitmentSchedule`, `GiftTransaction` (ROADMAP #83). Committed JSON
+  produced by generalizing a live org profile with every org-specific detail
+  stripped (org custom fields, automation counts, field population,
+  auto-generation rates), keeping only cloud-true structure, auto-generated-child
+  relationships, and date-range pairs. New commands `generalize-data-shape`
+  (producer) and `show-data-shape --cloud` (consumer); `gather-okf` now
+  surfaces them alongside the prose docs, so a fresh clone consults an
+  object's platform behavior before ever profiling its own org.
 * **New**: [Date-range fields (start/end) must be ordered](salesforce-platform/date-range-fields-must-be-ordered.md)
   -- generalizes the Nonprofit Cloud backwards-schedule-window finding
   (ROADMAP #85/#87) into a cross-cloud pattern. Any object with a

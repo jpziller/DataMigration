@@ -1,0 +1,121 @@
+{
+  "object": "GiftTransaction",
+  "cloud": "nonprofit-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-27",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "PaymentMethod",
+        "type": "picklist",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "OriginalAmount",
+        "type": "currency",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "OwnerId",
+        "references": [
+          "Group",
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "DonorId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Donor"
+      },
+      {
+        "field": "CampaignId",
+        "references": [
+          "Campaign"
+        ],
+        "relationshipName": "Campaign"
+      },
+      {
+        "field": "GiftCommitmentId",
+        "references": [
+          "GiftCommitment"
+        ],
+        "relationshipName": "GiftCommitment"
+      },
+      {
+        "field": "MatchingEmployerTransactionId",
+        "references": [
+          "GiftTransaction"
+        ],
+        "relationshipName": "MatchingEmployerTransaction"
+      },
+      {
+        "field": "OutreachSourceCodeId",
+        "references": [
+          "OutreachSourceCode"
+        ],
+        "relationshipName": "OutreachSourceCode"
+      },
+      {
+        "field": "GiftCommitmentScheduleId",
+        "references": [
+          "GiftCommitmentSchedule"
+        ],
+        "relationshipName": "GiftCommitmentSchedule"
+      },
+      {
+        "field": "PaymentInstrumentId",
+        "references": [
+          "PaymentInstrument"
+        ],
+        "relationshipName": "PaymentInstrument"
+      },
+      {
+        "field": "PartyPhilanthropicRsrchPrflId",
+        "references": [
+          "PartyPhilanthropicRsrchPrfl"
+        ],
+        "relationshipName": "PartyPhilanthropicRsrchPrfl"
+      },
+      {
+        "field": "GiftAgreementId",
+        "references": [
+          "GiftAgreement"
+        ],
+        "relationshipName": "GiftAgreement"
+      },
+      {
+        "field": "DonorGiftConceptId",
+        "references": [
+          "DonorGiftConcept"
+        ],
+        "relationshipName": "DonorGiftConcept"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": []
+}

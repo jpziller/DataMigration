@@ -140,3 +140,107 @@ def test_summary_lines_report_missing_signals(sqlite_engine):
     p = ds.build_profile(_StubSF(_DESCRIBE), sqlite_engine, "GiftCommitment")
     text = "\n".join(ds.summary_lines(p))
     assert "NOT scanned" in text and "NOT profiled" in text
+
+
+# --- cloud-level generalization (ROADMAP #83) -------------------------------
+
+def test_api_name_kind_classifies_portability():
+    assert ds._api_name_kind("DonorId") == "standard"
+    assert ds._api_name_kind("RecordTypeId") == "standard"
+    assert ds._api_name_kind("MigrationID__c") == "org_custom"
+    assert ds._api_name_kind("Foo__c") == "org_custom"
+    # namespaced managed-package field is cloud-true for any licensed org
+    assert ds._api_name_kind("npsp__Amount__c") == "packaged"
+    assert ds._api_name_kind("ns__Rel__r") == "packaged"
+
+
+def test_generalize_strips_org_specifics(sqlite_engine):
+    _seed_automation(sqlite_engine)
+    _seed_fieldprofile(sqlite_engine)
+    p = ds.build_profile(_StubSF(_DESCRIBE), sqlite_engine, "GiftCommitment",
+                         org_alias="NPC_TARGET_v2")
+    cp = ds.generalize_profile(p, "nonprofit-cloud")
+
+    # provenance / no org identity
+    assert cp["cloud"] == "nonprofit-cloud"
+    assert cp["kind"] == "cloud-data-shape"
+    assert "org_alias" not in cp
+    # org-specific behavioral detail is gone entirely
+    assert "automation" not in cp
+    assert "field_population" not in cp
+
+    # org custom field (MigrationID__c) dropped; standard fields kept
+    key_names = {f["name"] for f in cp["structure"]["key_fields"]}
+    assert key_names == {"Name", "DonorId"}
+    assert cp["structure"]["parent_lookups"] == [
+        {"field": "DonorId", "references": ["Account"], "relationshipName": "Donor"}]
+
+    # auto-generated children reduced to the relationship (name), not the rate
+    assert cp["auto_generated_children"] == ["GiftCommitmentSchedule"]
+    # detail string carrying "6/10 ... (60%)" must not survive anywhere
+    import json as _json
+    assert "60%" not in _json.dumps(cp)
+
+
+def test_generalize_keeps_packaged_field():
+    profile = {
+        "object": "npsp__Allocation__c",
+        "org_alias": "SOME_ORG",
+        "structure": {
+            "custom": True,
+            "key_fields": [
+                {"name": "Name"},
+                {"name": "npsp__Amount__c", "externalId": False},  # packaged -> kept
+                {"name": "MigrationID__c", "externalId": True},     # org custom -> dropped
+            ],
+            "parent_lookups": [
+                {"field": "npsp__Opportunity__c", "references": ["Opportunity"]},
+                {"field": "Local_Lookup__c", "references": ["Account"]},
+            ],
+            "date_range_pairs": [],
+        },
+        "automation": {"scanned": True, "active_counts": {"ValidationRule": 3}},
+        "auto_generated_children": [],
+    }
+    cp = ds.generalize_profile(profile, "npsp")
+    assert {f["name"] for f in cp["structure"]["key_fields"]} == {"Name", "npsp__Amount__c"}
+    assert [p["field"] for p in cp["structure"]["parent_lookups"]] == ["npsp__Opportunity__c"]
+    assert cp["structure"]["custom_object"] is True
+
+
+def test_cloud_profile_write_load_and_find(tmp_path):
+    okf_dir = str(tmp_path / "okf")
+    cp = {
+        "object": "GiftCommitment", "cloud": "nonprofit-cloud",
+        "structure": {"custom_object": False, "key_fields": [], "parent_lookups": [],
+                      "date_range_pairs": [{"start": "EffectiveStartDate", "end": "ExpectedEndDate"}]},
+        "auto_generated_children": ["GiftCommitmentSchedule"],
+    }
+    path = ds.write_cloud_profile(cp, okf_dir)
+    assert path.endswith("nonprofit-cloud/data-shapes/GiftCommitment.json".replace("/", __import__("os").sep))
+    assert ds.load_cloud_profile("GiftCommitment", "nonprofit-cloud", okf_dir) == cp
+    assert ds.load_cloud_profile("Nope", "nonprofit-cloud", okf_dir) is None
+
+    # find_cloud_profiles matches by object name across clouds
+    ds.write_cloud_profile({"object": "Account", "cloud": "sales-cloud",
+                            "structure": {}, "auto_generated_children": []}, okf_dir)
+    hits = ds.find_cloud_profiles(objects=["GiftCommitment"], okf_dir=okf_dir)
+    assert [h["object"] for h in hits] == ["GiftCommitment"]
+    assert hits[0]["cloud"] == "nonprofit-cloud"
+    # no filter -> every committed profile
+    assert {h["object"] for h in ds.find_cloud_profiles(okf_dir=okf_dir)} == {"GiftCommitment", "Account"}
+    # nonexistent okf dir -> [] not error
+    assert ds.find_cloud_profiles(okf_dir=str(tmp_path / "missing")) == []
+
+
+def test_cloud_summary_lines_flag_children_and_dates():
+    cp = {
+        "structure": {"custom_object": False, "key_fields": [{}, {}],
+                      "parent_lookups": [{}],
+                      "date_range_pairs": [{"start": "StartDate", "end": "EndDate"}]},
+        "auto_generated_children": ["GiftTransaction"],
+    }
+    text = "\n".join(ds.cloud_summary_lines(cp))
+    assert "StartDate->EndDate" in text
+    assert "GiftTransaction" in text
+    assert "auto-generated children" in text
