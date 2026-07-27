@@ -907,7 +907,7 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
 `/reconcile-load-counts`, `/assess-migration-readiness`, `/bootstrap-project`,
 `/generate-discovery-checklist`, `/gather-okf`, `/build-data-shape-profile`,
-`/show-data-shape`
+`/show-data-shape`, `/generalize-data-shape`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -1122,7 +1122,16 @@ don't jump straight to writing SQL:
      structured, machine-readable behavioral shape — auto-created children,
      active automation, real field population — that `describe()` alone can't
      give. Build/refresh it with `build-data-shape-profile <Object>` (roadmap
-     #83) once `analyze-org-risk`/`profile-salesforce` have run.
+     #83) once `analyze-org-risk`/`profile-salesforce` have run. On a **fresh
+     clone with no org profile yet**, `show-data-shape <Object> --cloud <cloud>`
+     falls back to the committed cloud-level profile
+     (`okf/<cloud>/data-shapes/<Object>.json`), and `gather-okf` surfaces those
+     profiles automatically — so the cloud-true behavior (what auto-creates,
+     date-range pairs, standard structure) is known before profiling your own
+     org. Once you've built an org profile worth generalizing, promote it to
+     that shared IP with `generalize-data-shape <Object> --cloud <cloud>` (it
+     strips org-specifics — org custom fields, this org's automation counts /
+     field population / auto-generation rates — keeping only cloud-true facts).
 2. **Profile the source table first** (`profile-sql-table`) — auto-mapping
    and any real mapping-quality judgment depend on knowing how populated a
    field actually is, not just what it's named. Don't skip to mapping
@@ -1344,8 +1353,16 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   "score the build from known data shape" direction #83 sets up.
   `assess-migration-readiness` and `orchestrator-assess` now **surface** an
   object's profile (advisory, never changing their verdict/tier); a harder
-  *scoring* step (a signal becoming a gate) and cloud-level generalization
-  (an org-derived profile into reusable `okf/<cloud>` IP) are follow-ups.
+  *scoring* step (a signal becoming a gate) is a follow-up.
+  **Cloud-level generalization** is built (roadmap #83): `generalize-data-shape
+  <Object> --cloud <cloud>` (`generalize_profile()`) promotes an org profile to
+  committed `okf/<cloud>/data-shapes/<Object>.json` — stripping org-specifics
+  (org custom fields via `_api_name_kind()`, this org's automation counts /
+  field population / auto-generation rates) and keeping only cloud-true facts
+  (standard/packaged structure, auto-generated-child relationships, date-range
+  pairs). `gather-okf` surfaces those committed profiles (`find_cloud_profiles()`)
+  and `show-data-shape --cloud` falls back to one, so a fresh clone knows an
+  object's platform behavior before profiling its own org.
 - `orchestrator.py` — `orchestrator-assess`'s logic (roadmap #53, Phase 1
   only): `assess_tier()`, the deterministic Tier 1 (Continue Silently)
   through Tier 4 (Full Stop) assessment `docs/ORCHESTRATOR_DESIGN.md`'s

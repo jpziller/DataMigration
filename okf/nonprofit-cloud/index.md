@@ -86,3 +86,22 @@ bundle.
   blank CSV cell is a no-op on update, not "clear the field" (needs the
   literal `#N/A`); a sent boolean field can silently break `bulk_op()`'s
   default result-matching fingerprint with zero error surfaced.
+
+# Cloud data-shape profiles (machine-readable)
+
+`data-shapes/<Object>.json` — NEW (2026-07-27, ROADMAP #83) —
+committed, **machine-readable** cloud-level data shapes: an object's
+standard/packaged structure (key fields, parent lookups), its
+platform-auto-generated child *relationships*, and its same-object
+date-range pairs. Produced by generalizing a live org profile
+(`build-data-shape-profile` → `generalize-data-shape --cloud nonprofit-cloud`),
+with every org-specific detail stripped — org custom fields, a specific
+org's automation counts / field population, and the numeric
+auto-generation rates. Unlike the prose docs above (read by a human),
+these are meant to be **consumed by tooling before a build**:
+`gather-okf --objects <Object>` surfaces them alongside the docs, and
+`show-data-shape <Object> --cloud nonprofit-cloud` reads one directly —
+so a fresh clone knows, for example, that a `GiftCommitment` auto-creates
+a `GiftCommitmentSchedule` and a `GiftTransaction` *before* it has
+profiled its own org. First occupants: `GiftCommitment`,
+`GiftCommitmentSchedule`, `GiftTransaction`.

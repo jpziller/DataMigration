@@ -285,7 +285,11 @@ def gather_okf_cmd(objects, subject_area, okf_dir):
         click.echo(f"OKF subject area: {subject_area}\n")
     else:
         click.echo("Full OKF catalog (pass --objects or --subject-area to narrow):\n")
-    if not matches:
+    # Machine-readable cloud data-shape profiles (ROADMAP #83) live alongside
+    # the prose docs in okf/<cloud>/data-shapes/ -- surface any matching the
+    # objects in play, since gather-okf is the "consult before building" step.
+    cloud_shapes = ds.find_cloud_profiles(objects=list(objects) or None, okf_dir=okf_dir)
+    if not matches and not cloud_shapes:
         click.echo("No matching OKF docs. If you learn something durable while "
                    "building, capture it in okf/<cloud>/ or validators/ -- don't "
                    "let the next pass rediscover it.")
@@ -307,8 +311,17 @@ def gather_okf_cmd(objects, subject_area, okf_dir):
         if meta.get("description"):
             click.echo(f"    summary: {' '.join(str(meta['description']).split())}")
         click.echo("")
-    click.echo(f"{len(matches)} doc(s). Read the relevant ones before building -- "
-               "this is knowledge captured so you don't rediscover it after a mistake.")
+    if cloud_shapes:
+        click.echo("Cloud-level data-shape profiles (machine-readable, committed):")
+        for cs in cloud_shapes:
+            click.echo(f"- {cs['object']} ({cs['cloud']})")
+            click.echo(f"    path:    {cs['path']}")
+            for line in ds.cloud_summary_lines(cs["profile"]):
+                click.echo(f"    {line}")
+            click.echo("")
+    click.echo(f"{len(matches)} doc(s), {len(cloud_shapes)} cloud data-shape "
+               "profile(s). Read the relevant ones before building -- this is "
+               "knowledge captured so you don't rediscover it after a mistake.")
 
 
 @cli.command("build-data-shape-profile")
@@ -335,15 +348,29 @@ def build_data_shape_profile_cmd(object_names, output_dir, schema):
 @cli.command("show-data-shape")
 @click.argument("object_name")
 @click.option("--output-dir", default="data_shapes")
-def show_data_shape_cmd(object_name, output_dir):
+@click.option("--cloud", default=None,
+              help="If no local org profile exists, fall back to the committed "
+                   "cloud-level profile at okf/<cloud>/data-shapes/<Object>.json "
+                   "-- knowledge a fresh clone has before profiling its own org.")
+def show_data_shape_cmd(object_name, output_dir, cloud):
     """Show a previously-built data-shape profile (the read-only surfacing
     side of build-data-shape-profile) -- consult it before building a
     transform, alongside gather-okf/check-validators. No org connection
     needed."""
     profile = ds.load_profile(object_name, output_dir)
     if profile is None:
+        cp = ds.load_cloud_profile(object_name, cloud) if cloud else None
+        if cp is not None:
+            click.echo(f"{object_name}: no local org profile -- showing the "
+                       f"cloud-level profile (okf/{cloud}/data-shapes/, "
+                       f"generalized {cp.get('generalized')}):")
+            for line in ds.cloud_summary_lines(cp):
+                click.echo(f"  {line}")
+            click.echo(f"  ({' '.join(str(cp.get('note', '')).split())})")
+            return
+        hint = "" if cloud else " (or pass --cloud <name> for the committed cloud-level profile)"
         click.echo(f"No data-shape profile for '{object_name}' in {output_dir}/ yet -- "
-                   f"run `build-data-shape-profile {object_name}` first.")
+                   f"run `build-data-shape-profile {object_name}` first{hint}.")
         return
     click.echo(f"{object_name} data-shape profile "
                f"(org {profile.get('org_alias')}, generated {profile.get('generated')}):")
@@ -354,6 +381,41 @@ def show_data_shape_cmd(object_name, output_dir):
         click.echo("  auto-generated child detail:")
         for c in ac:
             click.echo(f"    - {c.get('child')}: {c.get('detail')}")
+
+
+@cli.command("generalize-data-shape")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--cloud", required=True,
+              help="Cloud subject-area / OKF bundle name (e.g. nonprofit-cloud). "
+                   "Output goes to okf/<cloud>/data-shapes/<Object>.json.")
+@click.option("--input-dir", default="data_shapes",
+              help="Where the org-derived profiles live (build-data-shape-profile's --output-dir).")
+@click.option("--okf-dir", default="okf")
+def generalize_data_shape_cmd(object_names, cloud, input_dir, okf_dir):
+    """Promote an org-derived data-shape profile to cloud-level, reusable IP
+    (ROADMAP #83). Reads <input-dir>/<Object>.json, strips every org-specific
+    detail (org custom fields, this org's automation counts, field population,
+    numeric auto-generation rates), and writes okf/<cloud>/data-shapes/
+    <Object>.json -- committed, shareable knowledge a NEW project on the same
+    cloud consults (via gather-okf / show-data-shape --cloud) before it has
+    ever touched its own org. No org connection needed -- run
+    build-data-shape-profile first, then this."""
+    wrote = 0
+    for obj in object_names:
+        profile = ds.load_profile(obj, input_dir)
+        if profile is None:
+            click.echo(f"{obj}: no org profile in {input_dir}/ -- run "
+                       f"`build-data-shape-profile {obj}` first. Skipped.")
+            continue
+        cp = ds.generalize_profile(profile, cloud)
+        path = ds.write_cloud_profile(cp, okf_dir)
+        wrote += 1
+        click.echo(f"{obj} -> {path}")
+        for line in ds.cloud_summary_lines(cp):
+            click.echo(f"  {line}")
+    if wrote:
+        click.echo(f"\nGeneralized {wrote} profile(s). Commit okf/{cloud}/data-shapes/ "
+                   f"-- it's reusable cloud IP, not org-specific data.")
 
 
 @cli.command("record-counts")

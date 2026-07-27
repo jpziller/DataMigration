@@ -5654,9 +5654,34 @@ Consumer wired 2026-07-27: `assess-migration-readiness` and
 population) alongside their own output -- advisory, never changing the
 READY verdict / tier, since these signals are heads-ups not pass/fail. A
 harder *scoring* step (turning a specific signal into a gate once we know
-which should block) stays a follow-up. Still open: generalizing an
-org-derived profile into cloud-level reusable knowledge (stripping
-org-specifics) so it lives in `okf/<cloud>/` as shareable IP.
+which should block) stays a follow-up.
+
+**Cloud-level generalization — BUILT 2026-07-27** (`generalize-data-shape`,
+`data_shape.generalize_profile()`). The org-derived profile above still
+carried org-specifics; this promotes one into cloud-level, shareable IP.
+`generalize-data-shape <Object> --cloud <cloud>` reads
+`data_shapes/<Object>.json` and writes
+`okf/<cloud>/data-shapes/<Object>.json` (committed, **not** gitignored,
+unlike the org-level ones), keeping only what's true of the *cloud* for any
+org — standard/packaged structure, auto-generated-child *relationships*
+(the name, not the org's numeric rate), and same-object date-range pairs —
+and stripping everything org-specific: the org alias, org custom fields
+(the `_api_name_kind()` standard/packaged/org_custom classifier drops
+un-namespaced `__c` incl. this framework's own `MigrationID__c`; a
+namespaced managed-package field is kept as cloud-true), this org's
+active-automation counts, its field population, and the auto-generation
+rates. **Consumers**: `gather-okf --objects <Object>` now surfaces matching
+cloud profiles alongside the prose docs (`find_cloud_profiles()`), and
+`show-data-shape <Object> --cloud <cloud>` falls back to the committed
+cloud profile when no local org profile exists — so a **fresh clone knows
+an object's platform behavior (e.g. GiftCommitment auto-creates a schedule
++ transaction) before it has ever profiled its own org**. First real IP
+committed: `GiftCommitment`/`GiftCommitmentSchedule`/`GiftTransaction` for
+`nonprofit-cloud`. Tests in `tests/test_data_shape.py` (classifier, strip
+correctness, packaged-field retention, write/load/find, summary).
+Still a follow-up: promoting/curating cloud profiles for a *second* cloud
+(the mechanism is object- and cloud-agnostic; only NPC has real profiles so
+far), and the harder signal→gate scoring step noted above.
 
 ## 84. `bulkops delete --hard-delete` for a clean reset (BUILT 2026-07-25; live re-run pending an async platform purge)
 
