@@ -25,12 +25,18 @@ SELECT
     p.Name,
     pa.Id AS DonorId,
     gc.Id AS GiftCommitmentId,
-    'Paid' AS [Status],
+    -- Paid-aware Status/dates (finding from step 3, same as 120): an unpaid
+    -- NPSP installment (npe01__Paid__c = false) has no payment date, only a
+    -- scheduled due date, and AFNP's 'Paid' status requires a completion
+    -- date. This build's real multi-payment Opps happened to be all-paid, so
+    -- this branch didn't fail live -- fixed anyway (fix the class, not the
+    -- instance), since a real client's pledge installments will hit it.
+    CASE WHEN p.npe01__Paid__c = 1 THEN 'Paid' ELSE 'Unpaid' END AS [Status],
     'Individual' AS GiftType,
     p.npe01__Payment_Amount__c AS OriginalAmount,
-    p.npe01__Payment_Date__c AS TransactionDate,
-    p.npe01__Payment_Date__c AS TransactionDueDate,
-    p.npe01__Payment_Date__c AS CheckDate,
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS TransactionDate,
+    COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c) AS TransactionDueDate,
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS CheckDate,
     CASE p.npe01__Payment_Method__c
         WHEN 'Cash' THEN 'Cash'
         WHEN 'Check' THEN 'Check'

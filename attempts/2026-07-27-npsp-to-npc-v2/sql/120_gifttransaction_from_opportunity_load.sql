@@ -32,19 +32,29 @@ SELECT
     pa.Id AS DonorId,
     rdgc.Id AS GiftCommitmentId,
     rdsched.Id AS GiftCommitmentScheduleId,
-    'Paid' AS [Status],
+    -- Status/dates keyed on whether the Payment was actually paid (found
+    -- live, step 3): NPSP has unpaid/pledged installments (npe01__Paid__c =
+    -- false) with no payment date, only a scheduled due date. AFNP's
+    -- GiftTransaction Status = 'Paid' REQUIRES a completion date, so a
+    -- hardcoded 'Paid' fails on those (INVALID_INPUT/FIELD_INTEGRITY). The
+    -- PoC's seed was all-paid, so this only surfaced on real NPSP data.
+    CASE WHEN p.npe01__Paid__c = 1 THEN 'Paid' ELSE 'Unpaid' END AS [Status],
     'Individual' AS GiftType,
     p.npe01__Payment_Amount__c AS OriginalAmount,
-    p.npe01__Payment_Date__c AS TransactionDate,
+    -- TransactionDate is the completion date -- only a paid gift has one.
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS TransactionDate,
+    -- Due date: the actual payment date if paid, else the scheduled date;
+    -- then clamped into the schedule window (finding 4). Always populated
+    -- (TransactionDueDate is required, Appendix B).
     CASE
-        WHEN rdsched.Id IS NOT NULL AND rdsched.StartDate > p.npe01__Payment_Date__c
+        WHEN rdsched.Id IS NOT NULL AND rdsched.StartDate > COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c)
             THEN rdsched.StartDate
         WHEN rdsched.Id IS NOT NULL AND rdsched.EndDate IS NOT NULL
-             AND rdsched.EndDate < p.npe01__Payment_Date__c
+             AND rdsched.EndDate < COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c)
             THEN rdsched.EndDate
-        ELSE p.npe01__Payment_Date__c
+        ELSE COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c)
     END AS TransactionDueDate,
-    p.npe01__Payment_Date__c AS CheckDate,
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS CheckDate,
     CASE p.npe01__Payment_Method__c
         WHEN 'Cash' THEN 'Cash'
         WHEN 'Check' THEN 'Check'
