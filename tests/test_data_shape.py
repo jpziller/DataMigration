@@ -243,4 +243,4 @@ def test_cloud_summary_lines_flag_children_and_dates():
     text = "\n".join(ds.cloud_summary_lines(cp))
     assert "StartDate->EndDate" in text
     assert "GiftTransaction" in text
-    assert "auto-generated children" in text
+    assert "auto-created child relationships" in text

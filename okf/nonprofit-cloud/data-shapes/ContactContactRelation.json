@@ -1,5 +1,5 @@
 {
-  "object": "GiftCommitment",
+  "object": "ContactContactRelation",
   "cloud": "nonprofit-cloud",
   "kind": "cloud-data-shape",
   "generalized": "2026-07-27",
@@ -10,6 +10,15 @@
       {
         "name": "Name",
         "type": "string",
+        "required": false,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": true,
+        "externalId": false
+      },
+      {
+        "name": "ContactId",
+        "type": "reference",
         "required": true,
         "createable": true,
         "updateable": true,
@@ -17,7 +26,16 @@
         "externalId": false
       },
       {
-        "name": "DonorId",
+        "name": "RelatedContactId",
+        "type": "reference",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "PartyRoleRelationId",
         "type": "reference",
         "required": true,
         "createable": true,
@@ -36,76 +54,40 @@
         "relationshipName": "Owner"
       },
       {
-        "field": "DonorId",
+        "field": "ContactId",
         "references": [
-          "Account"
+          "Contact"
         ],
-        "relationshipName": "Donor"
+        "relationshipName": "Contact"
       },
       {
-        "field": "OpportunityId",
+        "field": "RelatedContactId",
         "references": [
-          "Opportunity"
+          "Contact"
         ],
-        "relationshipName": "Opportunity"
+        "relationshipName": "RelatedContact"
       },
       {
-        "field": "CampaignId",
+        "field": "RelatedInverseRecordId",
         "references": [
-          "Campaign"
+          "ContactContactRelation"
         ],
-        "relationshipName": "Campaign"
+        "relationshipName": "RelatedInverseRecord"
       },
       {
-        "field": "CurrentGiftCmtScheduleId",
+        "field": "PartyRoleRelationId",
         "references": [
-          "GiftCommitmentSchedule"
+          "PartyRoleRelation"
         ],
-        "relationshipName": "CurrentGiftCmtSchedule"
-      },
-      {
-        "field": "PartyPhilanthropicRsrchPrflId",
-        "references": [
-          "PartyPhilanthropicRsrchPrfl"
-        ],
-        "relationshipName": "PartyPhilanthropicRsrchPrfl"
-      },
-      {
-        "field": "GiftAgreementId",
-        "references": [
-          "GiftAgreement"
-        ],
-        "relationshipName": "GiftAgreement"
-      },
-      {
-        "field": "DonorGiftConceptId",
-        "references": [
-          "DonorGiftConcept"
-        ],
-        "relationshipName": "DonorGiftConcept"
-      },
-      {
-        "field": "PlannedGiftId",
-        "references": [
-          "PlannedGift"
-        ],
-        "relationshipName": "PlannedGift"
+        "relationshipName": "PartyRoleRelation"
       }
     ],
     "date_range_pairs": [
       {
-        "start": "EffectiveStartDate",
-        "end": "ExpectedEndDate"
-      },
-      {
-        "start": "EffectiveStartDate",
-        "end": "ExpectedAssetMaturityDate"
+        "start": "StartDate",
+        "end": "EndDate"
       }
     ]
   },
-  "auto_generated_children": [
-    "GiftCommitmentSchedule",
-    "GiftTransaction",
-    "GiftDefaultDesignation"
-  ]
+  "auto_generated_children": []
 }

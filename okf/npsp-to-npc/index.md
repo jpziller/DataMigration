@@ -54,3 +54,12 @@ other target-platform-only findings (Person Accounts, RecordTypes, the
   Book tab) — what a future real engagement can reuse directly vs. what
   must be redone per client. Full narrative account:
   `postmortems/2026-07-17-npsp-to-npc-poc.md`.
+* [What the NPC sample-data loop changes for an NPSP-to-NPC build](sample-data-learnings-for-migration.md) -
+  NEW (2026-07-27) — the PoC above predates this repo's NPC fundraising
+  sample-data clone-clean loop, where the target-platform behavior was
+  actually learned (auto-created records, keyless auto-generated children,
+  designation inheritance, the refund-order race, date-range ordering).
+  Maps each learning onto the PoC's scripts/mappings — the concrete
+  rebuild plan for a fresh, knowledge-informed NPSP-to-NPC build, so it
+  isn't rediscovered on a live client org. Pairs with the machine-readable
+  cloud data-shape profiles in [okf/nonprofit-cloud/data-shapes/](../nonprofit-cloud/index.md).

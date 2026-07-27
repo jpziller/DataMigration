@@ -1,0 +1,64 @@
+{
+  "object": "Contact",
+  "cloud": "nonprofit-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-27",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "LastName",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "AccountId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Account"
+      },
+      {
+        "field": "ReportsToId",
+        "references": [
+          "Contact"
+        ],
+        "relationshipName": "ReportsTo"
+      },
+      {
+        "field": "OwnerId",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "IndividualId",
+        "references": [
+          "Individual"
+        ],
+        "relationshipName": "Individual"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": [
+    "Account"
+  ]
+}

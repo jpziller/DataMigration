@@ -1,0 +1,36 @@
+{
+  "object": "GiftDesignation",
+  "cloud": "nonprofit-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-27",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "OwnerId",
+        "references": [
+          "Group",
+          "User"
+        ],
+        "relationshipName": "Owner"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": [
+    "GiftDefaultDesignation"
+  ],
+  "curation_note": "The empirical scan also detected GiftTransactionDesignation at 100%, but GiftTransactionDesignation references GiftDesignation (child->parent), not the reverse; the rate reflects this repo's sample data loading a GiftTransactionDesignation per GiftDesignation, not platform auto-creation. Removed during human promotion to cloud IP. GiftDefaultDesignation is kept -- it is genuinely platform auto-created (never inserted; see validators/GiftDefaultDesignation.md, sql/transformations/420 is doc-only)."
+}

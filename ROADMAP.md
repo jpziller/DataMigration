@@ -5675,13 +5675,32 @@ cloud profiles alongside the prose docs (`find_cloud_profiles()`), and
 `show-data-shape <Object> --cloud <cloud>` falls back to the committed
 cloud profile when no local org profile exists — so a **fresh clone knows
 an object's platform behavior (e.g. GiftCommitment auto-creates a schedule
-+ transaction) before it has ever profiled its own org**. First real IP
-committed: `GiftCommitment`/`GiftCommitmentSchedule`/`GiftTransaction` for
-`nonprofit-cloud`. Tests in `tests/test_data_shape.py` (classifier, strip
++ transaction) before it has ever profiled its own org**. Tests in `tests/test_data_shape.py` (classifier, strip
 correctness, packaged-field retention, write/load/find, summary).
-Still a follow-up: promoting/curating cloud profiles for a *second* cloud
-(the mechanism is object- and cloud-agnostic; only NPC has real profiles so
-far), and the harder signal→gate scoring step noted above.
+
+**Full NPC fundraising surface committed 2026-07-27** (18 objects: Account,
+Contact, AccountContactRelation, ContactContactRelation,
+PartyRelationshipGroup, ContactPoint Address/Phone/Email, Campaign,
+CampaignMember, GiftDesignation, GiftCommitment, GiftCommitmentSchedule,
+GiftTransaction, GiftRefund, GiftSoftCredit, GiftDefaultDesignation,
+GiftTransactionDesignation) — the target-side half of the "bridge to a fresh
+NPSP-to-NPC build". **Real limitation found doing it**: the
+`auto_generated_children` come from `analyze-org-risk`'s empirical
+child-record detection, which diffs real parent records against their real
+children — but run against an org holding **only this repo's synthetic
+sample data**, it *over-reports*, because it can't distinguish a genuine
+platform auto-creation from a child this repo loaded explicitly (it flagged
+`GiftTransactionDesignation` as an auto-child of `GiftTransaction`/
+`GiftDesignation` at 100%, when `sql/transformations/430` loads those
+explicitly). So promotion to committed cloud IP is **human-curated** — the
+over-reports were removed with a `curation_note` recording why, and the
+reliable un-curated parts (structure, date-range pairs, from `describe()`)
+kept as-is. Follow-up worth considering: a cleaner way to mark a detected
+child "confirmed" vs "candidate" so generalization needn't be hand-curated
+(the child-record check ideally wants genuine non-migrated reference
+records, not a migrated-synthetic org). Still a follow-up too: cloud
+profiles for a *second* cloud (mechanism is cloud-agnostic), and the harder
+signal→gate scoring step noted above.
 
 ## 84. `bulkops delete --hard-delete` for a clean reset (BUILT 2026-07-25; live re-run pending an async platform purge)
 
