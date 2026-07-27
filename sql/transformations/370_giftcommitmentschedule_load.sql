@@ -62,7 +62,19 @@ SELECT
     1 AS TransactionInterval,
     gc.NextTransactionAmount AS TransactionAmount,
     gc.EffectiveStartDate AS StartDate,
-    gc.ExpectedEndDate AS EndDate,
+    -- Guarantee a valid (forward) schedule window regardless of what the
+    -- mock recipe produced. Snowfakery generates EffectiveStartDate and
+    -- ExpectedEndDate INDEPENDENTLY, so the end can land before the start --
+    -- a backwards window into which NO transaction due date can be clamped
+    -- (see 390's two-sided clamp, which relies on Start <= End). If the
+    -- recipe's end isn't after the start, use a sensible 2-year window
+    -- instead. The committed recipe (sample_data/recipes/09) also orders
+    -- these dates for the standalone `snowfakery run` path, but the
+    -- framework's generate-related-mock-data regenerates the recipe from
+    -- describe() with independent dates -- so this SQL guard is the real
+    -- guarantee. Found + fixed 2026-07-27.
+    CASE WHEN gc.ExpectedEndDate >= gc.EffectiveStartDate THEN gc.ExpectedEndDate
+         ELSE DATEADD(YEAR, 2, gc.EffectiveStartDate) END AS EndDate,
     'CreateTransactions' AS [Type]
 INTO [dbo].[GiftCommitmentSchedule_Load]
 FROM [dbo].[GiftCommitment_Load] gc

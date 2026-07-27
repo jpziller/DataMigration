@@ -5787,3 +5787,31 @@ designation cap -- established empirically, live.
 refunded in the org (CurrentAmount=0) can't take a designation after the
 fact -- a real platform limit, handled by the load-before-refund order for
 any fresh migration.
+
+## 87. Tighten the sample-data recipe dates (ordered start/end/due) + a SQL guard (2026-07-27)
+
+Part of the "polish the reset+reload loop until a fresh clone runs clean"
+program. The recipes generated `EffectiveStartDate`/`ExpectedEndDate` (and
+`TransactionDate`/`TransactionDueDate`) as **independent**
+`fake.DateBetween(-3y, +1y)` values, so a schedule window could come out
+**backwards** (end before start) -- a window into which no transaction due
+date can be clamped, and the direct cause of the reload's due-date failure
+(#85).
+
+Two layers, because the framework's `generate-related-mock-data`
+regenerates the recipe from `describe()` (with independent dates), so a
+committed-recipe fix alone doesn't cover the primary path:
+- **Committed recipes** (`sample_data/recipes/09`,`10`) now use Snowfakery's
+  `date_between` with field references so `ExpectedEndDate`/
+  `NextTransactionDate` fall after `EffectiveStartDate`, and
+  `TransactionDueDate` after `TransactionDate` -- tight for the standalone
+  `snowfakery run` path. Verified all rows ordered.
+- **SQL guard in `370`**: `EndDate = CASE WHEN ExpectedEndDate >=
+  EffectiveStartDate THEN ExpectedEndDate ELSE DATEADD(YEAR,2,
+  EffectiveStartDate) END` -- guarantees a forward schedule window
+  regardless of what the recipe (or a describe()-regenerated one) produced.
+  This is the real guarantee; `390`'s two-sided clamp then always has a
+  valid window to clamp a due date into.
+
+Net: the date class of load failure is designed out, at both the recipe and
+the transform layer.
