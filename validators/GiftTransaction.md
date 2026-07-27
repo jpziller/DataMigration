@@ -122,3 +122,38 @@ entirely -- even a correctly-sent `#N/A` is rejected
 Unpaid or Pending."`). A delete-and-reinsert is the only fix once a
 record has reached that state (same pattern already documented in
 `docs/MIGRATION_PLAYBOOK.md`'s "Corrective reload" section).
+
+## Status must reflect whether the source gift was actually paid (not hardcoded 'Paid')
+**Found:** 2026-07-27, the real NPSP-to-NPC v2 migration run (step 3), on
+live NPSP data -- **the PoC's hand-seeded data was all-paid, so this never
+surfaced until a real org's data ran through.**
+
+Real NPSP `npe01__OppPayment__c` records include **unpaid / pledged
+installments** (`npe01__Paid__c = false`) that carry **no payment date**,
+only a scheduled due date (`npe01__Scheduled_Date__c`). The PoC-era
+transforms (`200`/`210`, carried into the v2 `120`/`130`) mapped **every**
+payment to `Status = 'Paid'` with `TransactionDueDate = payment date`. On an
+unpaid payment that produced two live failures:
+
+- `INVALID_INPUT: Complete this field.: TransactionDueDate` (the payment date
+  was null), and
+- `FIELD_INTEGRITY_EXCEPTION: To change the transaction status to Paid or
+  Fully Refunded, add the transaction completion date.` (AFNP requires a
+  completion date for `Paid`).
+
+6 of 10 real single-payment-Opportunity transactions failed this way.
+
+**Fix (v2 `120`/`130`):** key Status and the date fields on
+`npe01__Paid__c` --
+- `Status = CASE WHEN npe01__Paid__c = 1 THEN 'Paid' ELSE 'Unpaid' END`
+  (`GiftTransaction.Status` supports `Paid`/`Unpaid`),
+- `TransactionDate`/`CheckDate` (the completion date) set **only when paid**,
+- `TransactionDueDate = COALESCE(payment date, scheduled date)` -- the actual
+  payment date if paid, else the scheduled due date -- so it is always
+  populated (still clamped into the schedule window, `120`).
+
+Also fixed a **silent** correctness bug the same change caught: the
+Payment-branch (`130`) had been loading an unpaid installment as `Status =
+'Paid'` without erroring (it happened to carry a date), i.e. mislabeling a
+pledge as paid. Fix the class, not the instance -- both branches now derive
+Status from the source's real paid flag.
