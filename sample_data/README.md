@@ -91,9 +91,16 @@ and so Snowfakery users can run it without the framework).
 
 ## Loading into the org — ordered sequence
 
-Run the build groups **in order**. For each object with a `*_Load` table, apply
-the standard per-object gates from `CLAUDE.md`'s "Standard workflow" before
-loading — Hard Rule 6 (`add-bulk-load-sort-column`), Rule 7
+**First, resolve RecordTypes** (once, before any load):
+`resolve-record-types Account`. The Household / Organization / Person Account
+transforms (`230`/`280`/`290`) join `dbo.RecordTypeMap` to set `RecordTypeId`
+by `DeveloperName` (Hard Rule 15), and that table is a cache a fresh clone
+doesn't have yet — skip this and those transforms produce a `NULL`
+`RecordTypeId`. (Found via a from-scratch clone dry-run, 2026-07-27.)
+
+Then run the build groups **in order**. For each object with a `*_Load` table,
+apply the standard per-object gates from `CLAUDE.md`'s "Standard workflow"
+before loading — Hard Rule 6 (`add-bulk-load-sort-column`), Rule 7
 (`check-load-table-duplicate-keys`), Rule 12 (`validate-external-id`) — then
 `bulkops <Object> insert <Object>_Load --external-id MigrationID__c
 --email-deliverability <what Setup shows>`.
