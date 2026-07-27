@@ -5636,12 +5636,22 @@ orchestrator needs to be to gather any relevant OKF."
   normalization, reserved-file exclusion, subject-area listing), full
   suite green.
 
-**Deliberately not done (yet)**: a *structured, machine-readable*
-data-shape profile per object (the "auto-created children / real
-cardinality / defaulted-in-practice" facts as data a tool can score
-against, not prose) — the larger structured-data-shape-profile idea this
-sets up. This entry does the retrieval/surfacing half; the prose docs
-remain the source of truth for now, gathered actively instead of passively.
+**Structured data-shape profile — v1 BUILT 2026-07-26** (`data_shape.py`,
+`build-data-shape-profile`/`show-data-shape`). The machine-readable
+counterpart to this entry's prose-retrieval half: aggregates the
+behavioral signals the framework already produces — live `describe()`
+structure, `analyze-org-risk`'s automation + `child_record_risk.py`'s
+auto-generated-child detection, and `profile-salesforce`'s real field
+population — into one per-object JSON (`data_shapes/<Object>.json`) a tool
+can reason over. Confirmed live it captures exactly the shape prose can't
+give a tool cheaply — e.g. GiftCommitment's profile lists
+`GiftCommitmentSchedule` and `GiftTransaction` as auto-generated children,
+the very behavior this session's reset/reload hit. Missing upstream
+signals report `scanned:false`/`profiled:false`, never a misleading zero.
+Follow-ups (not v1): a deeper *consumer* that folds the profile into
+`assess-migration-readiness`/`orchestrator-assess` scoring, and
+generalizing an org-derived profile into cloud-level reusable knowledge
+(stripping org-specifics) so it lives in `okf/<cloud>/` as shareable IP.
 
 ## 84. `bulkops delete --hard-delete` for a clean reset (BUILT 2026-07-25; live re-run pending an async platform purge)
 

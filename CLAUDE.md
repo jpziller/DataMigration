@@ -906,7 +906,8 @@ Matching slash-command skills exist for the read-only ones — `/list-objects`,
 `/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
 `/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
 `/reconcile-load-counts`, `/assess-migration-readiness`, `/bootstrap-project`,
-`/generate-discovery-checklist`, `/gather-okf`
+`/generate-discovery-checklist`, `/gather-okf`, `/build-data-shape-profile`,
+`/show-data-shape`
 (`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
 no-prompt capabilities for anyone who opens this repo in Claude Code, so
 asking for one of these doesn't require re-deriving how to do it from
@@ -1117,6 +1118,11 @@ don't jump straight to writing SQL:
      the same knowledge the orchestrator gathers when it assesses a load —
      surfaced up front here so you head off the issue instead of scoring it
      after the fact.
+   - **Data-shape profile** (if one exists): `show-data-shape <Object>` for the
+     structured, machine-readable behavioral shape — auto-created children,
+     active automation, real field population — that `describe()` alone can't
+     give. Build/refresh it with `build-data-shape-profile <Object>` (roadmap
+     #83) once `analyze-org-risk`/`profile-salesforce` have run.
 2. **Profile the source table first** (`profile-sql-table`) — auto-mapping
    and any real mapping-quality judgment depend on knowing how populated a
    field actually is, not just what it's named. Don't skip to mapping
@@ -1324,6 +1330,20 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   by `orchestrator-assess` (which surfaces an object's relevant OKF as
   part of its assessment). Purely a lookup convenience; writing a new OKF
   entry is always a deliberate manual edit.
+- `data_shape.py` — `build-data-shape-profile`/`show-data-shape`'s logic
+  (roadmap #83, v1): aggregates the *behavioral* signals the framework
+  already produces — live `describe()` structure, `analyze-org-risk`'s
+  `ObjectAutomationRisk` (active automation + `child_record_risk.py`'s
+  auto-generated-child detection), and `profile-salesforce`'s `FieldProfile`
+  (real field population) — into one structured, machine-readable per-object
+  JSON profile a tool can reason over, complementing `describe()` metadata
+  with the shape it can't give (what the platform auto-creates, what's really
+  populated). Read-only; writes `data_shapes/<Object>.json`. Missing upstream
+  signals report `scanned: false`/`profiled: false`, never a misleading clean
+  zero. The structured counterpart to the prose in `validators/`/`okf/` — the
+  "score the build from known data shape" direction #83 sets up; a deeper
+  consumer (folding it into `assess-migration-readiness`/`orchestrator-assess`
+  scoring) and cloud-level generalization are noted follow-ups.
 - `orchestrator.py` — `orchestrator-assess`'s logic (roadmap #53, Phase 1
   only): `assess_tier()`, the deterministic Tier 1 (Continue Silently)
   through Tier 4 (Full Stop) assessment `docs/ORCHESTRATOR_DESIGN.md`'s

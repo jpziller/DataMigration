@@ -65,6 +65,7 @@ import orchestrator as orch
 import script_numbering as sn
 import validators_lookup as vl
 import okf_lookup as okf
+import data_shape as ds
 import failure_triage as ft
 import adversarial_mock_data as amd
 import pass_summary as ps
@@ -308,6 +309,51 @@ def gather_okf_cmd(objects, subject_area, okf_dir):
         click.echo("")
     click.echo(f"{len(matches)} doc(s). Read the relevant ones before building -- "
                "this is knowledge captured so you don't rediscover it after a mistake.")
+
+
+@cli.command("build-data-shape-profile")
+@click.argument("object_names", nargs=-1, required=True)
+@click.option("--output-dir", default="data_shapes", help="Where to write <Object>.json profiles (default: data_shapes/).")
+@click.option("--schema", default="dbo")
+def build_data_shape_profile_cmd(object_names, output_dir, schema):
+    """Build a structured, machine-readable data-shape profile per object
+    (ROADMAP #83) -- aggregates live describe() structure, analyze-org-risk's
+    automation + auto-generated-child detection, and profile-salesforce's
+    real field population into one JSON a tool can reason over. Writes
+    <output-dir>/<Object>.json and prints a summary. Read-only against the
+    org; the richer the upstream signals (run analyze-org-risk and
+    profile-salesforce first), the fuller the profile."""
+    s, sf, engine = _ctx()
+    for obj in object_names:
+        profile = ds.build_profile(sf, engine, obj, schema=schema, org_alias=s.sf_org_alias)
+        path = ds.write_profile(profile, output_dir)
+        click.echo(f"{obj} -> {path}")
+        for line in ds.summary_lines(profile):
+            click.echo(f"  {line}")
+
+
+@cli.command("show-data-shape")
+@click.argument("object_name")
+@click.option("--output-dir", default="data_shapes")
+def show_data_shape_cmd(object_name, output_dir):
+    """Show a previously-built data-shape profile (the read-only surfacing
+    side of build-data-shape-profile) -- consult it before building a
+    transform, alongside gather-okf/check-validators. No org connection
+    needed."""
+    profile = ds.load_profile(object_name, output_dir)
+    if profile is None:
+        click.echo(f"No data-shape profile for '{object_name}' in {output_dir}/ yet -- "
+                   f"run `build-data-shape-profile {object_name}` first.")
+        return
+    click.echo(f"{object_name} data-shape profile "
+               f"(org {profile.get('org_alias')}, generated {profile.get('generated')}):")
+    for line in ds.summary_lines(profile):
+        click.echo(f"  {line}")
+    ac = profile.get("auto_generated_children") or []
+    if ac:
+        click.echo("  auto-generated child detail:")
+        for c in ac:
+            click.echo(f"    - {c.get('child')}: {c.get('detail')}")
 
 
 @cli.command("record-counts")

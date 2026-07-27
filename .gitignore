@@ -15,8 +15,10 @@ server.crt
 # engagement wants a versioned copy (see README's "Repository structure").
 metadata/*.json
 mapping/*.xlsx
+data_shapes/*.json
 !metadata/.gitkeep
 !mapping/.gitkeep
+!data_shapes/README.md
 
 # Deliberate exception: the NPSP-to-NPC migration proof-of-concept's own
 # mapping workbooks ARE the versioned copy this repo wants -- a real
