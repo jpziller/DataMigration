@@ -277,3 +277,53 @@ def test_run_recipe_does_not_leak_polymorphic_cohort_columns_into_plain_child(tm
     task_cols = pd.read_sql("SELECT * FROM Task_Mock", sqlite_engine).columns
     assert "_ParentType" in task_cols
     assert "_SecondaryParentRef_Contact" in task_cols
+
+
+# --- Date-range (start/end) ordering (ROADMAP #88) ---------------------------
+import snowfakery_data as _sfd
+
+
+def test_date_range_pairs_common_and_root_matched():
+    # single start -> pair every end to it
+    assert _sfd.date_range_pairs(
+        ["EffectiveStartDate", "ExpectedEndDate", "NextTransactionDate"]
+    ) == [("EffectiveStartDate", "ExpectedEndDate")]
+    # exact StartDate/EndDate
+    assert _sfd.date_range_pairs(["StartDate", "EndDate"]) == [("StartDate", "EndDate")]
+    # multiple pairs disambiguated by shared root
+    assert set(_sfd.date_range_pairs(
+        ["ContractStartDate", "ContractEndDate", "TrialStartDate", "TrialEndDate"]
+    )) == {("ContractStartDate", "ContractEndDate"), ("TrialStartDate", "TrialEndDate")}
+
+
+def test_date_range_pairs_conservative_when_ambiguous_or_no_start():
+    # end-ish field but no start-ish field -> no pair (don't guess)
+    assert _sfd.date_range_pairs(["CreatedDate", "ClosedDate"]) == []
+    # two starts, an end with a root matching neither, -> ambiguous, unpaired
+    assert _sfd.date_range_pairs(
+        ["AlphaStartDate", "BetaStartDate", "GammaEndDate"]) == []
+
+
+def test_apply_date_range_ordering_rewrites_and_reorders():
+    # end appears BEFORE start in describe order -> must be reordered so the
+    # ${{...}} reference (backward-only) resolves, and its spec rewritten
+    fields = [
+        ({"name": "ExpectedEndDate", "type": "date"}, {"fake.DateBetween": {}}),
+        ({"name": "EffectiveStartDate", "type": "date"}, {"fake.DateBetween": {}}),
+    ]
+    out = _sfd._apply_date_range_ordering(fields)
+    names = [f["name"] for f, _ in out]
+    assert names.index("EffectiveStartDate") < names.index("ExpectedEndDate")
+    end_spec = dict(out)[[f for f, _ in out if f["name"] == "ExpectedEndDate"][0]["name"]] \
+        if False else next(s for f, s in out if f["name"] == "ExpectedEndDate")
+    assert end_spec == {"date_between": {"start_date": "${{EffectiveStartDate}}", "end_date": "+2y"}}
+
+
+def test_apply_date_range_ordering_only_touches_date_type():
+    # a datetime end is left alone (Faker rejects a substituted datetime)
+    fields = [
+        ({"name": "StartAt", "type": "datetime"}, {"fake.DateTimeBetween": {}}),
+        ({"name": "EndAt", "type": "datetime"}, {"fake.DateTimeBetween": {}}),
+    ]
+    out = _sfd._apply_date_range_ordering(fields)
+    assert out == fields  # unchanged

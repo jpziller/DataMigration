@@ -5787,3 +5787,64 @@ designation cap -- established empirically, live.
 refunded in the org (CurrentAmount=0) can't take a designation after the
 fact -- a real platform limit, handled by the load-before-refund order for
 any fresh migration.
+
+## 87. Tighten the sample-data recipe dates (ordered start/end/due) + a SQL guard (2026-07-27)
+
+Part of the "polish the reset+reload loop until a fresh clone runs clean"
+program. The recipes generated `EffectiveStartDate`/`ExpectedEndDate` (and
+`TransactionDate`/`TransactionDueDate`) as **independent**
+`fake.DateBetween(-3y, +1y)` values, so a schedule window could come out
+**backwards** (end before start) -- a window into which no transaction due
+date can be clamped, and the direct cause of the reload's due-date failure
+(#85).
+
+Two layers, because the framework's `generate-related-mock-data`
+regenerates the recipe from `describe()` (with independent dates), so a
+committed-recipe fix alone doesn't cover the primary path:
+- **Committed recipes** (`sample_data/recipes/09`,`10`) now use Snowfakery's
+  `date_between` with field references so `ExpectedEndDate`/
+  `NextTransactionDate` fall after `EffectiveStartDate`, and
+  `TransactionDueDate` after `TransactionDate` -- tight for the standalone
+  `snowfakery run` path. Verified all rows ordered.
+- **SQL guard in `370`**: `EndDate = CASE WHEN ExpectedEndDate >=
+  EffectiveStartDate THEN ExpectedEndDate ELSE DATEADD(YEAR,2,
+  EffectiveStartDate) END` -- guarantees a forward schedule window
+  regardless of what the recipe (or a describe()-regenerated one) produced.
+  This is the real guarantee; `390`'s two-sided clamp then always has a
+  valid window to clamp a due date into.
+
+Net: the date class of load failure is designed out, at both the recipe and
+the transform layer.
+
+## 88. Generic start/end date-range ordering in mock generation (2026-07-27)
+
+Answers a direct question -- "do we have any validation that start/end
+dates won't have issues on ANY object?" The honest answer was **no**: #87's
+date fix was Nonprofit-Cloud-GiftCommitment-specific, but the root cause is
+**generic** -- `snowfakery_data._snowfakery_field()` mapped every date to an
+*independent* `DateBetween`, so any object's start/end date pair (schedule,
+campaign, contract, promotion...) could come out backwards. This fixes the
+class, not the instance, across all three layers the question named:
+
+- **Code (root fix)**: `snowfakery_data.py` now detects **same-object
+  start/end date pairs** by name (start/begin/effective/... vs
+  end/finish/expiration/maturity/...; `date_range_pairs()` +
+  `_apply_date_range_ordering()`, called from `object_field_schema()`) and
+  generates the end field *after* the start via a Snowfakery `date_between`
+  field reference (reordering so the reference resolves), so end >= start by
+  construction for **every** object. Best-effort, conservative: pairs by
+  shared root, or the sole start; ambiguous cases left independent, not
+  guessed. `date`-typed pairs only (Faker rejects a substituted datetime).
+- **OKF**: [okf/salesforce-platform/date-range-fields-must-be-ordered.md](okf/salesforce-platform/date-range-fields-must-be-ordered.md)
+  -- the cross-cloud pattern, both rules (same-object -> order in
+  generation; cross-object date-in-window -> transform clamp), and how to
+  look for it on a new cloud. Discoverable via `gather-okf`.
+- **Data-shape profile**: `build-data-shape-profile` now surfaces each
+  object's `date_range_pairs`, so the risk is *visible* per object
+  (`show-data-shape`) even for pairs the heuristic can't auto-order.
+
+Complements #87 (which stays -- the committed recipes are tight for the
+standalone `snowfakery run` path, and `370`'s SQL guard is the per-object
+safety net) by fixing the generate-related-mock-data (framework) path at the
+root, for all objects. `tests/test_snowfakery_data.py` covers the pairing +
+ordering + conservatism.

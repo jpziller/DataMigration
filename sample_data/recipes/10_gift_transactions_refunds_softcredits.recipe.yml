@@ -23,9 +23,9 @@
         right_digits: 2
         positive: true
     TransactionDate:
-      fake.DateBetween:
+      date_between:
         start_date: -3y
-        end_date: +1y
+        end_date: -1M
     Status:
       random_choice:
       - Unpaid
@@ -73,8 +73,8 @@
       - Individual
       - Organizational
     TransactionDueDate:
-      fake.DateBetween:
-        start_date: -3y
+      date_between:
+        start_date: ${{TransactionDate}}
         end_date: +1y
     GatewayTransactionFee:
       fake.Pyfloat:

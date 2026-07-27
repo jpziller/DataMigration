@@ -54,10 +54,21 @@ def _describe_structure(sf, object_name):
                 "defaultedOnCreate": bool(f.get("defaultedOnCreate")),
                 "externalId": bool(f.get("externalId")),
             })
+    # Surface same-object start/end date pairs (ROADMAP #88) so the ordering
+    # risk is visible per object -- reuses snowfakery_data's own heuristic so
+    # the profile and the mock generator agree on what a "date range" is.
+    # Lazy import: keep this module light unless a profile is actually built.
+    import snowfakery_data as _sfd
+    date_names = [f["name"] for f in d["fields"]
+                  if f.get("type") in ("date", "datetime")]
+    date_range_pairs = [{"start": s, "end": e}
+                        for s, e in _sfd.date_range_pairs(date_names)]
+
     return {
         "custom": bool(d.get("custom")),
         "key_fields": key_fields,
         "parent_lookups": parent_lookups,
+        "date_range_pairs": date_range_pairs,
     }
 
 
@@ -163,6 +174,10 @@ def summary_lines(profile):
         f"structure: {len(st['key_fields'])} key/required field(s), "
         f"{len(st['parent_lookups'])} parent lookup(s), custom={st['custom']}",
     ]
+    drp = st.get("date_range_pairs") or []
+    if drp:
+        lines.append("date-range pairs (end must be >= start): "
+                     + ", ".join(f"{p['start']}->{p['end']}" for p in drp))
     if au.get("scanned"):
         counts = au.get("active_counts") or {}
         lines.append("automation: " + (

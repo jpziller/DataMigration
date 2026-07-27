@@ -25,9 +25,9 @@
         right_digits: 2
         positive: true
     EffectiveStartDate:
-      fake.DateBetween:
+      date_between:
         start_date: -3y
-        end_date: +1y
+        end_date: -6M
     Status:
       random_choice:
       - Active
@@ -58,9 +58,9 @@
         right_digits: 2
         positive: true
     NextTransactionDate:
-      fake.DateBetween:
-        start_date: -3y
-        end_date: +1y
+      date_between:
+        start_date: ${{EffectiveStartDate}}
+        end_date: +2y
     ExpectedAssetTransferDate:
       fake.DateBetween:
         start_date: -3y
@@ -70,9 +70,9 @@
       - Recurring
       - Custom
     ExpectedEndDate:
-      fake.DateBetween:
-        start_date: -3y
-        end_date: +1y
+      date_between:
+        start_date: ${{EffectiveStartDate}}
+        end_date: +2y
     GiftVehicle:
       random_choice:
       - Charitable Gift Annuity

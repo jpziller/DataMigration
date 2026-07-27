@@ -150,8 +150,10 @@ replicated snapshot, which must be **refreshed after that parent loads**. See
 `validators/GiftCommitmentSchedule.md`, `validators/GiftDefaultDesignation.md`,
 `validators/GiftCommitment.md`, and `validators/GiftTransactionDesignation.md`.
 
-With the fixes above (two-sided due-date clamp in `390`, and loading
-designations before refunds), a fresh run should load **everything**. The
+With the fixes above (tight recipe dates + a `370` SQL guard so schedule
+windows are never backwards, the two-sided due-date clamp in `390`, and
+loading designations before refunds), a fresh run should load
+**everything**. The
 one genuine platform limit that remains is unavoidable only in the wrong
 order: a transaction that is **already** fully refunded in the org
 (`CurrentAmount = 0`) can't take a designation after the fact — which is
