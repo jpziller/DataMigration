@@ -10,9 +10,11 @@ description: Object-specific findings for GiftTransactionDesignation
   The earlier round-robin-across-fabricated-designations approach in this
   build's own 430 script was fundamentally the wrong mechanism, not a
   minor miss. Also -- a split's two Amounts must sum to exactly the
-  transaction's OriginalAmount (rounding-safety), and a standalone,
-  fully-refunded transaction's first-insert failure remains genuinely
-  unresolved.
+  transaction's OriginalAmount (rounding-safety), and the total designation
+  Amount is capped at CurrentAmount (OriginalAmount minus RefundedAmount),
+  which refunds reduce asynchronously -- so designations must load BEFORE
+  refunds (resolved 2026-07-26, correcting an earlier wrong "standalone"
+  theory).
 tags: [object-validator, gift-transaction-designation, nonprofit-cloud, afnp, gift-transaction, gift-default-designation]
 timestamp: "2026-07-24"
 ---
@@ -152,57 +154,48 @@ secondary). A real client engagement hitting this should try the same
 delete-and-reinsert approach documented for the other two cases before
 assuming it's a different root cause.
 
-## SECOND, SEPARATE occurrence (2026-07-21) -- corrects the "locked after Status change" theory above, still unresolved
-**Found:** second NPC fundraising sample data rebuild attempt, a completely
-fresh insert this time (not a follow-up correction like LoadId 38
-above) -- `P9`, a standalone (no split, no `S9` counterpart) 100%
-designation, failed on its very first insert attempt with the identical
+## RESOLVED (2026-07-26): the real cause is CurrentAmount, and it's a refund-vs-designation LOAD-ORDER race -- load designations BEFORE refunds
+**This supersedes the earlier "standalone vs. commitment-linked" theory,
+which was wrong** -- it was an n=1-vs-n=1 coincidence. Nailed down live on
+the 2026-07-26 reload test, which reproduced the same
 `FIELD_INTEGRITY_EXCEPTION: "Adjust the designations so that the total
-designation amount doesn't exceed the transaction amount."` This alone
-already narrows the picture: since this was a first-ever insert, not an
-update against an already-loaded row, the original "field locked after
-Status change" theory (which specifically explains why an *update*
-would fail) doesn't fit this occurrence -- something about this specific
-transaction rejects a fresh insert outright.
+designation amount doesn't exceed the transaction amount"` and let it be
+diagnosed properly against a full set of refunded transactions.
 
-**Investigated live, two hypotheses tested and ruled out:**
-1. **Rounding/precision mismatch** -- checked the sent `Amount` against
-   the org's live `OriginalAmount` at 10 decimal places: both exactly
-   `78364.8000000000`. Not a rounding issue this time (unlike LoadId 38
-   above, which genuinely was one).
-2. **Fully-refunded transactions can't accept a 100% designation** -- the
-   failed transaction is `IsFullyRefunded = true`
-   (`RefundedAmount = OriginalAmount = 78364.8`). But this build's
-   *other* refunded transaction (`P30`/`S30`, a 60/40 split) is **also**
-   `IsFullyRefunded = true` with `RefundedAmount` exactly equal to its
-   own `OriginalAmount` too -- and it succeeded cleanly. Refund status
-   alone does not explain the difference.
+**The mechanism.** `GiftTransaction.CurrentAmount` is a calculated field
+equal to `OriginalAmount - RefundedAmount` (confirmed live: a partial
+refund of 59099.30 on a 78022.75 gift left `CurrentAmount = 18923.45`).
+The platform caps a transaction's **total designation Amount at
+CurrentAmount**, not at OriginalAmount -- the error text says "transaction
+amount" but it means the *current* (post-refund) amount. So a
+fully-refunded transaction has `CurrentAmount = 0` and rejects **any**
+designation Amount > 0.
 
-**The one real, remaining difference found:** the failed transaction
-(`P9`) is **standalone** -- `GiftCommitmentId` is blank. The succeeded
-one (`P30`) is **commitment-linked** (`GiftCommitmentId`/
-`GiftCommitmentScheduleId` both populated). No pre-existing/auto-created
-`GiftTransactionDesignation` row was found on the failed transaction
-either (queried directly, zero rows), ruling out an auto-created-row
-collision the same family as
-[AccountContactRelation](AccountContactRelation.md)/
-[GiftDefaultDesignation](GiftDefaultDesignation.md).
+**Why it's intermittent (the actual "standalone" red herring).** A
+`GiftRefund` reduces `CurrentAmount` **asynchronously**. When the load
+inserts refunds (`400`) before designations (`430`), it's a race: for one
+fully-refunded transaction the refund had already dropped `CurrentAmount`
+to 0 when the designation inserted (**fails**), while for another
+identically fully-refunded transaction the designation inserted *first*
+and persists fine afterward even though `CurrentAmount` later goes to 0
+(**succeeds**). Both live cases confirmed on 2026-07-26: `SNOWFAKE-GT-21`
+(`CurrentAmount=0`, designation failed, 0 loaded) vs. `SNOWFAKE-GT-26`
+(also `CurrentAmount=0`, but its 46267.65 designation was created before
+the refund landed and coexists with `CurrentAmount=0`). The old
+`GiftCommitmentId`-blank correlation was pure coincidence.
 
-**Why this is not being chased further right now:** this build only
-produced 2 refunded transactions total -- one of each shape (standalone
-vs. commitment-linked). "Standalone + fully-refunded fails, commitment-
-linked + fully-refunded succeeds" is an n=1-vs-n=1 comparison, not a
-confirmed rule -- a real, concrete lead, not proven causation.
-Confirming it needs one of: (a) a real migration with enough refunded,
-standalone transactions to test the pattern at real scale, (b) more
-real, human-created reference data in `NPC_TARGET_v2` covering this
-combination (a task for Ali, not something this framework can generate
-meaningfully), or (c) official Nonprofit Cloud documentation on how
-refunds interact with designation validation, not yet found. Per this
-project's own "test and ask questions, don't brute-force" principle,
-guessing further from a 2-example sample isn't worth it -- this stays a
-documented, open gap until one of those three becomes available.
-**What to do in the meantime:** treat "standalone + fully-refunded"
-GiftTransactionDesignation inserts as a known risk; a real client
-engagement hitting this should check `GiftCommitmentId`/refund status
-before assuming the earlier rounding-based explanation applies.
+**The fix (deterministic).** **Load `GiftTransactionDesignation` (`430`)
+BEFORE `GiftRefund` (`400`)**, right after the transactions themselves.
+Then every designation is created against the full, pre-refund
+`CurrentAmount`, and the refund reduces it afterward -- exactly the order
+`SNOWFAKE-GT-26` demonstrated works and persists. No transform change is
+needed; this is a load-ordering rule (the numbering `400 < 430` reflects
+dependency-build order, not load order -- both only depend on the
+transaction). `sample_data/README.md`'s sequence is updated accordingly.
+
+**Residual caveat.** This only helps a *fresh* load. A transaction that is
+**already** fully refunded in the org when you go to designate it
+(`CurrentAmount = 0`) genuinely cannot take a designation after the fact --
+that's a real platform limit, not a bug. If a source system has a
+designation on a gift that was later fully refunded, preserve it by
+loading the designation before applying the refund, per the fix above.

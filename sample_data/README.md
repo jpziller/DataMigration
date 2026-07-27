@@ -125,13 +125,22 @@ loading — Hard Rule 6 (`add-bulk-load-sort-column`), Rule 7
 7. **GiftDesignation** → `350`, load.
 8–9. **GiftCommitment (+ Schedule)** → `360`, load; then `370` **replicates**
    `GiftCommitmentSchedule` and inserts only genuinely-missing schedules, load.
-10. **GiftTransaction + GiftRefund + GiftSoftCredit** →
-    **re-replicate `GiftCommitmentSchedule`** (`replicate GiftCommitmentSchedule
-    --raw`) first, so `390` can join your just-loaded schedules (the group-8–9
-    snapshot predates them); then `390`, `400`, `410`, load each.
-11. **GiftDefaultDesignation + GiftTransactionDesignation** → `420` (no-op — GDD
-    is auto-created), then **replicate** `GiftDefaultDesignation` and
-    `GiftDesignation --raw`, and run `430`, load.
+10. **GiftTransaction** → **re-replicate `GiftCommitmentSchedule`**
+    (`replicate GiftCommitmentSchedule --raw`) first, so `390` can join your
+    just-loaded schedules (the group-8–9 snapshot predates them); then `390`,
+    load.
+11. **GiftTransactionDesignation, then GiftRefund + GiftSoftCredit** — note the
+    order. `420` is a no-op (GDD is auto-created); **replicate**
+    `GiftDefaultDesignation` and `GiftDesignation --raw`, run `430`, and **load
+    designations first**. **Then** load `400` (GiftRefund) and `410`
+    (GiftSoftCredit). Designations MUST load before refunds: a refund
+    asynchronously reduces `GiftTransaction.CurrentAmount` (= OriginalAmount −
+    RefundedAmount), and the total designation Amount is capped at
+    `CurrentAmount` — so a designation inserted after its refund fails
+    `FIELD_INTEGRITY_EXCEPTION`. Designating first (against the full amount)
+    always works; the refund reduces the balance afterward. (Found + resolved
+    live, 2026-07-26 — see `validators/GiftTransactionDesignation.md`. The
+    numbering `400 < 430` reflects dependency-build order, not load order.)
 
 The mid-stream `replicate` steps exist for two reasons — the platform
 auto-creates some child records on parent insert (`GiftCommitmentSchedule`,
@@ -141,11 +150,13 @@ replicated snapshot, which must be **refreshed after that parent loads**. See
 `validators/GiftCommitmentSchedule.md`, `validators/GiftDefaultDesignation.md`,
 `validators/GiftCommitment.md`, and `validators/GiftTransactionDesignation.md`.
 
-**Two rows may legitimately not load** (both known, not setup errors): a
-`GiftTransaction` whose randomly-generated due date can't be reconciled to its
-schedule window (mostly fixed by `390`'s two-sided clamp), and a standalone,
-fully-refunded transaction's `GiftTransactionDesignation` (a documented
-open platform gap — see `validators/GiftTransactionDesignation.md`).
+With the fixes above (two-sided due-date clamp in `390`, and loading
+designations before refunds), a fresh run should load **everything**. The
+one genuine platform limit that remains is unavoidable only in the wrong
+order: a transaction that is **already** fully refunded in the org
+(`CurrentAmount = 0`) can't take a designation after the fact — which is
+exactly why designations load before refunds (see
+`validators/GiftTransactionDesignation.md`).
 
 ## Expected results
 

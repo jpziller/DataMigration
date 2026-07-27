@@ -5741,3 +5741,39 @@ library (`sql/transformations/390`,`430`); the operational sequencing lands in
 org's schedules and GiftDefaultDesignations were **not** auto-created
 immediately on commitment insert (deferred to the nightly NextGen job), so
 `370`/`430`'s check-first fallbacks behaved correctly at load time.
+
+## 86. RESOLVED: the "fully-refunded GiftTransactionDesignation fails" gap is a CurrentAmount / load-order race (2026-07-26)
+
+Long carried as an open, unresolved gap (see ROADMAP #77-era notes and
+`validators/GiftTransactionDesignation.md`), with a *wrong* working theory
+("standalone transactions fail, commitment-linked succeed" -- an
+n=1-vs-n=1 coincidence). Researched properly on the 2026-07-26 reload,
+which reproduced it and let it be diagnosed against a full set of refunded
+transactions.
+
+**Real cause**: `GiftTransaction.CurrentAmount` is a calculated field =
+`OriginalAmount - RefundedAmount` (verified live: a 59099.30 partial refund
+on a 78022.75 gift left CurrentAmount = 18923.45). The platform caps a
+transaction's **total designation Amount at CurrentAmount**, not
+OriginalAmount (the error says "transaction amount" but means the
+post-refund amount). A `GiftRefund` reduces CurrentAmount **asynchronously**,
+so loading refunds (`400`) before designations (`430`) is a race: a
+fully-refunded transaction whose refund already applied has CurrentAmount=0
+and rejects any designation; one whose designation inserted first keeps it
+(and it coexists with CurrentAmount=0 afterward). Both confirmed live
+(`SNOWFAKE-GT-21` failed, `SNOWFAKE-GT-26` -- identical CurrentAmount=0 --
+succeeded, its 46267.65 designation created before the refund landed).
+
+**Fix**: load `GiftTransactionDesignation` (`430`) **before** `GiftRefund`
+(`400`), right after `GiftTransaction` (`390`). No transform change -- a
+load-ordering rule (the numbering 400 < 430 is dependency-build order, not
+load order). Captured in `validators/GiftTransactionDesignation.md` (the
+old wrong theory replaced with the resolution), `sample_data/README.md`'s
+load sequence, and `430`'s own header. Salesforce's own docs confirm
+CurrentAmount/RefundedAmount are calculated fields but don't spell out the
+designation cap -- established empirically, live.
+
+**Residual, genuinely unavoidable**: a transaction that is *already* fully
+refunded in the org (CurrentAmount=0) can't take a designation after the
+fact -- a real platform limit, handled by the load-before-refund order for
+any fresh migration.
