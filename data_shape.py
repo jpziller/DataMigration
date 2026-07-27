@@ -300,8 +300,8 @@ def cloud_summary_lines(cp):
         lines.append("date-range pairs (end must be >= start): "
                      + ", ".join(f"{p['start']}->{p['end']}" for p in drp))
     ch = cp.get("auto_generated_children") or []
-    lines.append("auto-generated children (platform-created -- plan for them, "
-                 "don't insert blindly): " + (", ".join(ch) if ch else "none"))
+    lines.append("auto-created child relationships (verify against your own "
+                 "org before inserting -- see note): " + (", ".join(ch) if ch else "none"))
     return lines
 
 

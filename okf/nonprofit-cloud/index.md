@@ -103,5 +103,28 @@ these are meant to be **consumed by tooling before a build**:
 `show-data-shape <Object> --cloud nonprofit-cloud` reads one directly —
 so a fresh clone knows, for example, that a `GiftCommitment` auto-creates
 a `GiftCommitmentSchedule` and a `GiftTransaction` *before* it has
-profiled its own org. First occupants: `GiftCommitment`,
-`GiftCommitmentSchedule`, `GiftTransaction`.
+profiled its own org.
+
+Coverage: the **full fundraising surface** (18 objects) — `Account`,
+`Contact`, `AccountContactRelation`, `ContactContactRelation`,
+`PartyRelationshipGroup`, `ContactPointAddress`/`Phone`/`Email`,
+`Campaign`, `CampaignMember`, `GiftDesignation`, `GiftCommitment`,
+`GiftCommitmentSchedule`, `GiftTransaction`, `GiftRefund`,
+`GiftSoftCredit`, `GiftDefaultDesignation`, `GiftTransactionDesignation`.
+
+**Curation matters here.** The `auto_generated_children` come from
+`analyze-org-risk`'s empirical child-record detection, which diffs real
+parent records against their real children. Run against an org holding
+**only this repo's synthetic sample data**, that detection *over-reports*:
+it can't tell a genuine platform auto-creation from a child this repo
+loaded explicitly. So promotion to committed IP is **human-curated** — the
+confirmed platform auto-creations are kept (Person Account `Account`↔`Contact`
+shadow; `GiftDefaultDesignation`, never inserted — see
+[validators/GiftDefaultDesignation.md](../../validators/GiftDefaultDesignation.md);
+`GiftCommitmentSchedule` and schedule→`GiftTransaction`), while
+`GiftTransactionDesignation` was removed as an auto-child of `GiftTransaction`
+and `GiftDesignation` (this repo loads it explicitly via
+`sql/transformations/430`; the profiles carry a `curation_note` recording
+why). The reliable, un-curated parts of every profile are the
+**structure** (standard/packaged key fields, parent lookups) and the
+**date-range pairs**, both straight from `describe()`.

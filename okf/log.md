@@ -1,6 +1,21 @@
 # okf bundle update log
 
 ## 2026-07-27
+* **New (NPSP-to-NPC rebuild plan)**: [What the NPC sample-data loop changes
+  for an NPSP-to-NPC build](npsp-to-npc/sample-data-learnings-for-migration.md)
+  — the PoC (`sql/transformations/090-220`) predates the NPC sample-data
+  clone-clean loop where target behavior was actually learned; this maps each
+  learning (don't insert auto-created records, GiftTransactionDesignation
+  inheritance, the refund-order/CurrentAmount race, date-range ordering,
+  objects the PoC never covered) onto the PoC's scripts/mappings as the
+  concrete plan for a fresh, knowledge-informed NPSP-to-NPC build.
+* **Cloud data-shape profiles expanded to the full fundraising surface** (18
+  objects) under [nonprofit-cloud/data-shapes/](nonprofit-cloud/index.md).
+  `auto_generated_children` are **human-curated** — empirical detection over
+  the synthetic-only sample org over-reports (can't tell platform
+  auto-creation from a child this repo loaded explicitly), so
+  `GiftTransactionDesignation` was removed as an auto-child of `GiftTransaction`
+  / `GiftDesignation` (loaded via `430`), with a `curation_note` recording why.
 * **New (machine-readable IP)**: cloud-level data-shape profiles under
   [nonprofit-cloud/data-shapes/](nonprofit-cloud/index.md) — `GiftCommitment`,
   `GiftCommitmentSchedule`, `GiftTransaction` (ROADMAP #83). Committed JSON

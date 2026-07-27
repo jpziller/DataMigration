@@ -1,0 +1,130 @@
+{
+  "object": "Campaign",
+  "cloud": "nonprofit-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-27",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "NumberOfLeads",
+        "type": "int",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "NumberOfConvertedLeads",
+        "type": "int",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "NumberOfContacts",
+        "type": "int",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "NumberOfResponses",
+        "type": "int",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "NumberOfOpportunities",
+        "type": "int",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "NumberOfWonOpportunities",
+        "type": "int",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "AmountAllOpportunities",
+        "type": "currency",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "AmountWonOpportunities",
+        "type": "currency",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "ParentId",
+        "references": [
+          "Campaign"
+        ],
+        "relationshipName": "Parent"
+      },
+      {
+        "field": "CampaignImageId",
+        "references": [
+          "ContentDocument"
+        ],
+        "relationshipName": null
+      },
+      {
+        "field": "OwnerId",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "CampaignMemberRecordTypeId",
+        "references": [
+          "RecordType"
+        ],
+        "relationshipName": "CampaignMemberRecordType"
+      }
+    ],
+    "date_range_pairs": [
+      {
+        "start": "StartDate",
+        "end": "EndDate"
+      }
+    ]
+  },
+  "auto_generated_children": []
+}

@@ -117,5 +117,6 @@
     ],
     "date_range_pairs": []
   },
-  "auto_generated_children": []
+  "auto_generated_children": [],
+  "curation_note": "The empirical scan detected GiftTransactionDesignation at 100%, but that reflects this repo's own sample data, which loads GiftTransactionDesignation explicitly (sql/transformations/430) -- it is NOT platform auto-created. Removed during human promotion to cloud IP."
 }
