@@ -126,6 +126,104 @@ def _snowfakery_field(field):
     return None
 
 
+# --- Generic date-range (start/end) ordering (ROADMAP #88) -------------------
+# A cross-object problem: _snowfakery_field() maps every date to an
+# INDEPENDENT DateBetween, so a same-object start/end pair (schedule
+# StartDate/EndDate, EffectiveStartDate/ExpectedEndDate, campaign dates,
+# contract dates, a promotion's dates...) can come out backwards -- end before
+# start -- which then breaks the load. This orders such pairs by construction:
+# the end field is generated *after* the start via Snowfakery's date_between
+# field reference, so end >= start on every row, for ANY object. Best-effort
+# name heuristic; ambiguous cases are left independent (and surfaced by
+# `build-data-shape-profile`'s date_range_pairs + okf/salesforce-platform).
+_START_TOKENS = frozenset({
+    "start", "begin", "began", "effective", "open", "opened", "from",
+    "commence", "launch", "issue", "issued", "activation", "activated",
+})
+_END_TOKENS = frozenset({
+    "end", "ended", "finish", "finished", "expiration", "expiry", "expires",
+    "expire", "expired", "maturity", "close", "closing", "closed",
+    "termination", "terminate", "terminated", "cease", "ceased", "thru",
+    "until", "completion", "deactivation", "deactivated",
+})
+_DATE_MARKERS = frozenset({"date", "datetime", "day", "at", "on", "time"})
+
+
+def _name_words(name):
+    """Lowercased words of a field name, splitting CamelCase and separators --
+    so "EffectiveStartDate" -> ["effective", "start", "date"]."""
+    import re
+    s = re.sub(r"[^A-Za-z0-9]", " ", name)
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s)
+    return [w.lower() for w in s.split() if w]
+
+
+def _date_role(name):
+    """"start" / "end" / None for a date field, by its name's tokens.
+    End is checked first -- it's the stronger, less ambiguous signal."""
+    ws = set(_name_words(name))
+    if ws & _END_TOKENS:
+        return "end"
+    if ws & _START_TOKENS:
+        return "start"
+    return None
+
+
+def _date_root(name):
+    """The field's identity minus its start/end role and date markers, so
+    two ends can be told apart and matched to the right start when several
+    exist (e.g. ContractStartDate/ContractEndDate vs TrialStartDate/...)."""
+    return "".join(w for w in _name_words(name)
+                   if w not in _START_TOKENS and w not in _END_TOKENS
+                   and w not in _DATE_MARKERS)
+
+
+def date_range_pairs(date_field_names):
+    """Best-effort (start_name, end_name) pairs among the given date field
+    names. Public -- reused by data_shape.py to surface the same pairs.
+    An end is matched to a start with the same root; failing that, to the
+    sole start if there's exactly one; otherwise left unpaired (ambiguous)."""
+    starts = [n for n in date_field_names if _date_role(n) == "start"]
+    ends = [n for n in date_field_names if _date_role(n) == "end"]
+    pairs = []
+    for end in ends:
+        same_root = [s for s in starts if _date_root(s) == _date_root(end)]
+        if same_root:
+            pairs.append((same_root[0], end))
+        elif len(starts) == 1:
+            pairs.append((starts[0], end))
+        # else: ambiguous (multiple starts, no root match) -- leave independent
+    return pairs
+
+
+def _apply_date_range_ordering(fields):
+    """Rewrite the end field of each detected same-object date pair to be
+    generated AFTER its start (via date_between field reference), and reorder
+    so the start is emitted first (Snowfakery references resolve backward
+    only). Only `date`-type fields are eligible -- Faker's DateTimeBetween
+    rejects a substituted datetime string, so datetime ranges aren't
+    auto-ordered here (handled at the transform layer where it matters)."""
+    date_names = [f["name"] for f, _ in fields if f.get("type") == "date"]
+    pairs = date_range_pairs(date_names)
+    if not pairs:
+        return fields
+    fields = list(fields)
+    by_name = {f["name"]: i for i, (f, _) in enumerate(fields)}
+    for start, end in pairs:
+        i = by_name[end]
+        f, _ = fields[i]
+        fields[i] = (f, {"date_between": {
+            "start_date": "${{%s}}" % start, "end_date": "+2y"}})
+    # ensure each start precedes its end (few pairs -- simple stable moves)
+    for start, end in pairs:
+        cur = {f["name"]: i for i, (f, _) in enumerate(fields)}
+        if cur[start] > cur[end]:
+            start_tuple = fields.pop(cur[start])
+            end_idx = next(i for i, (f, _) in enumerate(fields) if f["name"] == end)
+            fields.insert(end_idx, start_tuple)
+    return fields
+
+
 def _fix_snowfakery_datetime_strings(df, mapped_fields):
     """Snowfakery's own JSON output serializes a fake.DateTimeBetween value
     via Python's default str(datetime) representation -- space-separated,
@@ -208,6 +306,11 @@ def object_field_schema(sf, object_name):
             skipped.append((field["name"], field["type"]))
             continue
         fields.append((field, spec))
+
+    # Order any same-object start/end date pairs so end >= start by
+    # construction (ROADMAP #88), for every object -- not just the ones a
+    # human happened to notice.
+    fields = _apply_date_range_ordering(fields)
 
     return fields, skipped
 

@@ -17,3 +17,9 @@ is the same.
   the platform created or manages records/state your migration key doesn't
   cover -- auto-generated children with no migration key, or a
   state-lock. How to recognize it, how to look for it, and how to fix it.
+* [Date-range fields (start/end) must be ordered](date-range-fields-must-be-ordered.md) -
+  any object with a start/end date pair (schedule, campaign, contract,
+  promotion) needs end >= start, but mock generators produce each date
+  independently and can make it backwards. Same-object pairs get ordered
+  at generation time; a cross-object date-in-window constraint is a
+  transform-layer clamp. Enforced generically here.
