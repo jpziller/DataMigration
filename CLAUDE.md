@@ -1341,9 +1341,11 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   populated). Read-only; writes `data_shapes/<Object>.json`. Missing upstream
   signals report `scanned: false`/`profiled: false`, never a misleading clean
   zero. The structured counterpart to the prose in `validators/`/`okf/` — the
-  "score the build from known data shape" direction #83 sets up; a deeper
-  consumer (folding it into `assess-migration-readiness`/`orchestrator-assess`
-  scoring) and cloud-level generalization are noted follow-ups.
+  "score the build from known data shape" direction #83 sets up.
+  `assess-migration-readiness` and `orchestrator-assess` now **surface** an
+  object's profile (advisory, never changing their verdict/tier); a harder
+  *scoring* step (a signal becoming a gate) and cloud-level generalization
+  (an org-derived profile into reusable `okf/<cloud>` IP) are follow-ups.
 - `orchestrator.py` — `orchestrator-assess`'s logic (roadmap #53, Phase 1
   only): `assess_tier()`, the deterministic Tier 1 (Continue Silently)
   through Tier 4 (Full Stop) assessment `docs/ORCHESTRATOR_DESIGN.md`'s
