@@ -743,6 +743,18 @@ def assess_migration_readiness_cmd(object_names, schema, mapping_path, migration
         for gate_name, gate in r["gates"].items():
             symbol = "OK" if gate["ok"] else ("--" if gate["ok"] is None else "FAIL")
             click.echo(f"  [{symbol}] {gate_name}: {gate['detail']}")
+        # Data-shape profile as advisory context (ROADMAP #83/#88) -- the
+        # behavioral shape (auto-created children, date-range pairs,
+        # automation) alongside the gates. Advisory only; these signals are
+        # heads-ups, not pass/fail, so they never change the READY verdict.
+        profile = ds.load_profile(r["object"])
+        if profile:
+            click.echo("  data shape (advisory):")
+            for line in ds.summary_lines(profile):
+                click.echo(f"    - {line}")
+        else:
+            click.echo("  data shape: no profile yet -- run "
+                       f"`build-data-shape-profile {r['object']}` for the behavioral view")
 
 
 @cli.command("bootstrap-project")
@@ -866,6 +878,16 @@ def orchestrator_assess_cmd(object_name, log_id, schema, environment):
             click.echo(f"  - {title}  [{m['path']}]")
         click.echo("  (run `gather-okf --objects "
                    f"{object_name}` for the full summaries.)")
+
+    # Surface the object's data-shape profile too (ROADMAP #83) -- the
+    # behavioral shape (auto-created children, date-range pairs, automation)
+    # the tier's raw counts can't see. Advisory; never changes the tier.
+    profile = ds.load_profile(object_name)
+    if profile:
+        click.echo("")
+        click.echo(f"Data shape for {object_name}:")
+        for line in ds.summary_lines(profile):
+            click.echo(f"  - {line}")
 
     logged = orch.log_run_event(engine, resolved_log_id, object_name, result, schema=schema, environment=environment)
     if not logged:

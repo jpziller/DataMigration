@@ -5648,10 +5648,15 @@ give a tool cheaply — e.g. GiftCommitment's profile lists
 `GiftCommitmentSchedule` and `GiftTransaction` as auto-generated children,
 the very behavior this session's reset/reload hit. Missing upstream
 signals report `scanned:false`/`profiled:false`, never a misleading zero.
-Follow-ups (not v1): a deeper *consumer* that folds the profile into
-`assess-migration-readiness`/`orchestrator-assess` scoring, and
-generalizing an org-derived profile into cloud-level reusable knowledge
-(stripping org-specifics) so it lives in `okf/<cloud>/` as shareable IP.
+Consumer wired 2026-07-27: `assess-migration-readiness` and
+`orchestrator-assess` now surface the object's data-shape profile
+(structure, automation, auto-generated children, date-range pairs, field
+population) alongside their own output -- advisory, never changing the
+READY verdict / tier, since these signals are heads-ups not pass/fail. A
+harder *scoring* step (turning a specific signal into a gate once we know
+which should block) stays a follow-up. Still open: generalizing an
+org-derived profile into cloud-level reusable knowledge (stripping
+org-specifics) so it lives in `okf/<cloud>/` as shareable IP.
 
 ## 84. `bulkops delete --hard-delete` for a clean reset (BUILT 2026-07-25; live re-run pending an async platform purge)
 
