@@ -1,5 +1,16 @@
 # okf bundle update log
 
+## 2026-07-27 (later -- NPSP->NPC step-3 real run)
+* **New**: [NPSP source-shape fingerprint](npsp-to-npc/source-fingerprint-npsp.md)
+  + [`source-fingerprint-npsp.json`](npsp-to-npc/source-fingerprint-npsp.json)
+  -- the FIRST concrete instance of ROADMAP #89 (Known Source-Shape
+  Fingerprints), hand-captured from the real NPSP->NPC v2 migration run. The
+  NPSP recognition signature, each migration-relevant object's real shape, and
+  the source->target map. Discoverable via `gather-okf`.
+* **Extended**: `validators/GiftTransaction.md` -- Status must reflect real
+  paid/unpaid (real NPSP has unpaid pledges); the PoC's all-paid seed hid it.
+  Full account in `postmortems/2026-07-27-npsp-to-npc-v2-real-run.md`.
+
 ## 2026-07-27
 * **New (NPSP-to-NPC rebuild plan)**: [What the NPC sample-data loop changes
   for an NPSP-to-NPC build](npsp-to-npc/sample-data-learnings-for-migration.md)

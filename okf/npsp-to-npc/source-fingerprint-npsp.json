@@ -1,0 +1,84 @@
+{
+  "source_system": "NPSP",
+  "source_system_full": "Salesforce Nonprofit Success Pack",
+  "kind": "source-shape-fingerprint",
+  "roadmap": 89,
+  "captured": "2026-07-27",
+  "captured_from": "the real NPSP->NPC v2 migration run (step 3), NPSP_SOURCE org, nonprofit subset only",
+  "note": "FIRST concrete instance of ROADMAP #89 (Known Source-Shape Fingerprints), hand-captured from one real run's source data -- no registry tooling exists yet; this is the real example to generalize the tooling from later. Population/counts are from this run's scoped nonprofit subset (8 households) and illustrate SHAPE, not universal magnitudes. The recognition signature (packaged objects/fields) IS meant to be portable across NPSP orgs.",
+
+  "recognition_signature": {
+    "description": "How to recognize an org as NPSP from its shape alone -- presence of these packaged objects/fields is the fingerprint.",
+    "packaged_objects": [
+      "npe03__Recurring_Donation__c",
+      "npe01__OppPayment__c",
+      "npsp__Allocation__c",
+      "npsp__General_Accounting_Unit__c",
+      "npe5__Affiliation__c",
+      "npe4__Relationship__c"
+    ],
+    "packaged_namespaces": ["npsp__", "npe01__", "npe03__", "npe4__", "npe5__", "npo02__"],
+    "account_signals": {
+      "household_model": "npe01__SYSTEM_AccountType__c = 'Household Account' identifies a donor household (portable, unlike Type text or a record-type Id)",
+      "rollup_fields": "npo02__* currency/number rollups on Account (TotalOppAmount, LastCloseDate, ...) -- Disregard in migration (target recomputes), but a strong NPSP signal; these carry large scientific-notation values that need the scale-aware replicate coercer"
+    },
+    "mixed_org_caveat": "An NPSP dev/demo org commonly ALSO holds standard Salesforce demo Accounts (Edge Communications, etc.). Scope the migration to npe01__SYSTEM_AccountType__c = 'Household Account' + related; do not migrate demo/non-donor data."
+  },
+
+  "objects": {
+    "Account (household)": {
+      "namespace": "standard + npo02__/npsp__ packaged",
+      "role": "donor household; maps to target Account (RecordType Household) + PartyRelationshipGroup",
+      "migration_relevant_fields": ["Name", "Billing*", "npe01__SYSTEM_AccountType__c", "npe01__One2OneContact__c"],
+      "shape_observed": "single-member households in this run (8 households, 8 contacts, 1:1); a real client may have multi-member households (unvalidated here)"
+    },
+    "Contact": {
+      "namespace": "standard + npsp__/npo02__ packaged",
+      "role": "the person; maps to a target Person Account (shadow Contact auto-created)",
+      "migration_relevant_fields": ["FirstName", "LastName", "Mailing*", "Email", "Phone", "MobilePhone", "Birthdate", "npo02__Household_Naming_Order__c"]
+    },
+    "npe03__Recurring_Donation__c": {
+      "namespace": "npe03__",
+      "role": "recurring gift; maps to target GiftCommitment (+ GiftCommitmentSchedule)",
+      "migration_relevant_fields": ["npsp__Status__c", "npsp__RecurringType__c (Open/Fixed)", "npe03__Installment_Period__c (Monthly/Quarterly/Yearly/Weekly/1st and 15th)", "npsp__StartDate__c", "npsp__EndDate__c", "npe03__Installment_Amount__c", "npe03__Contact__c"],
+      "shape_observed": "period mix Monthly/Quarterly/Yearly; recurring (Monthly/Weekly/Yearly) get a platform-auto-created schedule, non-standard periods (Quarterly, 1st-and-15th) map to a Custom schedule this migration inserts explicitly"
+    },
+    "Opportunity": {
+      "namespace": "standard + npsp__ packaged",
+      "role": "a gift; ROUTES three ways by payment count/status -- >1 real payment -> GiftCommitment; else -> GiftTransaction directly",
+      "migration_relevant_fields": ["Amount", "CloseDate", "StageName", "npsp__Primary_Contact__c", "npe03__Recurring_Donation__c"],
+      "shape_observed": "of 12 in-scope opps, 2 multi-payment (route to GiftCommitment), 10 single-payment (route to GiftTransaction)"
+    },
+    "npe01__OppPayment__c": {
+      "namespace": "npe01__",
+      "role": "an installment/payment; maps to target GiftTransaction",
+      "migration_relevant_fields": ["npe01__Paid__c (BOOLEAN)", "npe01__Payment_Amount__c", "npe01__Payment_Date__c", "npe01__Scheduled_Date__c", "npe01__Payment_Method__c", "npsp__Payment_Acknowledgment_Status__c"],
+      "shape_observed": "MIXED paid/unpaid -- 8 paid, 7 unpaid/pledged. Unpaid payments carry NO payment date, only npe01__Scheduled_Date__c. This is the reality the transform's Status/date mapping MUST handle (validators/GiftTransaction.md)."
+    },
+    "npsp__Allocation__c": {
+      "namespace": "npsp__",
+      "role": "splits a gift across GAUs; maps to target GiftTransactionDesignation (fans out when an Opportunity produced >1 transaction)",
+      "migration_relevant_fields": ["npsp__Amount__c", "npsp__Opportunity__c", "npsp__General_Accounting_Unit__c"],
+      "shape_observed": "not every gift has an Allocation -- a transaction with none relies on the target's auto-created default designation (open question for the architect)"
+    },
+    "npsp__General_Accounting_Unit__c": {
+      "namespace": "npsp__",
+      "role": "fund/designation; maps to target GiftDesignation",
+      "migration_relevant_fields": ["Name", "npsp__Description__c", "npsp__Active__c"]
+    }
+  },
+
+  "maps_to_target": {
+    "target_system": "Nonprofit Cloud (AFNP)",
+    "kit": "attempts/2026-07-27-npsp-to-npc-v2/ (transforms), okf/npsp-to-npc/ (patterns), okf/nonprofit-cloud/data-shapes/ (target shapes)",
+    "key_mappings": [
+      "Household Account -> Account(RecordType Household) + PartyRelationshipGroup",
+      "Contact -> Person Account (Account) + auto-created shadow Contact + household-membership AccountContactRelation",
+      "Recurring Donation -> GiftCommitment + GiftCommitmentSchedule (recurring schedules auto-created)",
+      "Opportunity -> GiftCommitment | GiftTransaction (three-way routing by payment count)",
+      "OppPayment -> GiftTransaction (Status/dates keyed on npe01__Paid__c)",
+      "Allocation -> GiftTransactionDesignation (fan-out across split transactions)",
+      "General Accounting Unit -> GiftDesignation"
+    ]
+  }
+}

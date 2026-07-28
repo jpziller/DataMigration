@@ -54,6 +54,14 @@ other target-platform-only findings (Person Accounts, RecordTypes, the
   Book tab) — what a future real engagement can reuse directly vs. what
   must be redone per client. Full narrative account:
   `postmortems/2026-07-17-npsp-to-npc-poc.md`.
+* [NPSP source-shape fingerprint](source-fingerprint-npsp.md) - NEW
+  (2026-07-27) — a machine-readable fingerprint
+  ([`source-fingerprint-npsp.json`](source-fingerprint-npsp.json)) of what an
+  NPSP org's data actually looks like: the packaged objects/fields that make
+  an org recognizable as NPSP, each migration-relevant object's real shape
+  (incl. the mixed paid/unpaid Payment reality), and how it maps to the AFNP
+  target. First concrete instance of ROADMAP #89, captured from the real v2
+  migration run.
 * [What the NPC sample-data loop changes for an NPSP-to-NPC build](sample-data-learnings-for-migration.md) -
   NEW (2026-07-27) — the PoC above predates this repo's NPC fundraising
   sample-data clone-clean loop, where the target-platform behavior was

@@ -5936,9 +5936,16 @@ abstract. The first NPSP source fingerprint is to be captured as a byproduct
 of step 3's own source profiling (the profiling the migration needs anyway),
 so the idea proves out on real data before any registry/tooling is built.
 
-**Status: IDEA, not built.** No command, no schema, no registry yet -- this
-entry exists so the direction is captured in the repo (not just a session's
-memory) and so the step-3 NPSP profiling deliberately produces the first real
-fingerprint to generalize from later. Deliberately deferred past a single
-concrete instance, matching this repo's "don't build the framework until one
-real case proves the shape" philosophy (same as #83's own staged build).
+**Status: IDEA + first instance captured (2026-07-27).** No command, no schema,
+no registry tooling yet -- but the **first real fingerprint now exists**,
+`okf/npsp-to-npc/source-fingerprint-npsp.json` (+ its discoverable
+`source-fingerprint-npsp.md`), hand-captured from the real NPSP->NPC step-3
+run's own source data: the NPSP recognition signature (packaged
+objects/namespaces, the household signal, the mixed-org caveat), each
+migration-relevant object's real shape (incl. the mixed paid/unpaid Payment
+reality behind `validators/GiftTransaction.md`), and the `NPSP object -> AFNP
+object` map. This is the concrete example to generalize the tooling/registry
+from later -- same "prove on one real case first" discipline as #83's own
+staged build (org profile first, then generalize). The registry/command
+remains unbuilt on purpose until a second real source (or a second run)
+justifies the shape.
