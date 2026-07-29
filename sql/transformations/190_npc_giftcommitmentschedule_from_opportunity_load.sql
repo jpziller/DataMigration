@@ -1,17 +1,11 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 11 of ~14. Second half of
-   the Opportunity multi-Payment routing (180) -- needs 180's real,
-   already-loaded GiftCommitmentId.
-
-   TransactionPeriod = 'Custom', matching 180's ScheduleType = 'Custom'
-   (the same cross-object validation found live in 160/170). TransactionAmount
-   is each Opportunity's total Amount divided by its real Payment count --
-   a representative average installment size, since a Custom schedule has
-   no single natural "period amount" the way a Recurring one does.
-   TransactionInterval/TransactionDay are not meaningful for a Custom
-   period and are left NULL -- confirmed live neither is required outside
-   the Monthly-specific TransactionDay rule (Appendix B). */
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md). Second half of the
+   Opportunity multi-Payment routing (180). TransactionPeriod='Custom'
+   (matches 180's ScheduleType). TransactionAmount is the Opportunity total
+   divided by its real Payment count (a representative Custom installment).
+   StartDate only (no EndDate -- no window to order). */
 
 DROP TABLE IF EXISTS [dbo].[GiftCommitmentScheduleFromOpp_Load];
 

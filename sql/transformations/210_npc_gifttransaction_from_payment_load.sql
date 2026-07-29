@@ -1,32 +1,21 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 13 of ~14. The other half
-   of the multi-Payment routing (180/190): each of the 5 real Payments
-   under Opportunity #5 (2 payments) and #6 (3 payments) becomes its own
-   Gift Transaction, linked via GiftCommitmentId to the Gift Commitment
-   180 already created from their shared parent Opportunity (migration
-   guide sec 7.6.6 "Create Gift Transactions from Payments" -- loaded
-   after 180/190, since a transaction against a schedule needs that
-   schedule's commitment to already exist).
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md). Each real Payment
+   under a multi-Payment Opportunity becomes its own Gift Transaction,
+   linked via GiftCommitmentId (NOT GiftCommitmentScheduleId: AFNP's
+   "Single Transaction for Custom Schedule" validation forbids >1
+   transaction per Custom schedule -- see
+   okf/nonprofit-cloud/gift-transaction-validations.md). Same field
+   mapping as 200.
 
-   Same field mapping as 200 (Status/PaymentMethod/AcknowledgementStatus/
-   Name-required-on-insert) -- see that script's header for the full
-   picklist-mapping rationale, not repeated here. DonorId still resolves
-   through the parent Opportunity's npsp__Primary_Contact__c (Payment
-   itself carries no independent donor reference).
-
-   GiftCommitmentScheduleId is deliberately NOT populated here (checked
-   2026-07-18, architect review pass alongside 200's own fix). 190 builds
-   exactly one Custom-type GiftCommitmentSchedule per Opportunity, but this
-   script fans out to multiple Gift Transactions per Opportunity (one per
-   real Payment -- 2 for Opp #5, 3 for Opp #6). AFNP's own "Single
-   Transaction for Custom Schedule" validation (Appendix B --
-   okf/nonprofit-cloud/gift-transaction-validations.md) forbids linking
-   more than one Gift Transaction to the same Custom schedule, so linking
-   every Payment's transaction to that one shared schedule would fail live.
-   These Gift Transactions still correctly carry GiftCommitmentId (the
-   parent commitment, not the per-installment schedule) -- see
-   validators/GiftTransaction.md. */
+   NOTE (rebuild-plan finding 4): no schedule is joined here (by
+   design), so the 200-style due-date clamp isn't applied. If a real
+   client's Payment dates fall outside their commitment window and hit the
+   TransactionDueDate validation, add a clamp against
+   GiftCommitmentScheduleFromOpp_Load.StartDate (joined by GiftCommitmentId)
+   -- deliberately left out until real data shows it's needed, to avoid an
+   untested change to a validated transform. */
 
 DROP TABLE IF EXISTS [dbo].[GiftTransactionFromPayment_Load];
 
@@ -36,12 +25,18 @@ SELECT
     p.Name,
     pa.Id AS DonorId,
     gc.Id AS GiftCommitmentId,
-    'Paid' AS [Status],
+    -- Paid-aware Status/dates (finding from real NPSP data, same as 200): an unpaid
+    -- NPSP installment (npe01__Paid__c = false) has no payment date, only a
+    -- scheduled due date, and AFNP's 'Paid' status requires a completion
+    -- date. This build's real multi-payment Opps happened to be all-paid, so
+    -- this branch didn't fail live -- fixed anyway (fix the class, not the
+    -- instance), since a real client's pledge installments will hit it.
+    CASE WHEN p.npe01__Paid__c = 1 THEN 'Paid' ELSE 'Unpaid' END AS [Status],
     'Individual' AS GiftType,
     p.npe01__Payment_Amount__c AS OriginalAmount,
-    p.npe01__Payment_Date__c AS TransactionDate,
-    p.npe01__Payment_Date__c AS TransactionDueDate,
-    p.npe01__Payment_Date__c AS CheckDate,
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS TransactionDate,
+    COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c) AS TransactionDueDate,
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS CheckDate,
     CASE p.npe01__Payment_Method__c
         WHEN 'Cash' THEN 'Cash'
         WHEN 'Check' THEN 'Check'

@@ -1,25 +1,31 @@
 ---
 type: MigrationPattern
-title: NPSP-to-NPC reference implementation (this repo's own PoC)
+title: NPSP-to-NPC reference implementation (this repo's own starter kit)
 description: The concrete, live-verified artifacts this repo's own
-  NPSP-to-Nonprofit-Cloud proof-of-concept produced -- sql/transformations
-  scripts, mapping workbooks, and a Migration Run Book tab -- and how a
-  future real engagement should (and shouldn't) reuse them.
+  NPSP-to-Nonprofit-Cloud build produced -- sql/transformations scripts,
+  mapping workbooks, and a Migration Run Book tab -- real-data-validated
+  in the v2 rebuild (2026-07-27), and how a future real engagement should
+  (and shouldn't) reuse them.
 tags: [npsp, npc, afnp, reference-implementation, reusable, migration-pattern]
-timestamp: "2026-07-18"
+timestamp: "2026-07-27"
 ---
 # NPSP-to-NPC reference implementation
 
-This repo ran a real, live, two-org NPSP-to-Nonprofit-Cloud migration as a
-proof-of-concept (postmortem: `postmortems/2026-07-17-npsp-to-npc-poc.md`).
-Every artifact it produced is kept in this repo deliberately, as a real
+This repo ran a real, live, two-org NPSP-to-Nonprofit-Cloud migration —
+first as a proof-of-concept (postmortem:
+`postmortems/2026-07-17-npsp-to-npc-poc.md`), then rebuilt and
+**real-data-validated against a real NPSP org** in a v2 pass (postmortem:
+`postmortems/2026-07-27-npsp-to-npc-v2-real-run.md`). The current
+`sql/transformations/090-220_npc_*.sql` are that real-data-validated v2
+build, promoted from `attempts/2026-07-27-npsp-to-npc-v2/` under the
+Replace model. Every artifact is kept in this repo deliberately, as a real
 starting point for the *next* NPSP→NPC engagement — not a throwaway demo.
 
 # What's here
 
 | Artifact | Location | Covers |
 |---|---|---|
-| Transform scripts | `sql/transformations/090-220_npc_*.sql` | All 14 object families in dependency order — Household/Person Account, AccountContactRelation, PartyRelationshipGroup, Campaign/CampaignMember, GiftDesignation, GiftCommitment/Schedule (both the Recurring-Donation and multi-Payment-Opportunity routing branches), GiftTransaction (both branches), GiftTransactionDesignation. |
+| Transform scripts | `sql/transformations/090-220_npc_*.sql` (incl. doc-only `215`) | All object families in dependency order — Household/Person Account, AccountContactRelation, PartyRelationshipGroup, Campaign/CampaignMember, GiftDesignation, GiftCommitment/Schedule (both the Recurring-Donation and multi-Payment-Opportunity routing branches), GiftTransaction (both branches), the doc-only auto-created GiftDefaultDesignation (`215`), and GiftTransactionDesignation. |
 | Mapping workbooks | `mapping/npc_*.xlsx` | One workbook per (source table, target object) routing branch — `auto-map`'s real suggestions, not hand-typed. |
 | Migration Run Book tab | `migration_run_book.xlsx`, tab `NPSP_to_NPC_PoC` | Real load-order/dependency data (including the confirmed circular dependency among the four Gift* objects) and every real `bulkops` result from the live loads. |
 | Migration-key metadata | `force-app/main/default/objects/*/fields/MigrationID__c.field-meta.xml`, `force-app/main/default/permissionsets/MigrationFieldAccess.permissionset-meta.xml` | The `MigrationID__c` custom field + FLS grant on every target object this migration writes to. |
@@ -70,6 +76,53 @@ starting point for the *next* NPSP→NPC engagement — not a throwaway demo.
   Transactions — see
   [allocation-to-gift-transaction-designation.md](allocation-to-gift-transaction-designation.md).
 
+# Real-data findings from the v2 rebuild (2026-07-27)
+
+Running the build against a *real* NPSP org (not the PoC's hand-seeded
+data) surfaced four findings, all folded into the scripts here:
+
+- **`GiftTransaction.Status` must reflect real paid/unpaid state, not a
+  hardcoded `'Paid'`.** Real NPSP has unpaid/pledged installments
+  (`npe01__Paid__c = false`, no payment date); AFNP rejects `Paid` without
+  a completion date. Scripts `200`/`210` now derive Status from the real
+  paid flag and set completion dates only when paid. See
+  [validators/GiftTransaction.md](../../validators/GiftTransaction.md).
+- **The platform auto-creates a `GiftDefaultDesignation`** the instant a
+  GiftCommitment + GiftDesignation exist — never insert one. Captured as
+  the doc-only script `215` (mirrors sample-data `420`).
+- **Defensive date-range guards** — a two-sided due-date clamp on
+  `GiftTransaction.TransactionDueDate` into the joined schedule's window
+  (`200`), and a forward-window guard on `GiftCommitmentSchedule.EndDate`
+  (`170`) — real payment/schedule dates can fall outside the window AFNP's
+  date-range validation enforces.
+- **Load GiftTransactionDesignations BEFORE any GiftRefund** — a refund
+  asynchronously reduces `CurrentAmount`, which caps total designation
+  Amount; designating first (against the full amount) always works (`220`).
+
+The v2 pass also drove a framework-level fix reused everywhere:
+`replicate.py`'s decimal-precision handling for real large/odd-scale
+currency values (`type_map._decimal_coercer`).
+
+# Open questions and deferred scope
+
+Carried forward from the v2 build — genuinely unresolved, not forgotten:
+
+- **ACR multi-member household shape is still unvalidated.** The real
+  source households were all single-member, so the `IsDirect=false`
+  membership field shape (`IsIncludedInGroup`/`IsPrimaryMember`) hasn't
+  been tested against a genuine multi-member household. Confirm against a
+  real org with shared households before relying on it.
+- **GiftTransactionDesignation: Allocation fan-out vs. inherited default.**
+  For a GiftTransaction whose Opportunity had no Allocation, script `220`
+  currently relies on the platform's auto-created GiftDefaultDesignation
+  (option "a") rather than synthesizing an explicit GTD (option "b", as
+  sample-data `430` does). This loaded without error on real data, but the
+  intended behavior still needs architect confirmation.
+- **Scope-expansion objects** — GiftRefund, GiftSoftCredit,
+  ContactContactRelation, ContactPoint* are deliberately not built. Each
+  needs a per-object decision about the NPSP source shape and should be
+  built against real client data, not speculatively.
+
 # What must be redone per client — never reused verbatim
 
 - **Every `MigrationID__c` value and every real Salesforce Id** in the
@@ -100,3 +153,5 @@ starting point for the *next* NPSP→NPC engagement — not a throwaway demo.
 1. `postmortems/2026-07-17-npsp-to-npc-poc.md` — the full narrative
    account of this proof-of-concept, including what went well/poorly.
 2. `ROADMAP.md` #77 — the technical summary and real findings.
+3. `postmortems/2026-07-27-npsp-to-npc-v2-real-run.md` — the v2 rebuild's
+   real-data validation run and its four findings.

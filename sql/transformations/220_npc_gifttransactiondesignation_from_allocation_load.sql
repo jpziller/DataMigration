@@ -1,33 +1,40 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 14 of ~14, the last one.
-   Allocation -> Gift Transaction Designation (migration guide sec 7.6.12
-   "Create Gift Transaction Designations"), joining each Allocation's real
-   GiftTransactionId and its GAU's real GiftDesignationId (150).
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md). Last of the core
+   chain. Full Allocation->GiftTransactionDesignation rationale,
+   including the proportional split of an Opportunity-level Allocation
+   across the multiple Payment-level Gift Transactions its Opportunity fans
+   out into (the UNION ALL branch), and Percent being required alongside
+   Amount.
 
-   Real design wrinkle found live, not assumed up front: NPSP's Allocation
-   is Opportunity-level (splits one gift's total across GAUs), but 2 of
-   our 4 seeded Allocations reference Opportunity #6 -- a multi-Payment
-   Opportunity that itself fanned out into 3 separate Gift Transactions
-   (210, one per real Payment), not one. GiftTransactionDesignation.
-   GiftTransactionId is a single lookup, so an Opportunity-level Allocation
-   has no single correct Gift Transaction to attach to when its
-   Opportunity produced more than one. Resolved here by splitting each
-   such Allocation proportionally across every Payment-level Gift
-   Transaction under that Opportunity, weighted by that Payment's own
-   share of the Opportunity's total Amount -- accurate and never silently
-   drops or guesses at data, at the cost of turning 2 Allocations into 6
-   GiftTransactionDesignation rows (Opportunity #6's 3 equal $500 payments
-   split each Allocation into 3 equal thirds). The other 2 Allocations
-   (Opportunities #2/#3, single-Payment, routed to Gift Transaction
-   directly in 200) need no splitting -- a plain 1:1 join.
+   === v2 corrections from the sample-data loop (rebuild-plan findings 2 & 3) ===
 
-   Percent required alongside Amount -- confirmed live via a real
-   INVALID_INPUT failure ("Complete both the Percent and Amount fields"),
-   not assumed up front. Computed against each row's own joined Gift
-   Transaction's OriginalAmount (200/210 both populate it), so a plain
-   1:1 Allocation always lands at 100% and each split row lands at its
-   real proportional share. */
+   LOAD ORDER -- designations BEFORE refunds. A transaction's total
+   designation Amount is capped at CurrentAmount (OriginalAmount minus
+   RefundedAmount), and a GiftRefund reduces CurrentAmount ASYNCHRONOUSLY.
+   Loading a refund before its transaction's designation makes the
+   designation exceed the now-reduced cap and fail (confirmed live, sample
+   data -- validators/GiftTransactionDesignation.md). Percent/Amount here
+   are computed against OriginalAmount, which equals CurrentAmount only
+   while RefundedAmount is still 0 -- so this table MUST load before any
+   GiftRefund. If a real client migrates refunds, place them AFTER this
+   step (a GiftRefund transform is a deferred scope-expansion item -- see
+   okf/npsp-to-npc/reference-implementation.md).
+
+   OPEN QUESTION (flagged for architect/live confirmation -- see
+   okf/npsp-to-npc/reference-implementation.md):
+   Allocation fan-out vs. the auto-created GiftDefaultDesignation. This
+   maps GiftTransactionDesignations from real NPSP Allocations. A
+   GiftTransaction whose Opportunity had NO Allocation still needs a
+   designation -- the platform's auto-created GiftDefaultDesignation (215)
+   supplies the commitment/campaign default, so we deliberately do NOT
+   synthesize a GTD for those here (that is what sample-data 430 leaned on:
+   inherit the default rather than invent one). Confirm with the architect
+   whether Allocation-less transactions should (a) rely on the default as
+   here, or (b) get an explicit inherited GTD like 430. This build takes
+   (a) -- confirmed to load without error on real data 2026-07-27, but the
+   intended behavior still needs architect confirmation. */
 
 DROP TABLE IF EXISTS [dbo].[GiftTransactionDesignation_Load];
 

@@ -119,3 +119,7 @@ org's pre-existing data. Four real findings, all banked.
   before building; deferred deliberately, not forgotten.
 - **Promotion** of the v2 attempt to the library is the next milestone now that
   the transforms are real-data-validated.
+  *(Update 2026-07-29: done — promoted under the Replace model to
+  `sql/transformations/090-220_npc_*.sql` (plus the doc-only `215`); the
+  attempt folder was removed, recoverable via git history. See
+  `okf/npsp-to-npc/reference-implementation.md` for the canonical account.)*

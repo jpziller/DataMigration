@@ -1,17 +1,17 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 6 of ~14. Needs Campaign_Load
-   already loaded (130, real CampaignId) and the target-side Person Account
-   replicate already pulled back into dbo.Account (see 110's header --
-   ContactId is each person's own auto-generated PersonContactId, not the
-   Account Id itself).
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md).
 
-   HasResponded confirmed live as not createable on this org's
-   CampaignMember -- dropped from the column list (INVALID_FIELD_FOR_
-   INSERT_UPDATE otherwise). MigrationID__c also needed its own dedicated
-   deploy pass here -- initially missed in the Phase 1 metadata deploy,
-   caught live by this load's own pre-flight check ("not a real field on
-   CampaignMember"). */
+   Needs Campaign_Load already loaded (130, real CampaignId) and the
+   target-side Person Account replicate back in dbo.Account (ContactId is
+   each person's own auto-generated PersonContactId, not the Account Id --
+   see 110's header).
+
+   HasResponded is not createable on this org's CampaignMember (dropped --
+   INVALID_FIELD_FOR_INSERT_UPDATE otherwise, confirmed live in the PoC).
+   MigrationID__c must be deployed to CampaignMember with FLS (bulkops'
+   pre-flight check catches it if missing). */
 
 DROP TABLE IF EXISTS [dbo].[CampaignMember_Load];
 

@@ -1,49 +1,46 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 3 of ~14. "New Data" per
-   the official field-mapping workbook's own taxonomy (no direct NPSP
-   source field correspondence -- auto-map was skipped for this object,
-   see PR discussion) -- this is a synthesized relationship record, not a
-   1:1 field carry-over.
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md). The occasion for a
+   CORRECTION to the rebuild plan
+   (okf/npsp-to-npc/sample-data-learnings-for-migration.md, finding 1).
 
-   Links each household Account (090, already loaded) to its person
-   account's own auto-generated "shadow" Contact (100, already loaded --
-   PersonContactId only exists on the target org's Account row AFTER that
-   insert actually ran, hence this being its own later step rather than
-   folded into 090/100). dbo.Account currently holds a fresh, target-side
-   replicate of the 8 just-created Person Accounts (re-pulled specifically
-   for PersonContactId) -- NOT the original source household Accounts
-   090 already consumed; re-running 090 after this point would need a
-   fresh source-side Account replicate first.
+   The rebuild plan initially said "make ACR doc-only (mirror 250)". That
+   is WRONG for the NPSP household case, and reconciling it is exactly why
+   a fresh build beats blind reuse. There are TWO different
+   AccountContactRelation records here:
 
-   dbo.Contact (source-side, untouched since Phase 2) is the join spine:
-   Contact.AccountId is the NPSP household Account's own source Id,
-   matching HouseholdAccount_Load.LoadId; Contact.Id is the source Contact
-   Id, matching the target Person Account's MigrationID__c (set in 100).
+   1. The IsDirect = true SELF-relationship (Person Account <-> its own
+      auto-created shadow Contact). The platform auto-creates this the
+      instant the Person Account (100) is inserted; the sample-data build
+      correctly leaves it untouched (sql/transformations/250 is doc-only),
+      and real IsDirect=true rows are IsIncludedInGroup=False /
+      IsPrimaryMember=False. THIS build never inserts or updates it either.
 
-   IsIncludedInGroup/IsPrimaryMember (added 2026-07-18, architect review
-   finding -- likely root cause of "no household grouping visible" on the
-   live org): sample-reference-records against 10 real, non-migrated
-   AccountContactRelation records showed IsIncludedInGroup populated 10/10
-   and IsPrimaryMember populated 10/10, neither of which this script
-   originally set at all. Without IsIncludedInGroup = true, the standard
-   household UI grouping has no signal that a person is actually "in" the
-   Account's group, even though the AccountContactRelation and
-   PartyRelationshipGroup (120) records both genuinely exist -- Account
-   itself has no direct lookup field back to PartyRelationshipGroup
-   (confirmed via describe()), so this membership flag is the real
-   mechanism, not a page-layout/related-list issue.
-   IsIncludedInGroup = true for every row here: every one of these rows IS
-   a real household member, by construction.
-   IsPrimaryMember: exactly one true per household, chosen by NPSP's own
-   npo02__Household_Naming_Order__c (lower = named first/more senior),
-   falling back to Contact.Id when the naming order is null/tied, for a
-   deterministic single primary per household.
-   IsPrimaryGroup and Roles are deliberately left unset -- the same sample
-   didn't give confident evidence for either (IsPrimaryGroup showed only
-   False across the sample; Roles is a free-form multipicklist with no
-   natural source value) -- see Hard Rule 11 and
-   validators/AccountContactRelation.md. */
+   2. The IsDirect = false HOUSEHOLD-MEMBERSHIP relationship (household
+      Account -> each member's shadow Contact). This is NOT auto-created --
+      it is the mechanism that makes the standard household grouping
+      actually show (2026-07-18 architect-review finding: without
+      IsIncludedInGroup=true there is no signal a person is "in" the
+      household group; Account has no direct lookup back to
+      PartyRelationshipGroup). The sample-data build never exercised this
+      because its synthetic data had no shared multi-member households --
+      so its "doc-only" conclusion does NOT transfer here.
+
+   This script inserts ONLY record type 2 (household membership). It joins
+   the source household (Contact.AccountId -> HouseholdAccount_Load.LoadId)
+   to each person account's own PersonContactId (target-side replicate of
+   the 020 load; dbo.Account here holds the freshly re-pulled Person
+   Accounts, NOT the source households 010 consumed).
+
+   OPEN QUESTION (README): IsIncludedInGroup=true + one IsPrimaryMember per
+   household is the PoC's validated logic, but confirm the IsDirect=false
+   membership field shape against a real org with genuine multi-member
+   households before promotion. IsPrimaryMember picks one per household by
+   NPSP's own npo02__Household_Naming_Order__c (lower = named first),
+   falling back to Contact.Id for a deterministic single primary.
+   IsPrimaryGroup and Roles left unset (no confident evidence -- hard rule
+   11, validators/AccountContactRelation.md). */
 
 DROP TABLE IF EXISTS [dbo].[AccountContactRelation_Load];
 
