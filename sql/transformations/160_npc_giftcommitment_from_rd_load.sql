@@ -1,38 +1,15 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 8 of ~14. Recurring
-   Donation -> Gift Commitment (migration guide sec 7.6.2 "Create Gift
-   Commitments & Gift Commitment Schedules for Recurring Donations"). This
-   step builds the GiftCommitment half only -- GiftCommitmentSchedule
-   (170) is a separate later step since it needs THIS load's real,
-   written-back GiftCommitmentId.
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md). Full RD->GiftCommitment
+   rationale: Status/RecurrenceType picklist mapping, the ScheduleType
+   cross-validation that must match 170's TransactionPeriod, Name
+   required-on-insert.
 
-   DonorId is the RD's Contact's own migrated Person Account Id -- joins
-   through dbo.Account (still holding the target-side Person Account
-   replicate from the 090/100 requery, MigrationID__c = source Contact Id).
-
-   Status and RecurrenceType are mapped by real picklist value, both
-   sides confirmed live (not guessed):
-     npsp__Status__c (Active/Lapsed/Closed/Paused) -> GiftCommitment.Status
-       -- all 4 values exist verbatim on the target, direct 1:1.
-     npsp__RecurringType__c (Open/Fixed) -> RecurrenceType
-       (OpenEnded/FixedLength) -- explicit CASE mapping, no value overlap.
-
-   ScheduleType must match 170's own TransactionPeriod mapping exactly --
-   confirmed live via a real FIELD_INTEGRITY_EXCEPTION ("Prevent mismatched
-   schedule types" validation, Appendix B): a GiftCommitmentSchedule row
-   whose TransactionPeriod maps to 'Custom' (Quarterly/'1st and 15th', no
-   direct target period) requires its parent GiftCommitment.ScheduleType
-   to also be 'Custom', not 'Recurring'. The CASE below mirrors 170's own
-   TransactionPeriod mapping so the two never drift apart.
-
-   Name is a genuinely required field with no platform default (confirmed
-   live via REQUIRED_FIELD_MISSING when omitted -- describe() shows
-   createable: True, nillable: False, defaultedOnCreate: False, same as
-   PartyRelationshipGroup.Name (120); not a describe()/API mismatch as an
-   earlier version of this comment claimed, see
-   validators/GiftCommitment.md's own correction). Reuses the RD's own
-   Name. */
+   Sample-data learning confirmed compatible: a Recurring-type
+   GiftCommitment auto-creates its GiftCommitmentSchedule (and a
+   GiftDefaultDesignation) -- 170 already only inserts a schedule for the
+   Custom case, so no collision. */
 
 DROP TABLE IF EXISTS [dbo].[GiftCommitmentFromRD_Load];
 

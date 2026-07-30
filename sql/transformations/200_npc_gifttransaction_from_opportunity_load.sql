@@ -1,67 +1,27 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 12 of ~14. Opportunity
-   routing (okf/npsp-to-npc/opportunity-routing.md): the 4 Opportunities
-   with exactly ONE real Payment (confirmed live, including the 3
-   NPSP-auto-generated ones the original seed Load table never tracked)
-   route to Gift Transaction, joined to that one Payment for the real
-   transaction-level detail (amount/date/method) rather than using
-   Opportunity-level fields.
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md). Full rationale: the 4
+   single-Payment Opportunities route to Gift Transaction,
+   joined to their one Payment; the RD's first-installment Opportunity gets
+   GiftCommitmentId + GiftCommitmentScheduleId (the latter read from a live
+   dbo.GiftCommitmentSchedule replicate by real GiftCommitmentId, since the
+   schedule is often platform-auto-created and never in
+   GiftCommitmentSchedule_Load). Status/PaymentMethod/AcknowledgementStatus
+   picklist mappings and Name-required-on-insert as in the PoC.
 
-   Opportunity #1 (npe03__Recurring_Donation__c populated) is the
-   RD's own auto-generated first-installment Opportunity -- migrated as
-   its own real Gift Transaction (not skipped as historical noise, per
-   explicit decision this planning session), with GiftCommitmentId set to
-   the Gift Commitment 160 already created from that same RD. Opportunities
-   #2/#3/#4 (standalone) get no GiftCommitmentId.
+   PIPELINE DEPENDENCY: dbo.GiftCommitmentSchedule must
+   be freshly replicated from the target org AFTER 160/170 run and BEFORE
+   this script.
 
-   GiftCommitmentScheduleId (added 2026-07-18, architect review finding):
-   Opportunity #1 also gets GiftCommitmentScheduleId -- originally missing
-   entirely (this migration's own gap), caught when a second architect
-   reviewing the live org flagged this exact record
-   (GiftTransaction 6trfn000000rknwAAA) as disconnected from its schedule.
-   Joined against dbo.GiftCommitmentSchedule -- a live, target-org replicate
-   keyed by the real GiftCommitmentId, NOT GiftCommitmentSchedule_Load's own
-   LoadId. This distinction matters: GiftCommitmentSchedule_Load only
-   reflects rows 170 explicitly tried to insert, but Nonprofit Cloud
-   auto-creates a GiftCommitmentSchedule itself whenever the parent
-   GiftCommitment.ScheduleType = 'Recurring' (confirmed live -- see 170's
-   own header and okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md).
-   3 of this project's 4 RD-derived schedules were auto-created this way and
-   never appeared in GiftCommitmentSchedule_Load at all (170's own explicit
-   insert for them failed live with a real, previously uninvestigated
-   FIELD_INTEGRITY_EXCEPTION). Querying the real dbo.GiftCommitmentSchedule
-   replicate by GiftCommitmentId is correct regardless of whether the
-   schedule was auto-created or explicitly inserted.
-   Deliberately NOT extended to 210 (the multi-Payment-Opportunity branch)
-   -- see that script's own header for why (the "Single Transaction for
-   Custom Schedule" validation, okf/nonprofit-cloud/gift-transaction-
-   validations.md). See validators/GiftTransaction.md and
-   validators/GiftCommitmentSchedule.md.
-
-   New pipeline dependency: dbo.GiftCommitmentSchedule must be freshly
-   replicated from the target org AFTER 160/170 actually run (so the
-   auto-created rows exist to read back) and BEFORE this script --
-   `python cli.py --org target replicate GiftCommitmentSchedule` -- the
-   same two-pass-requery shape 110's own header already describes for
-   dbo.Account/PersonContactId.
-
-   Status = 'Paid' for all 4 (real, Closed Won, already-paid gifts).
-   TransactionDueDate is required (Appendix B) and has no better source
-   than the payment date itself here. PaymentMethod mapped by real
-   picklist value -- npe01__Payment_Method__c's Cash/Check/Credit Card/
-   ACH/PayPal all exist verbatim on the target, direct 1:1.
-   AcknowledgementStatus mapped from the payment's own
-   npsp__Payment_Acknowledgment_Status__c (To Be Acknowledged/Acknowledged/
-   Do Not Acknowledge -> To Be Sent/Sent/Don't Send).
-
-   Name is a genuinely required field with no platform default (confirmed
-   live via REQUIRED_FIELD_MISSING when omitted -- describe() shows
-   createable: True, nillable: False, defaultedOnCreate: False, same as
-   PartyRelationshipGroup.Name (120) and GiftCommitment.Name (160); not a
-   describe()/API mismatch as an earlier version of this comment claimed,
-   see validators/GiftTransaction.md's own correction). Reuses the
-   Opportunity's own Name. */
+   v2 ADDITION (rebuild-plan finding 4): a defensive two-sided clamp on
+   TransactionDueDate into the joined schedule's window, mirroring
+   sql/transformations/390. No-op when the payment date already falls
+   inside the schedule window (or when there is no schedule); only guards a
+   real payment dated outside its RD schedule window, which AFNP's
+   TransactionDueDate validation (Appendix B) would otherwise reject. The
+   PoC's clean seed data never exercised this; real NPSP data can. See
+   okf/salesforce-platform/date-range-fields-must-be-ordered.md. */
 
 DROP TABLE IF EXISTS [dbo].[GiftTransactionFromOpp_Load];
 
@@ -72,12 +32,29 @@ SELECT
     pa.Id AS DonorId,
     rdgc.Id AS GiftCommitmentId,
     rdsched.Id AS GiftCommitmentScheduleId,
-    'Paid' AS [Status],
+    -- Status/dates keyed on whether the Payment was actually paid (found
+    -- live on real NPSP data): NPSP has unpaid/pledged installments (npe01__Paid__c =
+    -- false) with no payment date, only a scheduled due date. AFNP's
+    -- GiftTransaction Status = 'Paid' REQUIRES a completion date, so a
+    -- hardcoded 'Paid' fails on those (INVALID_INPUT/FIELD_INTEGRITY). The
+    -- PoC's seed was all-paid, so this only surfaced on real NPSP data.
+    CASE WHEN p.npe01__Paid__c = 1 THEN 'Paid' ELSE 'Unpaid' END AS [Status],
     'Individual' AS GiftType,
     p.npe01__Payment_Amount__c AS OriginalAmount,
-    p.npe01__Payment_Date__c AS TransactionDate,
-    p.npe01__Payment_Date__c AS TransactionDueDate,
-    p.npe01__Payment_Date__c AS CheckDate,
+    -- TransactionDate is the completion date -- only a paid gift has one.
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS TransactionDate,
+    -- Due date: the actual payment date if paid, else the scheduled date;
+    -- then clamped into the schedule window (finding 4). Always populated
+    -- (TransactionDueDate is required, Appendix B).
+    CASE
+        WHEN rdsched.Id IS NOT NULL AND rdsched.StartDate > COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c)
+            THEN rdsched.StartDate
+        WHEN rdsched.Id IS NOT NULL AND rdsched.EndDate IS NOT NULL
+             AND rdsched.EndDate < COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c)
+            THEN rdsched.EndDate
+        ELSE COALESCE(p.npe01__Payment_Date__c, p.npe01__Scheduled_Date__c)
+    END AS TransactionDueDate,
+    CASE WHEN p.npe01__Paid__c = 1 THEN p.npe01__Payment_Date__c END AS CheckDate,
     CASE p.npe01__Payment_Method__c
         WHEN 'Cash' THEN 'Cash'
         WHEN 'Check' THEN 'Check'

@@ -1,12 +1,15 @@
 /* No ticket -- no ticket system in use for this project (hard rule 10).
 
-   NPSP-to-NPC migration proof-of-concept, step 7 of ~14. GiftDesignation
-   is AFNP's replacement for NPSP's General Accounting Unit (migration
-   guide sec 7.5 "Migrate Gift Designations (GAUs)") -- a near-direct
-   1:1 carry-over: Name/Description/IsActive map cleanly, GiftDesignation's
-   remaining fields are all AFNP-computed rollup aggregates (mirroring the
-   GAU's own rollup fields, which are Disregard per the workbook's own
-   taxonomy -- never migrated, always recomputed by the target platform). */
+   Canonical NPSP-to-NPC starter kit (real-data-validated 2026-07-27 --
+   see okf/npsp-to-npc/reference-implementation.md).
+
+   GiftDesignation is AFNP's replacement for NPSP's General Accounting Unit
+   (migration guide sec 7.5). Near-direct 1:1: Name/Description/IsActive;
+   the remaining GiftDesignation fields are AFNP-computed rollups (never
+   migrated). NOTE (sample-data learning): the platform auto-creates a
+   GiftDefaultDesignation off GiftDesignation/GiftCommitment -- see the
+   doc-only 215 and validators/GiftDefaultDesignation.md; nothing to do
+   here, but a downstream consumer (220) must account for it. */
 
 DROP TABLE IF EXISTS [dbo].[GiftDesignation_Load];
 
