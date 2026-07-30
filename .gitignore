@@ -28,3 +28,10 @@ data_shapes/*.json
 
 # Local `sf` CLI source-tracking state, per-org, per-machine -- not project source.
 .sf/
+
+# Local Salesforce CLI tooling cache and editor state -- per-machine, not
+# project source. `.sfdx/` in particular holds a large generated Apex-library
+# cache (git can't even index some of it). `.forceignore` is deliberately NOT
+# ignored here -- it's real, committable SFDX project config, not machine noise.
+.sfdx/
+.vscode/
