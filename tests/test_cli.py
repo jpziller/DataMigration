@@ -123,3 +123,67 @@ def test_no_org_flag_leaves_settings_unchanged(monkeypatch):
     assert result.exit_code == 0, result.output
     from config import get_settings
     assert captured["settings"].sf_org_alias == get_settings().sf_org_alias
+
+
+def _tripwire_no_salesforce(monkeypatch):
+    """Make any Salesforce connection attempt fail loudly, and stub the SQL
+    engine. Used to prove a SQL-only command reaches its SQL work WITHOUT
+    ever calling connect_salesforce() -- i.e. it goes through _sql_ctx(),
+    not _ctx(). In a two-org (source/target) config the flat SF_ORG_ALIAS is
+    deliberately empty and connect_salesforce() would fail outright, so a
+    SQL-only prep verb touching it at all is the bug (2026-07-27 NPSP->NPC
+    v2 real run)."""
+    def exploding_connect(s):
+        raise AssertionError("SQL-only command must not connect to Salesforce")
+
+    monkeypatch.setattr(cli_module, "connect_salesforce", exploding_connect)
+    monkeypatch.setattr(cli_module, "make_engine", lambda s: object())
+
+
+def test_check_load_table_duplicate_keys_needs_no_salesforce(monkeypatch):
+    """Hard rule 7's prep verb is SQL-only and must run without a Salesforce
+    connection (via cli._sql_ctx())."""
+    _tripwire_no_salesforce(monkeypatch)
+    monkeypatch.setattr(
+        cli_module.ltp, "check_load_table_duplicate_keys",
+        lambda engine, table_name, key_column, schema="dbo": ([], 0),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["check-load-table-duplicate-keys", "Account_Load", "MigrationID__c"])
+
+    assert result.exit_code == 0, result.output
+    assert "no duplicates or missing values" in result.output
+
+
+def test_add_bulk_load_sort_column_needs_no_salesforce(monkeypatch):
+    """Hard rule 6's prep verb is SQL-only -- same _sql_ctx() guarantee as
+    check-load-table-duplicate-keys."""
+    _tripwire_no_salesforce(monkeypatch)
+    monkeypatch.setattr(
+        cli_module.ltp, "add_bulk_load_sort_column",
+        lambda engine, table_name, parent_key_column, schema="dbo": [],
+    )
+
+    result = CliRunner().invoke(
+        cli, ["add-bulk-load-sort-column", "Contact_Load", "AccountId"])
+
+    assert result.exit_code == 0, result.output
+    assert "[Sort] column added/refreshed" in result.output
+
+
+def test_sql_only_command_beyond_prep_needs_no_salesforce(monkeypatch):
+    """The fix covers the whole SQL-only class, not just the two prep verbs
+    the finding named -- e.g. export-profile-excel also routes through
+    _sql_ctx() now and must not require an org."""
+    _tripwire_no_salesforce(monkeypatch)
+    monkeypatch.setattr(
+        cli_module.pf, "export_profile_to_excel",
+        lambda engine, output_path, schema="dbo", object_or_table=None, source_type=None: output_path,
+    )
+
+    result = CliRunner().invoke(
+        cli, ["export-profile-excel", "profile.xlsx"])
+
+    assert result.exit_code == 0, result.output
+    assert "Wrote profile.xlsx" in result.output
