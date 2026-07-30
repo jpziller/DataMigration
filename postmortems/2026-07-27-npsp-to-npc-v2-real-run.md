@@ -97,6 +97,11 @@ org's pre-existing data. Four real findings, all banked.
   shouldn't require a Salesforce connection.** They connect via `_ctx()` and
   fail on an empty flat `SF_ORG_ALIAS` even though they never touch the org.
   → ROADMAP candidate: let SQL-only prep verbs run without an org.
+  *(Resolved 2026-07-29: added `cli._sql_ctx()` — a SQL-only connection seam
+  (settings + lazy engine, no `connect_salesforce()`) sharing `_ctx()`'s
+  `--org` resolution — and routed all 23 SF-discarded call sites (both prep
+  verbs plus profiling, run-book sync, batch advice, logging toggles, etc.)
+  through it. Regression tests in `tests/test_cli.py`.)*
 - **The NPSP source was a mixed dev org** (nonprofit + standard demo data);
   scoping to the nonprofit subset (`npe01__SYSTEM_AccountType__c = 'Household
   Account'`) was a manual, per-object judgment. The source-fingerprint idea

@@ -76,13 +76,14 @@ import migration_brief as mbf
 import discovery_checklist as dch
 
 
-def _ctx():
-    """Single connection-establishing seam every command calls through.
-    Layers the global --org/--org-alias options (see the `cli` group below)
-    on top of the plain .env settings -- a two-org migration (source ->
-    target) can then flip which org a command targets per-invocation
-    instead of hand-editing SF_ORG_ALIAS in .env on every switch. Neither
-    flag given -> identical to pre-existing behavior."""
+def _resolve_settings():
+    """Apply the global --org/--org-alias options (see the `cli` group
+    below) on top of the plain .env settings and return the resolved
+    Settings -- no connection made. Shared by _ctx() (SF + SQL) and
+    _sql_ctx() (SQL only) so both honor the same override behavior: a
+    two-org migration (source -> target) can flip which org a command
+    targets per-invocation instead of hand-editing SF_ORG_ALIAS in .env on
+    every switch. Neither flag given -> identical to pre-existing behavior."""
     s = get_settings()
     root = click.get_current_context().find_root()
     org_role = root.params.get("org")
@@ -99,7 +100,33 @@ def _ctx():
     if org_alias:
         s = _dc_replace(s, sf_org_alias=org_alias)
         click.echo(f"[org: alias override -> {org_alias}]", err=True)
+    return s
+
+
+def _ctx():
+    """Connection seam for commands that talk to Salesforce: returns
+    (settings, live SF connection, SQL engine). See _resolve_settings() for
+    the --org/--org-alias handling. SQL-only commands (the load-table prep
+    verbs, profiling, run-book sync, batch advice, etc.) must use _sql_ctx()
+    instead -- they never touch the org, and routing them through here would
+    force (and fail on) a Salesforce connection in a two-org config whose
+    flat SF_ORG_ALIAS is deliberately empty."""
+    s = _resolve_settings()
     return s, connect_salesforce(s), make_engine(s)
+
+
+def _sql_ctx():
+    """Connection seam for SQL-only commands: returns (settings, SQL engine)
+    and never calls connect_salesforce(). Same --org/--org-alias resolution
+    as _ctx(). Exists because the load-table prep verbs (hard rules 6/7) and
+    every other mirror-DB-only command genuinely never touch Salesforce, yet
+    _ctx() used to force a live SF connection that fails outright when the
+    flat SF_ORG_ALIAS is empty -- the norm in a two-org (source/target)
+    config -- aborting the SQL-only work before it could even run (found in
+    the 2026-07-27 NPSP->NPC v2 real run). make_engine() is lazy, so no SQL
+    connection is opened until the command actually uses the engine."""
+    s = _resolve_settings()
+    return s, make_engine(s)
 
 
 def _parse_object_value_pairs(items, option_name):
@@ -477,7 +504,7 @@ def replicate_subset_cmd(root_object, related_objects, where, limit, schema, raw
 @click.option("--schema", default="dbo")
 @click.option("--append", is_flag=True, help="Add rows to an existing table instead of dropping/recreating it.")
 def import_parquet_cmd(parquet_path, table_name, schema, append):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     n = pqi.import_parquet(engine, parquet_path, table_name, schema=schema, append=append)
     click.echo(f"Imported {n} row(s) into {schema}.{table_name}"
                f"{' (appended)' if append else ' (table recreated)'}")
@@ -498,7 +525,7 @@ def import_csv_directory_cmd(csv_dir, schema, sql_dir, ticket, rebuild_tables, r
     current structure no longer matches what its script expects."""
     if bool(run_book_path) != bool(run_book_tab):
         raise click.BadParameter("--run-book and --run-book-tab must be given together.")
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     kwargs = {
         "schema": schema, "ticket": ticket, "rebuild": list(rebuild_tables),
         "run_book_path": run_book_path, "run_book_tab": run_book_tab,
@@ -537,7 +564,7 @@ def import_csv_directory_cmd(csv_dir, schema, sql_dir, ticket, rebuild_tables, r
 @cli.command("enable-source-ingestion-logging")
 @click.option("--schema", default="dbo", help="Schema to enable logging for -- each schema is opted in independently.")
 def enable_source_ingestion_logging_cmd(schema):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     si.enable_source_ingestion_logging(engine, schema=schema)
     click.echo(f"Source ingestion logging enabled for schema '{schema}' -- {schema}.SourceIngestionLog created.")
     click.echo("Every import-csv-directory call against this schema will now log automatically.")
@@ -546,7 +573,7 @@ def enable_source_ingestion_logging_cmd(schema):
 @cli.command("disable-source-ingestion-logging")
 @click.option("--schema", default="dbo", help="Schema to disable logging for.")
 def disable_source_ingestion_logging_cmd(schema):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     si.disable_source_ingestion_logging(engine, schema=schema)
     click.echo(f"Source ingestion logging disabled for schema '{schema}' -- {schema}.SourceIngestionLog dropped, history discarded.")
 
@@ -657,7 +684,7 @@ def bulkops_cmd(object_name, operation, source_table, where, dry_run, hard_delet
 @click.option("--schema", default="dbo")
 @click.option("--error-column", default="Error")
 def bulkops_retry_cmd(table, schema, error_column):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     retry_table, count = bo.build_retry_table(engine, table, schema=schema, error_column=error_column)
     if count == 0:
         click.echo(f"No failed rows found in {schema}.{table} (column {error_column}) -- nothing to retry.")
@@ -680,7 +707,7 @@ def triage_failures_cmd(table, schema, error_column, object_name, mapping_path):
     Read-only, advisory only -- never changes data, never re-runs
     bulkops. `table` is the same load table (written back in place) or
     <table>_Result table bulkops-retry already reads."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     results = ft.triage_failures(
         engine, table, schema=schema, error_column=error_column,
         object_name=object_name, mapping_path=mapping_path,
@@ -752,7 +779,7 @@ def reconcile_load_counts_cmd(object_names, schema, mapping_path, load_tables):
     for each object, flagging anywhere they don't reconcile the way
     they're supposed to. Read-only, aggregates data every one of these
     tools already produces."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     load_table_map = _parse_object_value_pairs(load_tables, "--load-table")
 
     results = rc.reconcile_load_counts(
@@ -890,7 +917,7 @@ def generate_discovery_checklist_cmd(object_names, output_path):
 @cli.command("enable-bulkops-logging")
 @click.option("--schema", default="dbo", help="Schema to enable logging for -- each schema is opted in independently.")
 def enable_bulkops_logging_cmd(schema):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     bo.enable_bulkops_logging(engine, schema=schema)
     click.echo(f"Bulk load logging enabled for schema '{schema}' -- {schema}.BulkOpsLog created.")
     click.echo("Every bulkops call against this schema will now log automatically; no per-call flag needed.")
@@ -899,7 +926,7 @@ def enable_bulkops_logging_cmd(schema):
 @cli.command("disable-bulkops-logging")
 @click.option("--schema", default="dbo", help="Schema to disable logging for.")
 def disable_bulkops_logging_cmd(schema):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     click.echo(f"This permanently drops {schema}.BulkOpsLog and all of its history.")
     bo.disable_bulkops_logging(engine, schema=schema)
     click.echo(f"Bulk load logging disabled for schema '{schema}'.")
@@ -918,7 +945,7 @@ def orchestrator_assess_cmd(object_name, log_id, schema, environment):
     ask-gated as it always was -- this never changes that, it only
     observes and reports. Logs to <schema>.OrchestratorRunEvent if
     enable-orchestrator-logging has been run for this schema."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     resolved_log_id, result = orch.assess_from_log(engine, object_name, log_id=log_id, schema=schema, environment=environment)
     click.echo(f"BulkOpsLog #{resolved_log_id} ({object_name}, {environment}): "
                f"Tier {result['tier']} ({result['tier_name']})")
@@ -959,7 +986,7 @@ def orchestrator_assess_cmd(object_name, log_id, schema, environment):
 @cli.command("enable-orchestrator-logging")
 @click.option("--schema", default="dbo", help="Schema to enable logging for -- each schema is opted in independently.")
 def enable_orchestrator_logging_cmd(schema):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     orch.enable_orchestrator_logging(engine, schema=schema)
     click.echo(f"Orchestrator shadow-mode logging enabled for schema '{schema}' -- {schema}.OrchestratorRunEvent created.")
     click.echo("Every orchestrator-assess call against this schema will now log automatically; no per-call flag needed.")
@@ -968,7 +995,7 @@ def enable_orchestrator_logging_cmd(schema):
 @cli.command("disable-orchestrator-logging")
 @click.option("--schema", default="dbo", help="Schema to disable logging for.")
 def disable_orchestrator_logging_cmd(schema):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     click.echo(f"This permanently drops {schema}.OrchestratorRunEvent and all of its history.")
     orch.disable_orchestrator_logging(engine, schema=schema)
     click.echo(f"Orchestrator shadow-mode logging disabled for schema '{schema}'.")
@@ -984,7 +1011,7 @@ def add_bulk_load_sort_column_cmd(table_name, parent_key_column, schema):
     same-parent rows in the same batch. Replaces the old
     EXEC dbo.AddBulkLoadSortColumn stored-procedure step -- run this before
     bulkops for any load table with a parent lookup/master-detail field."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     bad_ranges = ltp.add_bulk_load_sort_column(engine, table_name, parent_key_column, schema=schema)
     click.echo(f"[Sort] column added/refreshed on {schema}.{table_name}, ordered by {parent_key_column}.")
     if not bad_ranges:
@@ -1006,7 +1033,7 @@ def check_load_table_duplicate_keys_cmd(table_name, key_column, schema):
     on insert (see bulkops.py's own docstring). Replaces the old
     EXEC dbo.CheckLoadTableDuplicateKeys stored-procedure step. Exits
     nonzero if anything is found, so this can gate a script."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     duplicates, missing_key_count = ltp.check_load_table_duplicate_keys(
         engine, table_name, key_column, schema=schema
     )
@@ -1094,7 +1121,7 @@ def generate_source_data_model_cmd(subject_areas, output_dir, schema, mapping_pa
     staging tables. Relationships are a NAMING-CONVENTION GUESS ONLY --
     staging tables carry no foreign keys -- always labeled "(guessed)" and
     printed here for explicit human review, never silently trusted."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     os.makedirs(output_dir, exist_ok=True)
 
     for area in subject_areas:
@@ -1163,7 +1190,7 @@ def profile_salesforce_cmd(object_name, where, schema, top_n_values, reprofile):
 @click.option("--distinct-threshold", default=50, help="Columns with more distinct values than this skip value-distribution capture.")
 @click.option("--reprofile", is_flag=True, help="Force a fresh profile even if this table was already profiled in this schema (roadmap #47). Default: skip and show the existing profile.")
 def profile_sql_table_cmd(table_name, schema, top_n_values, distinct_threshold, reprofile):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     if not reprofile:
         already, last_at = pf.is_already_profiled(engine, table_name, "sql_table", schema=schema)
         if already:
@@ -1185,7 +1212,7 @@ def profile_sql_table_cmd(table_name, schema, top_n_values, distinct_threshold, 
 @click.option("--object", "object_or_table", default=None, help="Limit export to one object/table.")
 @click.option("--source-type", type=click.Choice(["salesforce", "sql_table"]), default=None)
 def export_profile_excel_cmd(output_path, schema, object_or_table, source_type):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     path = pf.export_profile_to_excel(
         engine, output_path, schema=schema, object_or_table=object_or_table, source_type=source_type
     )
@@ -1672,7 +1699,7 @@ def generate_solution_doc_cmd(output_path, object_names, mapping_path, template_
 @click.option("--script-dir", default=None, help="Resolve/link scripts from here instead of the default sql/transformations/ -- e.g. an attempts workspace's own script folder (see CLAUDE.md's \"Library vs. attempts workspace\" section).")
 def generate_migration_run_book_cmd(output_path, tab_name, object_names, schema, template_path,
                            project_name, source_env, target_env, ticket_url, ticket_label, script_dir):
-    s, _, engine = _ctx()
+    s, engine = _sql_ctx()
     kwargs = {
         "schema": schema,
         "project_name": project_name,
@@ -1704,7 +1731,7 @@ def generate_migration_run_book_cmd(output_path, tab_name, object_names, schema,
 @click.option("--ticket-label", default=None, help="Override the carried-forward ticket system name.")
 @click.option("--script-dir", default=None, help="Resolve/link scripts from here instead of the default sql/transformations/ -- e.g. an attempts workspace's own script folder (see CLAUDE.md's \"Library vs. attempts workspace\" section).")
 def add_migration_run_book_pass_cmd(path, from_tab, to_tab, project_name, source_env, target_env, ticket_url, ticket_label, script_dir):
-    s, _, _e = _ctx()
+    s, _ = _sql_ctx()
     mrb.add_migration_run_book_pass(
         path, from_tab, to_tab,
         project_name=project_name, source_env=source_env,
@@ -1721,7 +1748,7 @@ def add_migration_run_book_pass_cmd(path, from_tab, to_tab, project_name, source
 @click.option("--schema", default="dbo")
 @click.option("--script-dir", default=None, help="Resolve/link scripts from here instead of the default sql/transformations/ -- e.g. an attempts workspace's own script folder (see CLAUDE.md's \"Library vs. attempts workspace\" section).")
 def update_migration_run_book_cmd(path, tab_name, schema, script_dir):
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     result = mrb.sync_run_book_from_log(engine, path, tab_name, schema=schema, script_dir=script_dir)
     if result.get("message"):
         click.echo(result["message"])
@@ -1778,7 +1805,7 @@ def generate_pass_summary_cmd(path, tab_name, output_path, schema, load_tables):
     count, total/succeeded/failed records, and (with --load-table) a
     plain-language root cause per failure signature via triage-failures
     (#61). Plain Markdown for v1."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     load_table_map = _parse_object_value_pairs(load_tables, "--load-table")
 
     summary_text = ps.generate_pass_summary(path, tab_name, engine=engine, schema=schema, load_tables=load_table_map)
@@ -1836,7 +1863,7 @@ def analyze_org_risk_cmd(object_names, mapping_path, schema, skip_child_shape_ch
 def recommend_batch_size_cmd(object_name, schema):
     """Print bulkops' batch-size recommendation for an object, with full
     rationale, without loading anything -- read-only, no Salesforce call."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     size, rationale = ba.recommend_batch_size(engine, object_name, schema=schema)
     for line in rationale:
         click.echo(line)
@@ -1849,7 +1876,7 @@ def suggest_batch_heuristics_cmd(schema):
     this project's own converged load history (dbo.BulkOpsLog) -- never
     writes the file; review and commit changes yourself, same as adding a
     new alias to the field-synonym thesaurus."""
-    _, _, engine = _ctx()
+    _, engine = _sql_ctx()
     suggestions = ba.suggest_heuristic_updates(engine, schema=schema)
     if not suggestions:
         click.echo("No converged batch sizes to suggest yet -- needs several consecutive "
