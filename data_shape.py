@@ -25,6 +25,7 @@ prints a summary. Missing upstream signals are reported as `scanned: false` /
 import datetime
 import json
 import os
+from decimal import Decimal
 
 from sqlalchemy import text
 
@@ -103,6 +104,28 @@ def _automation_and_children(engine, object_name, schema):
     return {"scanned": True, "active_counts": active_counts}, auto_children
 
 
+def _as_float(v):
+    """Coerce a SQL numeric to a JSON-serializable float; None stays None.
+    SQL Server returns NUMERIC/DECIMAL columns (e.g. FieldProfile.PopulatedPct)
+    as Python Decimal, which json.dump can't serialize."""
+    return None if v is None else float(v)
+
+
+def _as_int(v):
+    """Coerce a SQL count (Decimal/float on some backends) to a plain int;
+    None stays None."""
+    return None if v is None else int(v)
+
+
+def _jsonable(o):
+    """json.dump default hook: coerce any stray SQL numeric (Decimal) to a
+    float so profile serialization never dies on a backend-specific type,
+    even for a value a future field forgets to coerce at the source."""
+    if isinstance(o, Decimal):
+        return float(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
 def _field_population(engine, object_name, schema):
     d = sql_dialect.for_engine(engine)
     if not d.table_exists(engine, schema, "FieldProfile"):
@@ -121,10 +144,10 @@ def _field_population(engine, object_name, schema):
         return {"profiled": False}
     fields = [{
         "name": r.get("fieldname"),
-        "populated_pct": r.get("populatedpct"),
-        "distinct": r.get("distinctcount"),
+        "populated_pct": _as_float(r.get("populatedpct")),
+        "distinct": _as_int(r.get("distinctcount")),
     } for r in rows]
-    return {"profiled": True, "total_rows": rows[0].get("totalrows"), "fields": fields}
+    return {"profiled": True, "total_rows": _as_int(rows[0].get("totalrows")), "fields": fields}
 
 
 def build_profile(sf, engine, object_name, schema="dbo", org_alias=None):
@@ -149,7 +172,7 @@ def write_profile(profile, output_dir="data_shapes"):
     os.makedirs(output_dir, exist_ok=True)
     path = profile_path(profile["object"], output_dir)
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(profile, fh, indent=2)
+        json.dump(profile, fh, indent=2, default=_jsonable)
     return path
 
 
@@ -236,7 +259,7 @@ def write_cloud_profile(cloud_profile, okf_dir="okf"):
     path = cloud_profile_path(cloud_profile["object"], cloud_profile["cloud"], okf_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(cloud_profile, fh, indent=2)
+        json.dump(cloud_profile, fh, indent=2, default=_jsonable)
     return path
 
 

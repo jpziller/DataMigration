@@ -136,6 +136,40 @@ def test_write_and_load_round_trip(sqlite_engine, tmp_path):
     assert ds.load_profile("Nope", out) is None
 
 
+def test_jsonable_coerces_decimal_to_float():
+    """SQL Server returns FieldProfile.PopulatedPct as Decimal, which
+    json.dump can't serialize -- it crashed build-data-shape-profile the
+    first time it ran on a SQL-Server-backed org (the SDO, 2026-07-31).
+    SQLite (this file's other fixtures) never yields Decimal, so the bug
+    hid until real SQL Server data hit it. The default hook coerces it."""
+    from decimal import Decimal
+    result = ds._jsonable(Decimal("99.71"))
+    assert result == 99.71 and isinstance(result, float)
+    with pytest.raises(TypeError):
+        ds._jsonable(object())
+
+
+def test_write_profile_serializes_decimal_field_population(tmp_path):
+    """Regression for the SDO crash: a profile carrying Decimal values (as
+    SQL Server produces for PopulatedPct) must write and round-trip to plain
+    floats rather than raising 'Object of type Decimal is not JSON
+    serializable'."""
+    from decimal import Decimal
+    profile = {
+        "object": "Opportunity",
+        "field_population": {
+            "profiled": True,
+            "total_rows": 685,
+            "fields": [{"name": "Amount", "populated_pct": Decimal("99.71"), "distinct": 188}],
+        },
+    }
+    out = str(tmp_path / "shapes")
+    ds.write_profile(profile, out)
+    loaded = ds.load_profile("Opportunity", out)
+    pct = loaded["field_population"]["fields"][0]["populated_pct"]
+    assert pct == 99.71 and isinstance(pct, float)
+
+
 def test_summary_lines_report_missing_signals(sqlite_engine):
     p = ds.build_profile(_StubSF(_DESCRIBE), sqlite_engine, "GiftCommitment")
     text = "\n".join(ds.summary_lines(p))
