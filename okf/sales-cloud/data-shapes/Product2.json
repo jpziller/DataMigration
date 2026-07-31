@@ -1,0 +1,67 @@
+{
+  "object": "Product2",
+  "cloud": "sales-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-31",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "TaxPolicyId",
+        "references": [
+          "TaxPolicy"
+        ],
+        "relationshipName": "TaxPolicy"
+      },
+      {
+        "field": "RecordTypeId",
+        "references": [
+          "RecordType"
+        ],
+        "relationshipName": "RecordType"
+      },
+      {
+        "field": "ExternalDataSourceId",
+        "references": [
+          "ExternalDataSource"
+        ],
+        "relationshipName": null
+      },
+      {
+        "field": "BusinessBrandId",
+        "references": [
+          "BusinessBrand"
+        ],
+        "relationshipName": "BusinessBrand"
+      },
+      {
+        "field": "BasedOnId",
+        "references": [
+          "ProductClassification"
+        ],
+        "relationshipName": "BasedOn"
+      },
+      {
+        "field": "UnitOfMeasureId",
+        "references": [
+          "UnitOfMeasure"
+        ],
+        "relationshipName": "UnitOfMeasure"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": []
+}

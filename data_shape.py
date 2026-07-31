@@ -232,6 +232,15 @@ def generalize_profile(profile, cloud):
                   if _api_name_kind(f.get("name")) != "org_custom"]
     parent_lookups = [p for p in st.get("parent_lookups", [])
                       if _api_name_kind(p.get("field")) != "org_custom"]
+    # A date-range pair is cloud-portable only if BOTH endpoints are -- an
+    # org-custom field on either end (e.g. Product2's Start_Date_Time__c)
+    # makes the whole pair org-specific, so drop it (found live: SDO Product2
+    # custom date pairs leaking into generalized Sales Cloud IP).
+    date_range_pairs = [
+        pair for pair in st.get("date_range_pairs", [])
+        if _api_name_kind(pair.get("start")) != "org_custom"
+        and _api_name_kind(pair.get("end")) != "org_custom"
+    ]
     children = [c.get("child") for c in profile.get("auto_generated_children", [])
                 if c.get("child")]
     return {
@@ -252,7 +261,7 @@ def generalize_profile(profile, cloud):
             "custom_object": st.get("custom", False),
             "key_fields": key_fields,
             "parent_lookups": parent_lookups,
-            "date_range_pairs": st.get("date_range_pairs", []),
+            "date_range_pairs": date_range_pairs,
         },
         "auto_generated_children": children,
     }
