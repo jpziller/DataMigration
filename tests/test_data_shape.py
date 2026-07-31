@@ -186,6 +186,13 @@ def test_api_name_kind_classifies_portability():
     # namespaced managed-package field is cloud-true for any licensed org
     assert ds._api_name_kind("npsp__Amount__c") == "packaged"
     assert ds._api_name_kind("ns__Rel__r") == "packaged"
+    # person-account custom suffixes must classify like their __c/__r cousins
+    # (found live: SDO_*__pc org-custom person-account fields leaked into
+    # generalized Sales Cloud IP because __pc/__pr weren't recognized)
+    assert ds._api_name_kind("SDO_Foo__pc") == "org_custom"
+    assert ds._api_name_kind("SDO_Foo__pr") == "org_custom"
+    assert ds._api_name_kind("ns__Foo__pc") == "packaged"
+    assert ds._api_name_kind("ns__Foo__pr") == "packaged"
 
 
 def test_generalize_strips_org_specifics(sqlite_engine):
