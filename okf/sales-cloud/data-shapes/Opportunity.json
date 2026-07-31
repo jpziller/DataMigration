@@ -1,0 +1,137 @@
+{
+  "object": "Opportunity",
+  "cloud": "sales-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-31",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "StageName",
+        "type": "picklist",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "CloseDate",
+        "type": "date",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "ForecastCategory",
+        "type": "picklist",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "AccountId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Account"
+      },
+      {
+        "field": "RecordTypeId",
+        "references": [
+          "RecordType"
+        ],
+        "relationshipName": "RecordType"
+      },
+      {
+        "field": "CampaignId",
+        "references": [
+          "Campaign"
+        ],
+        "relationshipName": "Campaign"
+      },
+      {
+        "field": "Pricebook2Id",
+        "references": [
+          "Pricebook2"
+        ],
+        "relationshipName": "Pricebook2"
+      },
+      {
+        "field": "OwnerId",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "Territory2Id",
+        "references": [
+          "Territory2"
+        ],
+        "relationshipName": "Territory2"
+      },
+      {
+        "field": "CreatedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "CreatedBy"
+      },
+      {
+        "field": "LastModifiedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "LastModifiedBy"
+      },
+      {
+        "field": "ContactId",
+        "references": [
+          "Contact"
+        ],
+        "relationshipName": null
+      },
+      {
+        "field": "SourceId",
+        "references": [
+          "BusinessMilestone",
+          "PersonLifeEvent"
+        ],
+        "relationshipName": "Source"
+      },
+      {
+        "field": "SyncedQuoteId",
+        "references": [
+          "Quote"
+        ],
+        "relationshipName": "SyncedQuote"
+      },
+      {
+        "field": "ContractId",
+        "references": [
+          "Contract"
+        ],
+        "relationshipName": "Contract"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": []
+}
