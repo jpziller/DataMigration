@@ -1,0 +1,64 @@
+{
+  "object": "OpportunityLineItem",
+  "cloud": "sales-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-31",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "OpportunityId",
+        "type": "reference",
+        "required": true,
+        "createable": true,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "Name",
+        "type": "string",
+        "required": false,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "Quantity",
+        "type": "double",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "OpportunityId",
+        "references": [
+          "Opportunity"
+        ],
+        "relationshipName": "Opportunity"
+      },
+      {
+        "field": "PricebookEntryId",
+        "references": [
+          "PricebookEntry"
+        ],
+        "relationshipName": "PricebookEntry"
+      },
+      {
+        "field": "Product2Id",
+        "references": [
+          "Product2"
+        ],
+        "relationshipName": "Product2"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": []
+}

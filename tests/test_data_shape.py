@@ -195,6 +195,33 @@ def test_api_name_kind_classifies_portability():
     assert ds._api_name_kind("ns__Foo__pr") == "packaged"
 
 
+def test_generalize_drops_date_pairs_with_org_custom_endpoint():
+    """A date-range pair survives generalization only if BOTH endpoints are
+    cloud-portable -- an org-custom field on either end makes the whole pair
+    org-specific and it must be dropped (found live: SDO Product2 custom date
+    pairs Start_Date_Time__c/End_Date_Time__c leaked into Sales Cloud IP)."""
+    profile = {
+        "object": "Product2",
+        "structure": {
+            "custom": False,
+            "key_fields": [],
+            "parent_lookups": [],
+            "date_range_pairs": [
+                {"start": "EffectiveDate", "end": "EndDate"},              # both standard -> keep
+                {"start": "Start_Date_Time__c", "end": "EndOfLifeDate"},   # custom start -> drop
+                {"start": "Start_Date_Time__c", "end": "End_Date_Time__c"},# both custom -> drop
+                {"start": "ns__Begin__c", "end": "ns__Finish__c"},         # packaged -> keep
+            ],
+        },
+        "auto_generated_children": [],
+    }
+    cp = ds.generalize_profile(profile, "sales-cloud")
+    assert cp["structure"]["date_range_pairs"] == [
+        {"start": "EffectiveDate", "end": "EndDate"},
+        {"start": "ns__Begin__c", "end": "ns__Finish__c"},
+    ]
+
+
 def test_generalize_strips_org_specifics(sqlite_engine):
     _seed_automation(sqlite_engine)
     _seed_fieldprofile(sqlite_engine)
