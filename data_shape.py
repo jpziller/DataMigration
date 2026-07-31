@@ -230,8 +230,17 @@ def generalize_profile(profile, cloud):
     st = profile.get("structure", {})
     key_fields = [f for f in st.get("key_fields", [])
                   if _api_name_kind(f.get("name")) != "org_custom"]
-    parent_lookups = [p for p in st.get("parent_lookups", [])
-                      if _api_name_kind(p.get("field")) != "org_custom"]
+    # Keep only portable lookups, and within each drop any org-custom target
+    # object from its references -- a standard/packaged field can still point
+    # at an org-custom object, and that target isn't cloud-true even though
+    # the field is (part of the leak-vector hardening after #49/#51/#52).
+    parent_lookups = []
+    for p in st.get("parent_lookups", []):
+        if _api_name_kind(p.get("field")) == "org_custom":
+            continue
+        refs = [r for r in (p.get("references") or [])
+                if _api_name_kind(r) != "org_custom"]
+        parent_lookups.append({**p, "references": refs})
     # A date-range pair is cloud-portable only if BOTH endpoints are -- an
     # org-custom field on either end (e.g. Product2's Start_Date_Time__c)
     # makes the whole pair org-specific, so drop it (found live: SDO Product2
@@ -241,8 +250,10 @@ def generalize_profile(profile, cloud):
         if _api_name_kind(pair.get("start")) != "org_custom"
         and _api_name_kind(pair.get("end")) != "org_custom"
     ]
+    # An auto-generated child that is itself an org-custom object is
+    # org-specific, not cloud-true -- drop it the same as an org-custom field.
     children = [c.get("child") for c in profile.get("auto_generated_children", [])
-                if c.get("child")]
+                if c.get("child") and _api_name_kind(c.get("child")) != "org_custom"]
     return {
         "object": profile["object"],
         "cloud": cloud,

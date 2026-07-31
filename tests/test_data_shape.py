@@ -195,6 +195,51 @@ def test_api_name_kind_classifies_portability():
     assert ds._api_name_kind("ns__Foo__pr") == "packaged"
 
 
+def test_generalize_strips_org_custom_from_every_structure_position():
+    """Hardening catch-all: no org-custom (un-namespaced) token may survive
+    generalization in ANY structure position -- key field, lookup field,
+    lookup reference target, date-range endpoint, or auto-generated child
+    object -- while standard and namespaced-packaged names DO survive. Locks
+    every leak vector at once, instead of the one-per-batch discovery the SDO
+    forced (Decimal #49, __pc/__pr #51, date pairs #52)."""
+    import json
+    import re
+    profile = {
+        "object": "Account",
+        "structure": {
+            "custom": False,
+            "key_fields": [{"name": "Name"}, {"name": "Org_Key__c"}, {"name": "ns__Pkg__c"}],
+            "parent_lookups": [
+                {"field": "AccountId", "references": ["Account", "Org_Obj__c"], "relationshipName": "Parent"},
+                {"field": "Org_Lookup__c", "references": ["Account"], "relationshipName": "Org_Lookup__r"},
+                {"field": "ns__PkgLookup__c", "references": ["ns__PkgObj__c"], "relationshipName": "ns__PkgLookup__r"},
+            ],
+            "date_range_pairs": [
+                {"start": "StartDate", "end": "EndDate"},
+                {"start": "Org_Start__c", "end": "EndDate"},
+            ],
+        },
+        "auto_generated_children": [
+            {"child": "Contact"}, {"child": "Org_Child__c"}, {"child": "ns__PkgChild__c"},
+        ],
+    }
+    cp = ds.generalize_profile(profile, "sales-cloud")
+
+    # Catch-all: zero un-namespaced org-custom tokens anywhere in the output.
+    blob = json.dumps(cp)
+    bare = [t for t in re.findall(r"[A-Za-z0-9_]+__(?:c|r|pc|pr|x)\b", blob)
+            if t.count("__") == 1]
+    assert bare == [], f"org-custom token(s) leaked: {bare}"
+
+    # Positive: standard + namespaced-packaged names survive in each position.
+    assert {f["name"] for f in cp["structure"]["key_fields"]} == {"Name", "ns__Pkg__c"}
+    assert {p["field"] for p in cp["structure"]["parent_lookups"]} == {"AccountId", "ns__PkgLookup__c"}
+    acct = next(p for p in cp["structure"]["parent_lookups"] if p["field"] == "AccountId")
+    assert acct["references"] == ["Account"]  # Org_Obj__c filtered from a kept lookup
+    assert cp["structure"]["date_range_pairs"] == [{"start": "StartDate", "end": "EndDate"}]
+    assert cp["auto_generated_children"] == ["Contact", "ns__PkgChild__c"]
+
+
 def test_generalize_drops_date_pairs_with_org_custom_endpoint():
     """A date-range pair survives generalization only if BOTH endpoints are
     cloud-portable -- an org-custom field on either end makes the whole pair
