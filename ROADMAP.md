@@ -5949,3 +5949,26 @@ from later -- same "prove on one real case first" discipline as #83's own
 staged build (org profile first, then generalize). The registry/command
 remains unbuilt on purpose until a second real source (or a second run)
 justifies the shape.
+
+## 90. Core-cloud package scoping for generalize-data-shape (IDEA, 2026-07-31)
+
+Found building the first Sales Cloud data-shape IP from a Salesforce demo
+org (SDO): `generalize-data-shape` keeps *namespaced managed-package* fields
+by design (they're portable to any org licensed for that package -- see
+`_api_name_kind`'s `packaged` class). That's exactly right for a package that
+**is** the cloud (`npsp__*` for Nonprofit Cloud). But a general-purpose demo
+org also has *incidental* packages installed (`maps__*` Salesforce Maps,
+`Ptnr_Onbd_Fmwk__*` a partner-onboarding AppExchange package) whose fields
+then appear in `okf/sales-cloud/data-shapes/*.json` as if they were core Sales
+Cloud structure -- portable, but not "the cloud."
+
+The org-custom **leak** vectors are a separate, already-fixed correctness
+concern (bare `Foo__c`/`__pc`/date-pair/child leaks -- #49/#51/#52 and the
+leak-vector hardening pass). This item is the *over-inclusion* refinement:
+teach generalization to scope packaged fields to a cloud's **core** packages
+rather than every package the source org happens to have. Needs a curated
+per-cloud allowlist of namespaces (the tool can't infer which packages "are"
+the cloud), so it's a real feature, not a filter tweak -- deliberately left as
+an idea until the noise actually gets in the way. For now a reader can tell a
+`ns__*` field is package-specific by its namespace, and the `note` field says
+structure is "standard/packaged."
