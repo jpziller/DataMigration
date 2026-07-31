@@ -196,12 +196,19 @@ def _api_name_kind(name):
     - ``org_custom`` -- un-namespaced custom (``Foo__c``, including migration
       helpers like ``MigrationID__c``): added per-org, NOT portable.
 
+    Recognizes the person-account custom suffixes ``__pc`` (field) and ``__pr``
+    (relationship) too, not just ``__c``/``__r``/``__x`` -- a person-account
+    org-custom field like ``SDO_Foo__pc`` is every bit as org-specific as a
+    plain ``Foo__c`` and must be stripped the same way (found live: SDO
+    person-account custom fields leaking into generalized Sales Cloud IP).
+
     Only ``standard`` and ``packaged`` survive generalization -- an org's own
     custom fields and this framework's own migration-key fields don't describe
     the *cloud*, so they'd be noise (or misleading) in shared IP.
     """
     n = name or ""
-    if not (n.endswith("__c") or n.endswith("__r") or n.endswith("__x")):
+    if not (n.endswith("__c") or n.endswith("__r") or n.endswith("__x")
+            or n.endswith("__pc") or n.endswith("__pr")):
         return "standard"
     base = n.rsplit("__", 1)[0]  # 'ns__Foo' (packaged) or 'Foo' (org custom)
     return "packaged" if "__" in base else "org_custom"

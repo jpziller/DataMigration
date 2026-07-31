@@ -1,0 +1,102 @@
+{
+  "object": "Account",
+  "cloud": "sales-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-07-31",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": false,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "RecordTypeId",
+        "references": [
+          "RecordType"
+        ],
+        "relationshipName": "RecordType"
+      },
+      {
+        "field": "ParentId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Parent"
+      },
+      {
+        "field": "OwnerId",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "CreatedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "CreatedBy"
+      },
+      {
+        "field": "LastModifiedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "LastModifiedBy"
+      },
+      {
+        "field": "PersonIndividualId",
+        "references": [
+          "Individual"
+        ],
+        "relationshipName": "PersonIndividual"
+      },
+      {
+        "field": "OperatingHoursId",
+        "references": [
+          "OperatingHours"
+        ],
+        "relationshipName": "OperatingHours"
+      },
+      {
+        "field": "maps__AssignmentRule__c",
+        "references": [
+          "maps__AssignmentRule__c"
+        ],
+        "relationshipName": "maps__AssignmentRule__r"
+      },
+      {
+        "field": "Ptnr_Onbd_Fmwk__Onboarding_Plan__c",
+        "references": [
+          "Ptnr_Onbd_Fmwk__Onboarding__c"
+        ],
+        "relationshipName": "Ptnr_Onbd_Fmwk__Onboarding_Plan__r"
+      },
+      {
+        "field": "Ptnr_Onbd_Fmwk__Onboarding_Plan__pc",
+        "references": [
+          "Ptnr_Onbd_Fmwk__Onboarding__c"
+        ],
+        "relationshipName": "Ptnr_Onbd_Fmwk__Onboarding_Plan__pr"
+      }
+    ],
+    "date_range_pairs": [
+      {
+        "start": "EffectiveDate",
+        "end": "EndDate"
+      }
+    ]
+  },
+  "auto_generated_children": [
+    "Contact"
+  ]
+}
