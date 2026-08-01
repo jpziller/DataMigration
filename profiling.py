@@ -90,6 +90,24 @@ def _to_str(v):
     return str(v)[:4000]
 
 
+def _as_count(v):
+    """Coerce a SOQL aggregate count (COUNT/COUNT_DISTINCT) to int. Salesforce
+    can return the value as a numeric *string* for some fields, which then
+    blows up the null_count/percent arithmetic ('unsupported operand int - str')
+    -- found live profiling WorkOrder on the SDO, 2026-07-31. None stays None;
+    a value that can't be parsed as a number degrades to None rather than
+    crashing the whole profile write."""
+    if v is None or isinstance(v, int):
+        return v
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return None
+
+
 def _write_profile(engine, object_or_table, source_type, profiles, distributions, schema="dbo"):
     _ensure_profile_tables(engine, schema=schema)
     analyzed_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -106,9 +124,9 @@ def _write_profile(engine, object_or_table, source_type, profiles, distributions
 
         rows = []
         for field_name, p in profiles.items():
-            total = p.get("total_rows")
-            populated = p.get("populated_count")
-            null_count = p.get("null_count")
+            total = _as_count(p.get("total_rows"))
+            populated = _as_count(p.get("populated_count"))
+            null_count = _as_count(p.get("null_count"))
             if null_count is None and total is not None and populated is not None:
                 null_count = total - populated
             pct = round(100.0 * populated / total, 2) if total and populated is not None else None
@@ -121,8 +139,8 @@ def _write_profile(engine, object_or_table, source_type, profiles, distributions
                 "populated_count": populated,
                 "populated_pct": pct,
                 "null_count": null_count,
-                "blank_count": p.get("blank_count"),
-                "distinct_count": p.get("distinct_count"),
+                "blank_count": _as_count(p.get("blank_count")),
+                "distinct_count": _as_count(p.get("distinct_count")),
                 "min_value": _to_str(p.get("min_value")),
                 "max_value": _to_str(p.get("max_value")),
                 "min_length": p.get("min_length"),
