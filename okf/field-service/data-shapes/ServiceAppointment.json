@@ -1,0 +1,195 @@
+{
+  "object": "ServiceAppointment",
+  "cloud": "field-service",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-08-01",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Address",
+        "type": "address",
+        "required": true,
+        "createable": false,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "EarliestStartTime",
+        "type": "datetime",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "DueDate",
+        "type": "datetime",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "OwnerId",
+        "references": [
+          "Group",
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "CreatedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "CreatedBy"
+      },
+      {
+        "field": "LastModifiedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "LastModifiedBy"
+      },
+      {
+        "field": "ParentRecordId",
+        "references": [
+          "Account",
+          "Asset",
+          "CareProgramEnrollee",
+          "Case",
+          "ClinicalServiceRequest",
+          "Lead",
+          "Opportunity",
+          "ProductServiceCampaignItem",
+          "WorkOrder",
+          "WorkOrderLineItem"
+        ],
+        "relationshipName": "ParentRecord"
+      },
+      {
+        "field": "WorkTypeId",
+        "references": [
+          "WorkType"
+        ],
+        "relationshipName": "WorkType"
+      },
+      {
+        "field": "ContactId",
+        "references": [
+          "Contact"
+        ],
+        "relationshipName": "Contact"
+      },
+      {
+        "field": "ServiceTerritoryId",
+        "references": [
+          "ServiceTerritory"
+        ],
+        "relationshipName": "ServiceTerritory"
+      },
+      {
+        "field": "RelatedBundleId",
+        "references": [
+          "ServiceAppointment"
+        ],
+        "relationshipName": "RelatedBundle"
+      },
+      {
+        "field": "BundlePolicyId",
+        "references": [
+          "ApptBundlePolicy"
+        ],
+        "relationshipName": "BundlePolicy"
+      },
+      {
+        "field": "AppointmentInvitationId",
+        "references": [
+          "AppointmentInvitation"
+        ],
+        "relationshipName": "AppointmentInvitation"
+      },
+      {
+        "field": "EngagementChannelTypeId",
+        "references": [
+          "EngagementChannelType"
+        ],
+        "relationshipName": "EngagementChannelType"
+      },
+      {
+        "field": "AppointmentCategoryId",
+        "references": [
+          "AppointmentCategory"
+        ],
+        "relationshipName": "AppointmentCategory"
+      },
+      {
+        "field": "ReceiptOrderId",
+        "references": [
+          "Order"
+        ],
+        "relationshipName": "ReceiptOrder"
+      },
+      {
+        "field": "FSL__Related_Service__c",
+        "references": [
+          "ServiceAppointment"
+        ],
+        "relationshipName": "FSL__Related_Service__r"
+      },
+      {
+        "field": "FSL__Scheduling_Policy_Used__c",
+        "references": [
+          "FSL__Scheduling_Policy__c"
+        ],
+        "relationshipName": "FSL__Scheduling_Policy_Used__r"
+      },
+      {
+        "field": "FSSK__FSK_Assigned_Service_Resource__c",
+        "references": [
+          "ServiceResource"
+        ],
+        "relationshipName": "FSSK__FSK_Assigned_Service_Resource__r"
+      },
+      {
+        "field": "FSSK__FSK_Work_Order__c",
+        "references": [
+          "WorkOrder"
+        ],
+        "relationshipName": "FSSK__FSK_Work_Order__r"
+      }
+    ],
+    "date_range_pairs": [
+      {
+        "start": "ArrivalWindowStartTime",
+        "end": "ArrivalWindowEndTime"
+      },
+      {
+        "start": "SchedStartTime",
+        "end": "SchedEndTime"
+      },
+      {
+        "start": "ActualStartTime",
+        "end": "ActualEndTime"
+      },
+      {
+        "start": "FSSK__FSK_Mobile_Start_Time__c",
+        "end": "FSSK__FSK_Mobile_End_Time__c"
+      },
+      {
+        "start": "FSSK__FSK_Planned_Scheduled_Start__c",
+        "end": "FSSK__FSK_Planned_Scheduled_End__c"
+      }
+    ]
+  },
+  "auto_generated_children": [
+    "AssignedResource"
+  ]
+}
