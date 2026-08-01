@@ -23,3 +23,9 @@ is the same.
   independently and can make it backwards. Same-object pairs get ordered
   at generation time; a cross-object date-in-window constraint is a
   transform-layer clamp. Enforced generically here.
+* [Person Accounts -- the shadow Contact, and __pc / __pr suffixes](person-accounts-shadow-contact-and-field-suffixes.md) -
+  a B2C person is ONE Account row plus a platform-managed paired "shadow"
+  Contact; Contact fields are mirrored onto the Account as Person*/__pc/__pr.
+  You migrate by loading the ACCOUNT (Person Account RecordTypeId) and never
+  insert the Contact -- it's auto-created, PersonContactId gives its Id. You
+  may need to RECOGNIZE __pc/__pr even when you never migrate into them.
