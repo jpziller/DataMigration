@@ -1,0 +1,93 @@
+{
+  "object": "ServiceTerritory",
+  "cloud": "field-service",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-08-01",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "OperatingHoursId",
+        "type": "reference",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "OwnerId",
+        "references": [
+          "Group",
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "CreatedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "CreatedBy"
+      },
+      {
+        "field": "LastModifiedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "LastModifiedBy"
+      },
+      {
+        "field": "ParentTerritoryId",
+        "references": [
+          "ServiceTerritory"
+        ],
+        "relationshipName": "ParentTerritory"
+      },
+      {
+        "field": "OperatingHoursId",
+        "references": [
+          "OperatingHours"
+        ],
+        "relationshipName": "OperatingHours"
+      },
+      {
+        "field": "SchedulingConstraintId",
+        "references": [
+          "SchedulingConstraint"
+        ],
+        "relationshipName": "SchedulingConstraint"
+      },
+      {
+        "field": "TravelModeId",
+        "references": [
+          "TravelMode"
+        ],
+        "relationshipName": "TravelMode"
+      },
+      {
+        "field": "PricebookId",
+        "references": [
+          "Pricebook2"
+        ],
+        "relationshipName": "Pricebook"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": [
+    "ServiceTerritory"
+  ]
+}

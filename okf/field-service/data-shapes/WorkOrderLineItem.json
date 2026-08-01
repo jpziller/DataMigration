@@ -1,0 +1,165 @@
+{
+  "object": "WorkOrderLineItem",
+  "cloud": "field-service",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-08-01",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "WorkOrderId",
+        "type": "reference",
+        "required": true,
+        "createable": true,
+        "updateable": false,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "CreatedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "CreatedBy"
+      },
+      {
+        "field": "LastModifiedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "LastModifiedBy"
+      },
+      {
+        "field": "WorkOrderId",
+        "references": [
+          "WorkOrder"
+        ],
+        "relationshipName": "WorkOrder"
+      },
+      {
+        "field": "ParentWorkOrderLineItemId",
+        "references": [
+          "WorkOrderLineItem"
+        ],
+        "relationshipName": "ParentWorkOrderLineItem"
+      },
+      {
+        "field": "Product2Id",
+        "references": [
+          "Product2"
+        ],
+        "relationshipName": "Product2"
+      },
+      {
+        "field": "AssetId",
+        "references": [
+          "Asset"
+        ],
+        "relationshipName": "Asset"
+      },
+      {
+        "field": "OrderId",
+        "references": [
+          "Order"
+        ],
+        "relationshipName": "Order"
+      },
+      {
+        "field": "PricebookEntryId",
+        "references": [
+          "PricebookEntry"
+        ],
+        "relationshipName": "PricebookEntry"
+      },
+      {
+        "field": "WorkTypeId",
+        "references": [
+          "WorkType"
+        ],
+        "relationshipName": "WorkType"
+      },
+      {
+        "field": "ServiceTerritoryId",
+        "references": [
+          "ServiceTerritory"
+        ],
+        "relationshipName": "ServiceTerritory"
+      },
+      {
+        "field": "LocationId",
+        "references": [
+          "Location"
+        ],
+        "relationshipName": "Location"
+      },
+      {
+        "field": "ServiceReportTemplateId",
+        "references": [
+          "ServiceReportLayout"
+        ],
+        "relationshipName": "ServiceReportTemplate"
+      },
+      {
+        "field": "ReturnOrderLineItemId",
+        "references": [
+          "ReturnOrderLineItem"
+        ],
+        "relationshipName": "ReturnOrderLineItem"
+      },
+      {
+        "field": "MaintenancePlanId",
+        "references": [
+          "MaintenancePlan"
+        ],
+        "relationshipName": "MaintenancePlan"
+      },
+      {
+        "field": "AssetWarrantyId",
+        "references": [
+          "AssetWarranty"
+        ],
+        "relationshipName": "AssetWarranty"
+      },
+      {
+        "field": "ProductServiceCampaignItemId",
+        "references": [
+          "ProductServiceCampaignItem"
+        ],
+        "relationshipName": "ProductServiceCampaignItem"
+      },
+      {
+        "field": "CostCenterId",
+        "references": [
+          "CostCenter"
+        ],
+        "relationshipName": "CostCenter"
+      },
+      {
+        "field": "JobExpenseTypeId",
+        "references": [
+          "JobExpenseType"
+        ],
+        "relationshipName": "JobExpenseType"
+      },
+      {
+        "field": "FSL__VisitingHours__c",
+        "references": [
+          "OperatingHours"
+        ],
+        "relationshipName": "FSL__VisitingHours__r"
+      }
+    ],
+    "date_range_pairs": [
+      {
+        "start": "StartDate",
+        "end": "EndDate"
+      }
+    ]
+  },
+  "auto_generated_children": [
+    "WorkOrderLineItem"
+  ]
+}
