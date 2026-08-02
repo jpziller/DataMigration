@@ -1660,7 +1660,10 @@ with rather than replaces (Mockaroo, Snowfakery, SFDMU) — naming those is fine
   alongside any change that adds a credential type, network listener, or
   auth boundary), `DOCKER.md` (roadmap #68/#69 — the Docker local dev
   environment quickstart for both the `mssql` and `postgres` profiles,
-  auth-mode guidance, and what's deliberately out of scope).
+  auth-mode guidance, and what's deliberately out of scope),
+  `CONTEXT_DOC_STANDARDS.md` (the standard for keeping this file lean and
+  load-bearing — the rubric/routing/invariants the `/optimize-claude-md`
+  skill applies; run it when this file grows past a comfortable budget).
 - `Dockerfile`, `docker-compose.yml`, `docker/init-db.sh` (roadmap
   #68/#69) — the containerized local dev environment, one Dockerfile
   shared by two Compose **profiles**: `mssql` (default — SQL Server 2022
