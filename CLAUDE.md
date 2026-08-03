@@ -117,803 +117,125 @@ for you, and it'll stick for future sessions too.
 - The migration logic lives in `sql/transformations/*.sql`. Edit those files;
   don't inline large SQL into one-off shell commands.
 
-## Canonical commands (Windows; venv already created at .venv)
-Call the venv Python directly — `cd` does not persist between bash calls and the
-venv may not be active in a fresh shell:
+## Canonical commands (Windows; venv at .venv)
 
-- Bootstrap a new project: `.venv/Scripts/python.exe cli.py bootstrap-project brief.yaml
-                migration_run_book.xlsx --tab Dev1`
-                (roadmap #59: closes the hand-off gap between upstream client discovery — the
-                architect, often with another AI session's help, landing on which objects need
-                migrating, the use cases behind each one, special requirements — and this framework's
-                own build/validate/run tooling. Today that hand-off is a cold start; this reads a
-                minimal, deliberately simple YAML "migration brief" a discovery-AI session could
-                produce directly:
-                ```yaml
-                project: Acme Migration
-                ticket: PROJ-123
-                target_org_alias: ACME_UAT
-                objects:
-                  - name: Account
-                    notes: Primary account records, ~5000 rows expected
-                  - name: Contact
-                ```
-                and does the boring, mechanical first pass: confirms every named object is real via
-                live `describe()` (a typo or renamed object surfaces immediately, not three commands
-                later — reported as a clear problem, never silently skipped), runs `analyze-load-order`
-                across the objects that ARE real, and scaffolds a Migration Run Book with that object
-                list already wired in. `target_org_alias`, if given, is cross-checked against this
-                session's actual configured org alias — a warning, not a hard block, since a brief
-                written before the exact alias was finalized is normal. Deliberately does **not** try
-                to guess mapping, field lists, or transform logic from the brief's own notes — that's
-                still `generate-mapping-doc`/`auto-map`'s job, on the real source tables, once they
-                exist (Hard Rule 11's same first-pass-only scope discipline). The brief's `ticket`
-                field is reported back as a reminder for the Script Ticket Traceability Rule (#10) once
-                real transform scripts get built — it isn't forced into the Run Book's own
-                `ticket_url`/`ticket_label` header fields, which describe a whole ticket **system** link,
-                not one specific ticket number.)
-- Discovery question checklist: `.venv/Scripts/python.exe cli.py generate-discovery-checklist
-                Account Contact [--output discovery_checklist.md]`
-                (roadmap #60, the companion to `bootstrap-project` running the other direction:
-                instead of starting from a discovery output, generates the questions an architect
-                should be *asking* during discovery, derived from live org signals instead of a
-                generic template a human has to remember. `analyze-org-risk`'s own active validation
-                rules become real, specific questions (naming each rule's `ErrorDisplayField`/
-                `ErrorMessage`, not a generic "any validation rules?"); an object carrying
-                `RecordTypeId` becomes "does the client use Record Types here, get the exact
-                DeveloperName for each one in scope" (the RecordType Resolution Rule, #15/#36); a
-                reference field pointing at an object **not yet** in the candidate list becomes
-                "confirm that object is in scope too, or that target records already exist for it" —
-                deliberately the inverse of what `load_order.py`'s own dependency-edge builder tracks
-                (that one only records edges *within* scope), so this reads `describe()` directly
-                rather than reusing that function against its own grain. Purely read-only against
-                Salesforce (`describe()` + a live `analyze-org-risk`-style Tooling API scan per
-                object) — no engine/mirror-DB dependency at all, so this can run before the SQL
-                Server side of a project even exists, during discovery itself. Plain Markdown output
-                for v1, same "ship the simple version" discipline as `generate-run-book-flowchart`/
-                `generate-pass-summary`'s own v1 framing.)
-- Inspect org:  `.venv/Scripts/python.exe cli.py list-objects`
--               `.venv/Scripts/python.exe cli.py describe Account`
--               `.venv/Scripts/python.exe cli.py dump-describe Account`
--               `.venv/Scripts/python.exe cli.py sample-reference-records Account --ids <id1,id2,...>`
-                (roadmap #78: `describe()` and page layouts don't show the full picture of what a
-                *working* record actually looks like — especially on complex packaged/managed
-                objects, where the platform's own automation populates fields never exposed in the
-                UI (a pattern familiar from CPQ migrations, confirmed again live on Nonprofit
-                Cloud's fundraising objects — see `ROADMAP.md` #78). Queries a small, ideally
-                human-identified set of real records (`--ids`, the recommended input — only a human
-                knows which records are genuinely good examples, especially for a package object
-                with no real data yet that needs one hand-created through the real UI flow first;
-                `--where "<SOQL WHERE>"` when you know a filter but not specific Ids; neither given
-                falls back to the `--limit` most-recently-created records, not the recommended
-                path) and reports every field's real shape across them — populated-N-of-M count,
-                sample values, and the `describe()` flags (`createable`/`nillable`/
-                `defaultedOnCreate`) side by side with what the sample actually shows, since those
-                flags alone can't always be trusted (confirmed both directions live: a field can
-                report required when it isn't practically enforced, and reachable when it's
-                genuinely required with no default). Also reports an object-level automation
-                summary (active validation-rule/trigger/Flow counts) from `dbo.ObjectAutomationRisk`
-                if `analyze-org-risk` has already been run — `--schema` controls where that's read
-                from, reported as "not checked" rather than a silently misleading zero if that table
-                doesn't exist yet. Deliberately **not** gated to before a transform exists — reach
-                for it at any point in a project (before building, mid-sprint, after a UAT finding
-                reveals a gap), the same way `query`/`describe` themselves are used, not a one-time
-                Standard Workflow step. Complements `compare-reference-record` below rather than
-                replacing it — that one needs a `*_Load` table to already exist and can only diff
-                fields a transform already populates; this one needs neither, and exists
-                specifically to surface a field nobody thought to include yet. Read-only, safe
-                without confirmation.)
--               `.venv/Scripts/python.exe cli.py record-counts Account Contact [--all-objects]`
-                (one HTTP call for many objects' record counts via `/limits/recordCount` —
-                much cheaper than a SOQL `COUNT()` per object, but an **approximate, cached**
-                snapshot, confirmed live to lag real inserts noticeably and to omit 0-record
-                objects entirely rather than showing 0. Fast rough triage across many objects,
-                **not** a substitute for `profile-salesforce`'s exact count when validating a
-                load actually landed every row. See `ROADMAP.md` #41.)
-- Query:        `.venv/Scripts/python.exe cli.py query "SELECT Id, Name FROM Account LIMIT 10"`
-                `[--all]` to paginate everything, `[--csv path]`/`[--excel path]` to export.
-                (Basic DLO/DMO lookups already work here too, no separate command needed —
-                confirmed live, see `ROADMAP.md` #18.)
-- Data Cloud (D360): `.venv/Scripts/python.exe cli.py data-cloud-query "SELECT ... FROM SomeDMO"`
-                (complex/cross-object Data Cloud SQL — a separate tenant token exchange under
-                the hood, `data_cloud.py`; confirmed live against a real Data Cloud org)
-                `.venv/Scripts/python.exe cli.py list-calculated-insights`
-                `.venv/Scripts/python.exe cli.py query-calculated-insight RateCount__cio`
-                `.venv/Scripts/python.exe cli.py data-cloud-status calculated-insight|data-stream|dso|identity-resolution|data-transform|data-graph [Name]`
-                (all six via plain core-org SOQL, no Data Cloud tenant token needed — see
-                `ROADMAP.md` #18 for the full tested findings and required org/app setup.)
-                `.venv/Scripts/python.exe cli.py data-cloud-profile UnifiedssotIndividualIndv__dlm "[ssot__LastName__c=Smith]"`
-                (Unified Profile lookup by a required equality filter — the CLI alternative to
-                clicking through Data Cloud's own Profile Explorer; `--fields`/`--limit`/`--offset`/
-                `--orderby` optional. `filters` really is required by the API itself, not just this
-                framework — there's no "browse everyone" mode.)
-                `.venv/Scripts/python.exe cli.py list-data-graphs`
-                (Data Graph metadata discovery — confirmed live, though this org has none
-                configured yet; querying a specific Data Graph's data is written in `data_cloud.py`
-                but not yet live-verified, no CLI command wired up for it until it is.)
-- Replicate:    `.venv/Scripts/python.exe cli.py replicate Account [--where "..."] [--raw]`
-- Relationship-consistent subset replicate (roadmap #34): `.venv/Scripts/python.exe cli.py
-                replicate-subset Account Contact Opportunity Case --where "Name LIKE 'Pilot%'" --limit 50`
-                (a scoped/phased migration rehearsal — "the first 50 pilot Accounts and everything
-                genuinely related to them" — without hand-writing matching `--where` clauses across
-                every object, which risks an orphaned child row if the filters don't line up exactly.
-                First positional is the root object, gets `--where`/`--limit`; every other named object
-                is automatically constrained to rows whose in-scope parent lookup(s) point at real Ids
-                this same run actually just replicated — read back from the mirror table itself, not a
-                second live-org round-trip. Reuses `load_order.py`'s own dependency graph in-memory only
-                (the same one `analyze-load-order`/`snowfakery_data.py` already reuse — no
-                `dbo.ObjectDependency` persistence needed here). A polymorphic lookup (e.g. `Task.WhatId`)
-                naturally gets OR semantics — every in-scope, already-replicated parent's Ids get unioned
-                under that one field, no separate detection step needed. Two distinct lookup fields on the
-                same child (e.g. a hypothetical `AccountId` + `OwnerId` both in scope) combine with AND — a
-                deliberate scope choice, not the only possible interpretation. The root doesn't need to be
-                topologically first; every other object just gets its dependency-derived constraint (or
-                none, reported clearly, if no in-scope parent was named/replicated). See
-                `subset_replication.py` for the full design account.)
-- Import file:  `.venv/Scripts/python.exe cli.py import-parquet path/to/file.parquet SourceAccounts [--append]`
-                (Parquet -> typed SQL Server table, column types inferred from the file's own
-                schema via `pyarrow` — no coercion step needed since Parquet is already typed,
-                unlike Salesforce's Bulk API 2.0 CSV extracts. Drops/recreates the target table
-                by default; `--append` adds to an existing compatible table instead. A second
-                entry point into the mirror DB alongside `replicate`, for source data that starts
-                as a file rather than a live org.)
-- Import CSV directory (bulk, roadmap #46): `.venv/Scripts/python.exe cli.py import-csv-directory
-                path/to/client_files --ticket PROJ-123 [--rebuild TableName ...] [--run-book path.xlsx --run-book-tab Dev1]`
-                (generalizes a proven real-world convention: every `*.csv` in the directory gets
-                staged as an all-`NVARCHAR(MAX)` table via `BULK INSERT` — no type sniffing, typed
-                later via `sql/transformations/*.sql` like every other source, same "stage raw, type
-                explicitly" philosophy. Deliberately different from `import-parquet`: generates a
-                numbered, git-committed `.sql` script per file under `sql/source_ingestion/`
-                (`--ticket` required, the Script Ticket Traceability Rule, #10) rather than loading directly in Python — the
-                script is the real artifact of record, reused unchanged on every later pass, never
-                silently regenerated. On a later pass, the current CSV's header is checked against
-                what the existing script expects — **the full ordered column list, not just set
-                membership**, since `BULK INSERT` maps columns positionally and a same-name reorder
-                is exactly as dangerous as a rename. Any drift hard-stops that one file (the rest of
-                the batch still runs) until `--rebuild <table>` explicitly regenerates the script —
-                never automatic. `--run-book`/`--run-book-tab` auto-syncs results into that tab's
-                **Pre-Migration** phase, same opt-in shape as `bulkops`' own run-book flags.)
-                `.venv/Scripts/python.exe cli.py enable-source-ingestion-logging --schema dbo`
-                (creates `<schema>.SourceIngestionLog` — same opt-in, presence-is-the-switch
-                convention as `enable-bulkops-logging`. A drift-blocked run is logged too, so it
-                shows up in the Migration Run Book as an `Issue` with the exact diff, not just a
-                console message.)
-                `.venv/Scripts/python.exe cli.py disable-source-ingestion-logging --schema dbo`
-- Profile:      `.venv/Scripts/python.exe cli.py profile-salesforce Account` (live org, aggregate SOQL)
-                `.venv/Scripts/python.exe cli.py profile-sql-table Account` (any SQL Server table)
-                `.venv/Scripts/python.exe cli.py export-profile-excel profile.xlsx`
-                (roadmap #47: profiling is a first-pass activity — both commands check
-                `dbo.FieldProfile.AnalyzedDate` first and, by default, skip re-profiling an
-                object/table already profiled in this schema, printing the existing date and
-                still showing the current profile preview. `--reprofile` forces a real refresh
-                regardless of prior state.)
-- Load order:   `.venv/Scripts/python.exe cli.py analyze-load-order Account Contact Opportunity ...`
-- Resolve RecordTypes: `.venv/Scripts/python.exe cli.py resolve-record-types Account`
-                (roadmap #36, the RecordType Resolution Rule, #15 — RecordType Ids are org-specific and never portable
-                across orgs. Queries the target org's real RecordType rows for the object and
-                writes them into `dbo.RecordTypeMap` (shared across every object in the project,
-                like `dbo.FieldProfile`) — the transform then `JOIN`s against it by `DeveloperName`
-                to populate `RecordTypeId`, instead of ever hand-copying a raw source Id. Read-only
-                against Salesforce, writes only to the mirror DB. Deliberately a plain T-SQL
-                reference table, not automatic `bulkops` resolution — use a `LEFT JOIN` in the
-                transform so an unmatched `DeveloperName` surfaces as a visible `NULL`, since this
-                design has no automatic unresolved-value guard.)
-- Data model diagrams (roadmap #57): `.venv/Scripts/python.exe cli.py generate-target-data-model
-                Account Contact Opportunity --output target_model.md [--mapping-path ...]`
-                `.venv/Scripts/python.exe cli.py generate-source-data-model
-                --subject-area "Sales:SourceAccounts,SourceOpportunities" --output-dir models/ [--mapping-path ...]`
-                (Mermaid `classDiagram` ERDs styled to approximate Salesforce Data Model Notation
-                (SDMN) — verified against `developer.salesforce.com`'s actual SDMN guide before
-                building this, not guessed. Renders as `classDiagram` rather than `erDiagram`/
-                `flowchart` — confirmed against Mermaid's own docs to be the one diagram type that
-                gets real UML composition (`*--`, filled diamond) vs aggregation (`o--`, hollow
-                diamond) for master-detail vs lookup (a closer match to SDMN's own diamond-on-the-
-                parent-side convention), real per-class fill/border color via `classDef`/`:::`
-                styling (something `erDiagram` can't do at all — palette reused verbatim from
-                `forcedotcom/sf-skills`' `external-diagram-mermaid-generate` skill's own validated
-                Standard/Custom/External convention, not invented here), and attribute lists with
-                `"1" *-- "1..*"`-style cardinality strings, all at once. **Target model**:
-                relationships come straight from live `describe()` via
-                `load_order.build_dependency_edges()` — real, never guessed; object-type coloring
-                comes from `describe()`'s own `custom` flag and `__x` API-name suffix, also real.
-                **Source model(s)**: staging tables carry no foreign keys, so relationships are a
-                naming-convention **guess only**, always rendered as the weaker aggregation form and
-                labeled `(guessed)`, printed separately for explicit human review, and never
-                color-coded (no Standard/Custom/External axis exists for a plain SQL table). Subject
-                areas are an explicit, human-chosen grouping (`--subject-area "Name:Table1,Table2"`,
-                repeatable) — never auto-clustered. Both write plain `.md` files with a fenced
-                ` ```mermaid ` block — GitHub renders it natively, Lucid supports paste-to-import,
-                same "just emit plain Mermaid" convention `ROADMAP.md` #52 (not yet built) already
-                sketched for Migration Run Book flowcharts. Read-only, safe without confirmation. See
-                `ROADMAP.md` #57 for the full `sf-skills` cross-reference.)
-- Mock data:    `.venv/Scripts/python.exe cli.py generate-mock-data Account --count 50`
-                (needs `MOCKAROO_API_KEY` in `.env` — free tier, 200 requests/day;
-                get a key at mockaroo.com/account. Writes to `<Object>_Mock`, never touches Salesforce.)
-- Related mock data (Snowfakery): `.venv/Scripts/python.exe cli.py generate-related-mock-data
-                Account Contact --count Account=10 --count Contact=3`
-                (relationship-aware alternative to `generate-mock-data` — auto-builds a Snowfakery
-                YAML recipe from `describe()` + this framework's own load-order dependency graph
-                (`load_order.py`), nesting child objects under their parent so e.g. every mock
-                Contact actually references one of the mock Accounts. Recipe is written to
-                `_stage/` for review/hand-editing, not hidden. Writes to `<Object>_Mock` tables —
-                a child's parent linkage is a synthetic `_ParentMockRef` column, not a real
-                Salesforce Id, since none exist yet; building the real `*_Load` transform
-                (assigning the actual migration key) is still a manual next step. Never touches
-                Salesforce. Same skip policy as `generate-mock-data` — no Data.com fields, no
-                Latitude/Longitude subfields. `--count NAME=N-M` (e.g. `Contact=1-2`) randomizes
-                the per-parent count via Snowfakery's own `random_number()` instead of a flat N —
-                a statistical split, not a guaranteed exact percentage.)
-- Adversarial mock data (roadmap #62): `.venv/Scripts/python.exe cli.py generate-adversarial-mock-data
-                Account --count 50 --scenario duplicate_key:MigrationID__c:2 --scenario missing_required:Name:2`
-                (a companion to `generate-mock-data`'s happy-path generation: takes the same
-                describe()-derived Mockaroo schema (`mock_data.py`) and deliberately corrupts a chosen,
-                disjoint subset of rows to provoke known Salesforce Bulk API failure classes on
-                purpose, so a validation-rule collision or pre-flight-check gap surfaces during Dev
-                testing — not for the first time against real client data, or worse, during a UAT
-                pass. `--scenario scenario:field:rows`, repeatable, one of `duplicate_key`
-                (DUPLICATE_VALUE — two-plus rows share one value), `oversized_string` (STRING_TOO_LONG
-                — a value deliberately exceeds the target's real describe() length), `missing_required`
-                (REQUIRED_FIELD_MISSING — a genuinely required field left blank; raises if the named
-                field isn't actually required), `invalid_picklist` (a picklist/combobox field gets a
-                value that isn't one of its real picklistValues), or `bad_reference`
-                (INVALID_CROSS_REFERENCE_KEY — a reference field, never included in a normal
-                happy-path mock run since there's no target Id to point at yet, gets a well-formed-
-                looking but real-org-guaranteed-nonexistent Id). Every field/scenario pairing is
-                validated against live `describe()` before anything is corrupted. Writes to
-                `<Object>_Mock_Adversarial` — never `<Object>_Mock`, so this never mixes into or
-                overwrites the normal happy-path mock table — tagging every corrupted row's scenario
-                in a `REF_AdversarialScenario` column; `REF_`-prefixed (hard rule 13) so `bulkops`
-                never sends it to Salesforce, meaning the same table can go straight into a real
-                `bulkops` call as-is. Never touches Salesforce itself.)
-- Mapping doc:  `.venv/Scripts/python.exe cli.py generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts`
-                `.venv/Scripts/python.exe cli.py generate-mapping-doc Contact mapping/Migration_Mapping.xlsx SourceContacts`
-                (one workbook, one tab per object — reuse the SAME output path for every object in
-                the project; it appends/replaces that object's sheet, not the whole file. One row per
-                SOURCE field from the named SQL table, with a blank Target block for a human to fill
-                in once a mapping is decided — doesn't guess the mapping itself. Auto-fills "Data Profile
-                Populated On/%" from existing profiling data for that source table, if any.)
-                `.venv/Scripts/python.exe cli.py set-mapping-script Account mapping/Migration_Mapping.xlsx`
-                (fills in that object's sheet's "Transform Script:" header field — auto-resolved from
-                `sql/transformations/` (highest-numbered match, `--dir source_ingestion` for that folder
-                instead), with a real GitHub hyperlink when this repo has a remote, same breadcrumb
-                convention the Migration Run Book uses. Deliberately its own step, run only *after* the
-                real transform is built — `generate-mapping-doc` never guesses this, since the script
-                genuinely doesn't exist yet at mapping time in the standard workflow. Raises if no
-                matching script is found rather than leaving a guessed filename in place.)
-                `.venv/Scripts/python.exe cli.py check-mapping-balance Account mapping/Migration_Mapping.xlsx sql/transformations/<NNN>_account_load.sql`
-                (diffs a filled-in doc's Target block against the transform's real INSERT INTO list,
-                both directions, plus flags any referenced field that doesn't actually exist on the object.
-                Also flags rule 14 duplicates: the same Target Field chosen by two+ rows in one sheet,
-                or the transform's own column list naming the same column twice.)
-- Unmapped required fields: `.venv/Scripts/python.exe cli.py check-required-mappings Account mapping/Migration_Mapping.xlsx`
-                (roadmap #49: flags every row flagged `Migrate Data = Yes` with no Target Field ever
-                chosen, and attempts a `describe()`-driven suggestion for each via the same matching
-                `auto-map` uses — read-only, never writes into the doc itself; that's `auto-map`'s job.)
-- Auto-map:     `.venv/Scripts/python.exe cli.py auto-map Account mapping/Migration_Mapping.xlsx SourceAccounts`
-                (requires the source table to already be profiled — raises a clear error otherwise.
-                Suggests a Target field per source field via exact/normalized name match, then a
-                git-tracked synonym thesaurus (`reference/field_synonyms.json`), then fuzzy string
-                matching as a conservative fallback. Every suggestion is passed through the existing
-                profiling data as a data-quality gate — a clean name match still gets downgraded to
-                "No"/"Review" if the source field is barely populated or has only one distinct value.
-                Writes suggestions into the mapping doc's Target block/Notes/Migrate Data columns,
-                but never overwrites a row where a human already filled in the Target field — see
-                `auto_mapper.py` for the full design rationale. Roadmap #47: a second run over the
-                same source/target pair (`dbo.SourceRegistry.AutoMappedDate` already records this,
-                no new state needed) is framed as a review pass — "N field(s) already decided by a
-                human, M still blank, freshly suggested" — rather than the first-pass summary, since
-                a later pass means reviewing existing work, not redrafting it. The underlying
-                behavior doesn't change either way; only the console framing does.)
-- Solution doc:  `.venv/Scripts/python.exe cli.py generate-solution-doc Solution.docx Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx`
-                (auto-drafts a migration solution/design Word document from load-order analysis,
-                a mapping doc, and profiling data — no binary template checked into git; the
-                default document is built entirely from Python in `solution_doc.py`, fully
-                reviewable like everything else this framework generates. `--company`/`--project`/
-                `--prepared-by` fill in the cover; `--appendix` adds the full field-by-field
-                mapping table; `--template <custom.docx>` lets a data architect swap in their own
-                branded Word template with the same context as `docxtpl` Jinja tags, falling back
-                to the default when omitted.)
-- Load-table pre-flight checks (hard rules 6/7 — not stored procedures;
-                plain Python + inline SQL via `sql_dialect.py`, works on either SQL backend):
-                `.venv/Scripts/python.exe cli.py add-bulk-load-sort-column Account_Load AccountId [--schema dbo]`
-                `.venv/Scripts/python.exe cli.py check-load-table-duplicate-keys Account_Load Legacy_Id__c [--schema dbo]`
-                (`load_table_prep.py` — replaces the old `EXEC dbo.AddBulkLoadSortColumn`/
-                `EXEC dbo.CheckLoadTableDuplicateKeys` stored-procedure step. `check-load-table-
-                duplicate-keys` exits nonzero if anything is found, so it can gate a script. Both
-                commands validate the named column actually exists on the table before doing anything
-                else, raising a clear error if not — found in a ruthless-review pass: SQLite silently
-                treats an unmatched double-quoted identifier as a plain string literal rather than
-                erroring (a real, documented SQLite compatibility quirk), so a typo'd column name used
-                to produce a misleading, non-crashing wrong answer on that backend instead of a clear
-                failure. SQL Server never had this specific gap — an invalid bracket-quoted column name
-                already raised "Invalid column name" there — but the explicit check now makes both
-                backends fail the same clear way.)
-- Load (WRITES TO SALESFORCE — confirm the target org first):
-                `.venv/Scripts/python.exe cli.py bulkops Account upsert Account_Load --external-id Legacy_Id__c --email-deliverability system-email-only`
-                (insert/upsert require `--email-deliverability` — check Setup > Email Administration
-                > Deliverability yourself first and pass what it actually shows; there's no API to
-                read it, so `bulk_op()` requires this as an explicit human attestation and raises
-                before touching the API if it's missing — the Email Deliverability Attestation Rule, #9. `all-email` also needs
-                `--confirm-external-email-risk`.)
-                (every sent column is checked against the target object's live describe() before
-                the API is ever called — a typo'd, removed, or non-writable field aborts the whole
-                call up front rather than burning a real Bulk API batch to find out the same thing;
-                a required-but-unsent field on insert is reported as a warning instead, since
-                automation could still default it. See `bulkops.py`'s pre-flight check. Exception:
-                any column prefixed `REF_` — a human-only SQL-side audit field, rule 13 — is
-                excluded from this check entirely, never sent, never flagged. `--ref-prefix` overrides
-                the default `REF_` if a project uses a different convention.)
-                `.venv/Scripts/python.exe cli.py bulkops Account delete Account_Purge --external-id Legacy_Id__c`
-                (delete by external id — Bulk API 2.0's delete only ever accepts a real Id, so this
-                resolves external id values to real Ids via a query first, then deletes the resolved
-                rows. A value with no matching org record never reaches the API; it gets a clear
-                local "no matching record found" error written back like any other failure.)
-                `.venv/Scripts/python.exe cli.py bulkops Account delete --where "AccountNumber LIKE 'MOCKACCT-%'" [--dry-run]`
-                (purge by filter — test-data cleanup without hand-building a delete load table:
-                matching Ids are resolved via SOQL into `<Object>_Purge`, then deleted through the
-                normal path (batch sizing, logging, run-book sync all apply). Run `--dry-run` first —
-                it reports the matched count and sample Ids without touching anything. No
-                delete-everything default: purging a whole object means writing `"Id != null"`
-                explicitly. Standard (soft) delete is the default — Recycle Bin–recoverable. Pass
-                `--hard-delete` (delete only; also works on delete-by-table) to use Bulk API 2.0
-                `hardDelete` and remove records **permanently**, bypassing the Recycle Bin — needed
-                to reset object families whose platform validation counts soft-deleted children as
-                still blocking a parent delete (confirmed live on Nonprofit Cloud
-                GiftCommitment/GiftTransaction; see `ROADMAP.md` #84 and
-                `okf/nonprofit-cloud/full-org-reset-between-build-attempts.md`). Hard delete is
-                irreversible and requires the load user's "Bulk API Hard Delete" permission. See
-                `ROADMAP.md` #32. Rule 2 applies in full — this deletes real
-                records from a live org.)
-                `--batch-size auto|none|<N>` (default `auto` — dynamic recommendation printed as
-                rationale before the load runs, layering seed knowledge for OOTB-heavy objects
-                (`reference/batch_size_heuristics.json`), this org's own automation (`analyze-org-risk`'s
-                `ObjectAutomationRisk` table), and this project's own load history (`BulkOpsLog`'s
-                `LockErrorCount`) — see `batch_advisor.py` and `ROADMAP.md` #15. `none` submits one
-                unchunked job (Bulk API 2.0's own default without this framework's involvement); any
-                integer pins that exact value verbatim and is never second-guessed — a scripted value
-                always wins, same as every established migration tool's hardcode-it norm.)
-                `--run-book <path.xlsx> --run-book-tab <name>` (opt-in, both required together —
-                right after this load's own `BulkOpsLog` row is written, automatically calls the same
-                sync `update-migration-run-book` uses against that tab's Load phase. Not automatic by
-                default; `bulkops` shouldn't silently touch a spreadsheet file unless asked to. See
-                `ROADMAP.md` #16.)
-                `--engine python|sfdmu` (default `python`, this framework's own Bulk API 2.0 wrapper,
-                unchanged. `sfdmu` delegates to `forcedotcom/SFDX-Data-Move-Utility` — Salesforce's own
-                Apache-2.0 data migration plugin, `sf plugins install sfdmu` required — as an
-                alternate write engine, upsert/update only, requiring `--external-id`; a polymorphic
-                lookup field like `Task.WhatId` is skipped automatically rather than guessed at, load
-                it via the `python` engine as a separate pass instead. Id/Error land in the same SQL
-                Load table either way via the exact same writeback `bulk_op()` itself uses, so nothing
-                downstream needs to know or care which engine ran. See `sfdmu_bridge.py`'s module
-                docstring and README.md's "Two `bulkops` load engines" section for the confirmed-live
-                mechanics — including the non-obvious `Id,Name`/`externalId:Id`/`Readonly` declaration
-                an already-loaded parent object needs so its real, already-resolved Id passes through
-                to a child's lookup field instead of triggering SFDMU's own relationship re-matching.)
-- Retry a failed load:
-                `.venv/Scripts/python.exe cli.py bulkops-retry Contact_Load`
-                (copies only the failed rows — where `Error` is populated — from a load table or its
-                `_Result` table into a fresh `<table>_Retry` table. Does not call Salesforce itself;
-                resubmit the new table via a normal, separately-confirmed `bulkops` call once you've
-                looked at why those rows failed.)
-                `.venv/Scripts/python.exe cli.py triage-failures Contact_Load [--object Contact] [--mapping-path mapping/Migration_Mapping.xlsx]`
-                (roadmap #61: groups a load's failures by normalized error signature — the same
-                `_normalize_error_signature()` this session's ruthless review added to `bulkops.py`'s
-                `failure_error_counts`, record-Id tokens collapsed to `<ID>` so a recurring cause
-                counts as one signature, not one per row — and maps well-known, stable Salesforce Bulk
-                API error codes (`DUPLICATE_VALUE`, `REQUIRED_FIELD_MISSING`, `STRING_TOO_LONG`,
-                `INVALID_CROSS_REFERENCE_KEY`, `FIELD_CUSTOM_VALIDATION_EXCEPTION`,
-                `INVALID_FIELD_FOR_INSERT_UPDATE`, `MALFORMED_ID`, `UNABLE_TO_LOCK_ROW`) to a likely
-                root cause and which existing command to run next — turning "N rows failed" into "1
-                root cause, here's where to look" instead of reading raw error strings row by row.
-                Field-name extraction is only attempted for `REQUIRED_FIELD_MISSING`'s stable
-                "Required fields are missing: [Field1, Field2]" bracketed-list shape — every other
-                code gets guidance text only, never an invented field-position regex for a message
-                shape not directly confirmed against this project's own live data. `--object` (plus
-                `--mapping-path` for the `REQUIRED_FIELD_MISSING` check) enables two real, live
-                cross-references instead of static text alone: whether a missing-required field was
-                ever chosen as a Target Field in the mapping doc at all, and — for
-                `FIELD_CUSTOM_VALIDATION_EXCEPTION` — the active validation rules already on file in
-                `dbo.ObjectAutomationRisk` from a prior `analyze-org-risk` run. `DUPLICATE_VALUE`
-                deliberately gets no live cross-reference: `analyze-org-risk` only scans
-                ValidationRule/ApexTrigger/WorkflowRule/ApprovalProcess/FlowDefinitionView, never
-                Salesforce's separate DuplicateRule metadata type, so there's genuinely nothing on
-                file to check yet. Read-only, advisory only — never changes data, never re-runs
-                `bulkops` itself. `table` is the same load table or `<table>_Result` table
-                `bulkops-retry` already reads.)
-- Reset a Dev cycle: `.venv/Scripts/python.exe cli.py reset-dev-cycle --objects Account Contact
-                [--purge-org-where "Account:AccountNumber LIKE 'MOCKACCT-%'"] [--dry-run]`
-                (roadmap #63: codifies the manual reset ritual this project's own self-testing did by
-                hand, repeatedly, across earlier sessions — drops every `_Mock`/`_Mock_Adversarial`/
-                `_Load`/`_Load_Result`/`_Load_Retry`/`_Purge`/`_Purge_Result` table for the given
-                objects, and clears their `dbo.FieldProfile`/`FieldProfileValues` rows so the next
-                `profile-salesforce`/`profile-sql-table` call doesn't silently skip re-profiling a
-                rebuilt table (roadmap #47's own skip-if-already-profiled behavior would otherwise
-                misread a dropped-and-rebuilt table as still current). Always leaves
-                `sql/transformations/*.sql`, mapping docs, and every org-metadata-derived cache
-                (`dbo.ObjectAutomationRisk`, `dbo.RecordTypeMap`, `dbo.SourceRegistry`/
-                `AutoMapSuggestions`) untouched — those are either real, committed artifacts a reset
-                must never silently erase, or reflect the target org's own state, not this project's
-                iteration-specific mock/test data. `--purge-org-where Object:WHERE_CLAUSE` (repeatable)
-                optionally also purges matching org test data via the exact same `bulkops delete
-                --where` mechanism (#32) — a real Salesforce delete, so the Live-Org Write
-                Confirmation Rule (#2) applies in full; state the target org and get confirmation
-                before running this with `--purge-org-where`, same as any other delete. `--dry-run`
-                reports the matched org record count without deleting anything. Omit
-                `--purge-org-where` entirely for a purely mirror-DB reset with zero live-org risk.)
-- Row-count reconciliation: `.venv/Scripts/python.exe cli.py reconcile-load-counts Account Contact
-                [--mapping-path mapping/Migration_Mapping.xlsx] [--load-table Account=Account_LoadV2]`
-                (roadmap #64: a data-completeness auditor spanning the whole load order, not a
-                per-tool spot check — cross-checks the source table's row count, the Load table's row
-                count (did the transform's `JOIN`s/`WHERE` clauses silently drop rows it shouldn't
-                have?), and `bulkops`' most recent submitted/succeeded/failed counts from
-                `dbo.BulkOpsLog`, flagging anywhere they don't reconcile: the Load table doesn't exist
-                yet, it has fewer rows than the source, it's never been loaded via `bulkops`, or its
-                current row count no longer matches what the most recent `bulkops` run actually
-                submitted (a stale prior run — the Load table changed since). Source-table discovery
-                reads a mapping doc's own "Source Object:" header cell for that object's sheet (the
-                exact cell `generate-mapping-doc` writes) — real, not guessed; omit `--mapping-path` to
-                skip the source-count half and still get the Load/`bulkops` cross-check.
-                `--load-table Object=TableName` overrides the `<Object>_Load` default naming
-                convention. Entirely read-only, aggregating data every one of these tools already
-                produces.)
-- Migration readiness score: `.venv/Scripts/python.exe cli.py assess-migration-readiness Account
-                [--migration-key Account=MigrationID__c] [--mapping-path mapping/Migration_Mapping.xlsx]
-                [--load-table Account=Account_LoadV2]`
-                (roadmap #65: one aggregate go/no-go view per object instead of checking five
-                different tables/commands by hand — re-checks or re-presents every gate this framework
-                already enforces individually: the Parent-Batch Sort Rule (hard rule 6, only applies
-                when the object has an in-scope parent on file in `dbo.ObjectDependency`); the
-                Migration Key Integrity Rule (hard rule 7, re-runs `check-load-table-duplicate-keys`
-                live); the Live Migration Key Validation Rule (hard rule 12, re-runs
-                `validate-external-id` live against the real org); `analyze-org-risk` scan coverage
-                (the same "scanned vs. never scanned" signal `orchestrator.py`/`risk_analyzer.py`'s
-                `ScanCompleted` marker already makes checkable); `check-mapping-balance`, re-run live
-                against the mapping doc and the object's real transform script (auto-resolved via
-                `script_numbering.script_filename_for()`); Email Deliverability attestation (hard rule
-                9 — a human attestation, never auto-checked, so this can only confirm the flag was
-                recorded on the most recent `BulkOpsLog` insert/update/upsert row, not verify the live
-                Setup value — skipped, not failed, when the most recent run was a delete); and
-                row-count reconciliation (#64), folded in directly rather than reimplemented.
-                `--migration-key Object=Field` (repeatable) enables the two migration-key gates for
-                that object — left out, both report "not checked," never assumed clean.
-                `--mapping-path` enables `check-mapping-balance` and the reconciliation gate's
-                source-count half. `--load-table Object=TableName` overrides the `<Object>_Load`
-                default. A gate reported "not checked"/"not applicable" never blocks the overall
-                READY/NOT READY verdict by itself — only an explicit failure does; the point is
-                surfacing every gap, not treating an unchecked gate as silently clean. Read-only, no
-                new checks invented.)
-- Bulk load activity logging (opt-in, per schema — off by default, never
-                automatic; the same opt-in-per-database convention established
-                commercial migration tools use):
-                `.venv/Scripts/python.exe cli.py enable-bulkops-logging --schema dbo`
-                (creates `<schema>.BulkOpsLog`. From then on, every `bulkops` call
-                against that schema logs itself automatically — action, object,
-                source table, record counts, job count, the Email Deliverability
-                attestation, start/end/duration, OS user, and (roadmap #53) distinct
-                failure error messages and their counts as JSON in `FailureErrorCounts`
-                — needed by `orchestrator-assess`'s "seen before vs. novel error" check,
-                previously only visible in the writeback table, not the summary dict.
-                No per-call flag needed; presence of the table is the on/off switch,
-                same pattern as the `[Sort]` column and `key_column` writeback. Never
-                logs `query` reads. Each schema (source/staging/dbo/etc.) opts in
-                independently.)
-                `.venv/Scripts/python.exe cli.py disable-bulkops-logging --schema dbo`
-                (drops `<schema>.BulkOpsLog` — permanently discards that schema's
-                log history, so confirm before running.)
-- Org risk check: `.venv/Scripts/python.exe cli.py analyze-org-risk Account Contact Opportunity --mapping-path mapping/Migration_Mapping.xlsx`
-                (object-level automation inventory before a load — active validation rules, Apex
-                triggers, record-triggered Flows, legacy workflow rules, approval processes, via
-                live Tooling API + standard Query API calls. Not a field-level formula parser; the
-                one field-level signal it does give cheaply is cross-referencing an active
-                validation rule's `ErrorDisplayField` against the mapping doc's actually-migrated
-                target fields (`Migrate Data == Yes`) as a "direct hit." See `risk_analyzer.py`.
-                Also runs `child_record_risk.py`'s auto-generated-child-record check by default
-                (`--skip-child-shape-check` to opt out) — the Tooling API can't see managed-
-                package-internal automation (confirmed live, 2026-07-18: Nonprofit Cloud silently
-                auto-creates a `GiftCommitmentSchedule` for a Recurring-type `GiftCommitment`, no
-                visible Flow/trigger explains it), so this empirically diffs real, non-migrated
-                parent records in the target org against their real children instead — a
-                consistently high population rate across a real dependency edge (reused from
-                `load_order.build_dependency_edges()`, scoped to the object list given here) is
-                printed as "possible auto-generated child record" and written into
-                `dbo.ObjectAutomationRisk` as `CheckType = "AutoGeneratedChildRecord"`. Advisory
-                only — a normal 1:1 business relationship can also show a high rate; verify before
-                assuming an explicit insert for that child is unsafe or unnecessary. See
-                `okf/nonprofit-cloud/gift-commitment-schedule-auto-creation.md` for the real,
-                confirmed example this was built from.)
-- Orchestrator tier assessment (roadmap #53, `docs/ORCHESTRATOR_DESIGN.md` — Phase 1 only;
-                read-only, never changes how `bulkops` itself is gated):
-                `.venv/Scripts/python.exe cli.py orchestrator-assess Account [--log-id N] [--environment uat|prod]`
-                (deterministic tier for a completed `bulkops` run, resolved from a real
-                `BulkOpsLog` row — the most recent for that object if `--log-id` is omitted —
-                plus that object's own history and whether `analyze-org-risk` has been run for
-                it. Every tier has a name, printed alongside the number, never shown bare —
-                **Tier 1 (Continue Silently)**, **Tier 2 (Continue with Warning)**, **Tier 3
-                (Pause and Ask)**, **Tier 4 (Full Stop)** — see `orchestrator.TIER_NAMES`.
-                Prints every reason that fired, not just the tier. `assess_tier()` in
-                `orchestrator.py` is the actual logic — deliberately deterministic Python,
-                never model judgment, per the design doc's own core requirement. Also reports
-                `coarse_approval_eligible`: `False` whenever this object has no prior history
-                at all, regardless of how clean the current run looks — an object needs at
-                least one logged run before it's eligible for anything beyond Stage 1/shadow
-                mode. Two things a completed run genuinely can't reveal are deliberately not
-                checked here: a `bulk_op()` pre-flight failure and a missing Email
-                Deliverability attestation are both hard `raise`s before any summary exists at
-                all, so a real orchestrator loop treats that exception as **Tier 4 (Full
-                Stop)** directly, never reaching this command.)
-                `.venv/Scripts/python.exe cli.py enable-orchestrator-logging --schema dbo`
-                (creates `<schema>.OrchestratorRunEvent` — same opt-in, presence-of-table
-                convention as `BulkOpsLog`. Every `orchestrator-assess` call against that schema
-                then logs itself automatically: LogId, object, tier, reasons, environment,
-                timestamp, OS user. Never gates anything — purely the shadow-mode observation
-                record Stage 1 needs to eventually confirm the tier logic agreed with what
-                actually happened.)
-                `.venv/Scripts/python.exe cli.py disable-orchestrator-logging --schema dbo`
-                (drops `<schema>.OrchestratorRunEvent` — permanently discards that schema's
-                shadow-mode history, so confirm before running.)
-                Phase 2 (the actual coarse-approval mechanism — `bulkops-under-plan`, a
-                PreToolUse hook, `orchestrator-approve`) is explicitly not built yet — see the
-                design doc's own "Implementation status" note for why.
-- Batch-size recommendation (read-only, no Salesforce write — same rationale `bulkops` prints
-                automatically when `--batch-size` is left at `auto`):
-                `.venv/Scripts/python.exe cli.py recommend-batch-size Opportunity`
-                `.venv/Scripts/python.exe cli.py suggest-batch-heuristics`
-                (the second one reads this project's own converged load history and prints candidate
-                `reference/batch_size_heuristics.json` edits — never writes the file itself; a human
-                reviews and commits deliberately, same as adding a new alias to the field-synonym
-                thesaurus. See `batch_advisor.py` and `ROADMAP.md` #15.)
-- Migration Run Book:     `.venv/Scripts/python.exe cli.py generate-migration-run-book migration_run_book.xlsx --tab Dev1 --objects Account Contact`
-                (first tab for a new project, or any brand-new tab built straight from
-                `docs/MIGRATION_RUN_BOOK_TEMPLATE.md` rather than copied forward. Structure is a
-                direct mirror — reviewed for column names/layout only, never content — of a real
-                client's in-production migration-status tab: **one unified table** (Stage, Object,
-                Dependency, Status, Critical, Person Responsible, Begin Time, End Time, Execution
-                Time, JIRA Ticket Link, Notes, Total/Success/Failed Records, Success Percent, Error
-                Details) used for every phase, with phases marked by a single dark-navy banner row
-                rather than a repeated header. `--objects` auto-fills the Load phase from
-                `analyze-load-order`'s results — omit it for a blank Load phase to fill in by hand.
-                `Status` is a real dropdown (Not Started/N/A/In Process/Completed/Issue) driven by
-                live conditional-formatting colors (yellow/light green/dark green/red) that update
-                if a human changes the value later — same mechanism for `Critical = Yes` (a
-                different signal: ahead-of-time risk, not "something already went wrong"). Refuses
-                to overwrite an existing `--tab` name; a Migration Run Book tab holds live,
-                manually-entered operational history. Every tab also gets a fixed header block —
-                Project, Source/Target Environment, a Git Repository link, the exact commit/branch
-                and a link to the scripts at that commit, and (if configured) a link to the ticket
-                system's project — `--project`/`--source-env`/`--target-env`/`--ticket-url`/
-                `--ticket-label` override the auto-filled defaults (`SQL_DATABASE`/`SF_ORG_ALIAS`/
-                `TICKET_SYSTEM_URL`/`TICKET_SYSTEM_LABEL`). A matched Load-phase `Object` cell gets
-                a real hyperlink to that script at the pinned commit, when this repo has a GitHub
-                remote.)
-                `.venv/Scripts/python.exe cli.py add-migration-run-book-pass migration_run_book.xlsx --from-tab Dev1 --to-tab UAT --target-env UAT_ORG_ALIAS`
-                (a new pass over the same project — Dev → UAT → PROD — copies the source tab's
-                recipe columns forward (Stage/Object/Dependency/Critical/JIRA Ticket Link) and
-                blanks every result column (Status reset to "Not Started", not left empty) for the
-                fresh run. Also refuses to overwrite an existing `--to-tab`. Header carry-forward:
-                Project/Source Environment/ticket link carry forward from the source tab unless
-                overridden; Commit/Branch and the Scripts link always refresh to the *current* Git
-                state; Target Environment is never silently carried forward — Dev/UAT/PROD are
-                different orgs — pass `--target-env` explicitly. See `migration_run_book.py` and
-                `ROADMAP.md` #16 — `dbo.BulkOpsLog` (#14) can never see manual steps like disabling
-                CPQ automation, so every phase's result columns always need a human filling Person
-                Responsible/Begin-End Time; this is the framework's "bigger picture" document
-                spanning both manual and scripted steps.)
-                `.venv/Scripts/python.exe cli.py update-migration-run-book migration_run_book.xlsx --tab Dev1`
-                (pulls new `dbo.BulkOpsLog` rows into that tab's Load phase since the last sync —
-                fills in a still-pending auto-fill placeholder for that object if one exists,
-                otherwise inserts a new row (e.g. a retry) — never overwrites an already-resolved
-                row or anything a human typed in by hand. Tracks a per-tab "Last Synced Log Id"
-                watermark in the header block (never carried forward on a new pass) so re-running
-                is idempotent. Only `BulkOpsLog`'s own aggregate columns get pulled in — per-row
-                `Error Details` text isn't populated (would need the separate `_Result` writeback
-                table too). Also available as an opt-in automatic step on `bulkops` itself via
-                `--run-book`/`--run-book-tab` (same underlying sync, called right after that load's
-                own `BulkOpsLog` row is written) instead of running this separately. Since roadmap
-                #46, this same command **also** pulls new `dbo.SourceIngestionLog` rows into that
-                tab's **Pre-Migration** phase in the same call, via its own independent "Last Synced
-                Source Ingestion Log Id" watermark — the two syncs never interfere with each other.
-                Also available as an opt-in automatic step on `import-csv-directory` itself via its
-                own `--run-book`/`--run-book-tab`.)
-                `.venv/Scripts/python.exe cli.py generate-run-book-flowchart migration_run_book.xlsx --tab Dev1 --output run_book_flowchart.md`
-                (roadmap #52: a Mermaid process-flow diagram straight from that tab's own Stage/
-                Object/Dependency/Status columns — deliberately simple v1, per the user's own framing
-                ("for now, you would just create mermaid"): one `subgraph` per phase banner, one node
-                per step, edges parsed ONLY from the Dependency column's real "After: X, Y" text (the
-                same shape `_load_order_rows()` itself writes for the Load phase) — never fabricated
-                top-to-bottom chaining, so a Pre-/Post-Migration item with no known dependency renders
-                as a standalone node rather than a guessed link. A parent name is resolved against
-                every other row's Object value via `script_numbering.matches_token()` — the same
-                whole-token match already used elsewhere in this module, since a Load-phase Object
-                cell is often a script filename ("010_account_load.sql"), not the bare name a
-                Dependency cell names ("After: Account"). An unresolved dependency mention (no
-                matching row in this tab) is dropped, not guessed at, and reported back rather than
-                silently vanishing — kept distinct from a separate signal, `unparsed_dependency_notes`:
-                a non-blank Dependency cell that doesn't match the "After: X" shape at all (a plausible
-                hand-filled free-text note on a Pre-/Post-Migration row) is *also* reported back rather
-                than being silently indistinguishable from a genuine "no dependency" row. Node color
-                reuses the workbook's own Status conditional-formatting
-                palette, so the diagram agrees visually with the spreadsheet. Read-only, no Salesforce/
-                SQL connection needed — just the local `.xlsx` file. GitHub/most Markdown renderers
-                already render the fenced ` ```mermaid ` block natively; Lucid supports paste-to-import.
-                A polished, hand-styled diagram elsewhere remains a named future stretch, not part of
-                this v1.)
-                `.venv/Scripts/python.exe cli.py generate-pass-summary migration_run_book.xlsx --tab Dev1 --output pass_summary.md`
-                (roadmap #66: a plain-English, client-facing "here's what happened this pass" draft
-                pulled straight from that tab's own Load-phase results — object count, total/succeeded/
-                failed records per object — ready to send a client stakeholder instead of a raw
-                spreadsheet dump or a manually-written status email. Plain Markdown for v1, same "ship
-                the simple version, decide on polish later" discipline as `generate-run-book-flowchart`'s
-                own v1 framing; `solution_doc.py`'s `docxtpl` machinery is there to reuse later for a
-                client-ready Word format if that's ever wanted instead. `--load-table Object=TableName`
-                (repeatable) enables a plain-language root cause per failure signature via
-                `triage-failures` (#61) for that object instead of just a raw failed count — deliberately
-                never guessed: an object left out of `--load-table` just points at the Run Book's own
-                Notes/Error Details columns, since a Run Book row's Object cell may be a bare object
-                name or a script filename (`020_contact_load.sql`), neither of which reliably gives the
-                real SQL Load table name on its own.)
-- Validate migration key: `.venv/Scripts/python.exe cli.py validate-external-id Account Legacy_Id__c`
-                (confirms the named field is genuinely externalId+unique in the live org's
-                describe() before it's trusted as a migration key — rule 12. Read-only, no
-                confirmation needed, exits nonzero on failure. Not this framework's job to
-                create/fix the field; only to gate on it being correctly in place.)
-- Reference-record diff: `.venv/Scripts/python.exe cli.py compare-reference-record Account Account_Load
-                <RecordId> --migration-key Legacy_Id__c`
-                (roadmap #51: diffs a live, hand-created reference record — e.g. one an architect made
-                through the Salesforce UI to see how the org's real automation shapes it — against the
-                Load table row its migration key corresponds to, field by field. Matches by migration
-                key, not `Id`, since a hand-created record was never loaded through `bulkops` and so has
-                no `Id` in the Load table to match against — the key's value is read directly off the
-                live record. Read-only, a review/debugging aid only; never writes anything back.
-                `--key-column`/`--id-column`/`--error-column` override the Load table's writeback column
-                names if not the defaults.)
-- Look at SQL:  `sqlcmd -S localhost -E -d SF_Migration -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.Account;"`
-  `-E` = Windows auth; use `-U`/`-P` for a SQL login. Prefer a read-only login
-  for ad-hoc queries. On a SQLite-backed project, use the `sqlite3` CLI (or
-  any SQLite browser) against the relevant `<schema>.db` file under
-  `SQL_SQLITE_DIR` instead — there's no `sqlcmd` equivalent needed.
+Invoke every verb as `.venv/Scripts/python.exe cli.py <verb> ...` — call the
+venv Python directly (`cd` doesn't persist between bash calls). The prefix is
+omitted below for brevity. Read-only unless noted; each entry points at its
+ROADMAP # / module for the full rationale.
 
-**SQL backend**: `SQL_BACKEND` in `.env` is `mssql` (default), `sqlite`,
-or `postgresql` (roadmap #69, in progress — see below), per project —
-see `sql_client.py`/`sql_dialect.py`. SQLite mode uses
-`SQL_SQLITE_DIR` (a directory, one `<schema>.db` file per schema) and
-`SQL_SQLITE_SCHEMAS` (comma-separated, e.g. `dbo,source,staging`) instead
-of `SQL_SERVER`/`SQL_DATABASE`/the ODBC settings — every declared schema
-is `ATTACH DATABASE`'d under its own name on each connection, so an
-existing `schema=` argument anywhere in this codebase already means the
-right thing on either backend, no per-call-site changes needed.
-PostgreSQL mode (SQLAlchemy + `psycopg2-binary`) reuses `SQL_SERVER`/
-`SQL_DATABASE`/`SQL_UID`/`SQL_PWD` directly (already backend-generic
-names) plus two Postgres-only settings, `SQL_PORT` (default `5432`) and
-`SQL_POSTGRES_SSLMODE` (default `prefer`). The actual load engine —
-`replicate`, `bulkops` (writeback, activity logging, retry), hard rules
-6/7's tooling, and `import-csv-directory`'s CSV staging — works on all
-three backends. `risk_analyzer.py`, `migration_run_book.py`,
-`mapping_doc.py`, and `snowfakery_data.py` have also been ported to
-`sql_dialect.py` (orchestrator Phase 1 needed the first of those; the
-others followed the same pattern). `mock_data.py`'s own table-DDL step
-(`create_mock_table()`) was ported too, once roadmap #62's
-`adversarial_mock_data.py` needed it to be real-SQLite-testable — the rest
-of `mock_data.py` (the Mockaroo schema-derivation logic) never touched SQL
-directly to begin with. `load_order.py`'s own `write_to_sql()` was ported
-the same way, once roadmap #59's `migration_brief.py` needed
-`analyze_load_order()` to be real-SQLite-testable. The SQL-Server-only
-cleansing/matching function library (`sql/functions/cleansing|matching|lookups`)
-and the remaining data-architect tools (`profiling.py`, `auto_mapper.py`,
-`solution_doc.py`, `parquet_import.py`, `record_types.py`,
-`reference_record.py`) are **SQL-Server-only for now** — a deliberate
-scope boundary, not an oversight; port one incrementally via the same
-`sql_dialect.py` helpers whenever a real SQLite or PostgreSQL project
-actually needs it. The private, mssql-or-sqlite-only column-type helper
-that used to bypass `sql_dialect.py` in `bulkops.py`/`orchestrator.py`/
-`source_ingestion.py` (and, found in the same pass, `load_order.py`/
-`risk_analyzer.py` too) is fixed — all five now use a shared
-`SqlDialect.pick_type()`, verified against a real Postgres instance,
-including Hard Rule 6's sort-column UPDATE (Postgres has neither
-SQLite's `rowid` nor T-SQL's updatable-CTE syntax, so this needed a real
-third branch, not just a type swap) and the column-name case-folding
-gap that live testing turned up along the way (Postgres folds an
-unquoted reference to lowercase — both at `CREATE TABLE` and in a query's
-own result set — while SQL Server/SQLite don't; `sql_dialect.lower_keys()`
-is the fix for the read side, lowercasing every key of a row once instead
-of accessing each field by exact case). `migration_run_book.py`'s three
-affected functions (`_load_order_rows()`, `sync_run_book_from_log()`,
-`sync_source_ingestion_to_run_book()`) are fixed the same way —
-`orchestrator.py`'s own `_row_to_current()`/`assess_from_log()` also both
-call `lower_keys()` now. `readiness.py`'s `_email_deliverability_gate()`
-and `reconciliation.py`'s `_latest_bulkops_row()`/
-`reconcile_load_counts()` (including the actual stale-prior-run
-comparison, not just a display value) are fixed the same way.
-`failure_triage.py`'s `_validation_rule_candidates()` is fixed too, plus
-one more real bug in the same family found along the way and fixed in
-both `batch_advisor.py` and `failure_triage.py`: both hardcoded
-`IsActive = 1` as a SQL literal against a genuine Postgres `BOOLEAN`
-column, which Postgres rejects outright (`operator does not exist:
-boolean = integer`) — fixed by binding `True` as a real query parameter
-instead. That in turn surfaced a bug in `PostgresDialect.column_exists()`
-itself (not a caller): it compared column names by exact case, which
-works for table names (always quoted via `qualify()`) but not for the
-columns this codebase creates bare almost everywhere — fixed with
-`LOWER(column_name) = LOWER(:column)`.
+**Discovery / bootstrap**
+- `bootstrap-project brief.yaml run_book.xlsx --tab Dev1` — mechanical first pass from a discovery YAML brief: confirms each named object via `describe()`, runs `analyze-load-order`, scaffolds a Run Book. Never guesses mapping. (ROADMAP #59; `migration_brief.py`)
+- `generate-discovery-checklist Account Contact [--output f.md]` — generates the discovery questions to *ask*, from live org signals (validation rules, RecordTypes, out-of-scope lookups). No mirror DB needed. (ROADMAP #60; `discovery_checklist.py`)
 
-A repo-wide grep at that point concluded the case-folding/boolean-literal
-patterns were "fully closed" — **a ruthless multi-angle code-review pass
-found that claim was wrong.** `load_table_prep.py` (Hard Rules 6/7's own
-implementation) had the identical bug, missed by every prior pass because
-its return value is a *public, documented Pascal-case contract* `cli.py`
-reads by exact key, not an internal row read — fixed the opposite way
-from everywhere else, by wrapping the SQL aliases themselves in
-`d.quote_ident()` (matching `RowCount`/`Sort`'s existing convention in
-that file) rather than lowering the reader, so `cli.py`/`readiness.py`
-needed no changes. Verified live with a genuine non-contiguous Sort range
-and a genuine duplicate key, not just the clean path. The same review
-also found `source_ingestion.py`'s generated `.sql` script hardcoded
-"SQLite" regardless of actual backend (fixed, and `import-csv-directory`
-is now live-verified against Postgres end to end, both new-file and
-reused-on-a-later-pass), doc drift in `docs/SECURITY_OVERVIEW.md`/
-`docs/DOCKER.md`/`README.md` (all fixed), and two redundant double-row-
-lowering passes (`orchestrator.py`, `migration_run_book.py`) — the latter
-fix also removed `row_get()` entirely (one caller, itself redundant;
-`lower_keys()` alone is now the one canonical helper). Also added: real
-Postgres integration test coverage (`tests/conftest.py`'s `postgres_engine`
-fixture, `tests/test_load_table_prep_postgres_integration.py`, and a
-`postgres:16` service in `.github/workflows/tests.yml`) — every bug in
-this whole chain was found by a human manually running Postgres in a
-throwaway container; this is the first of that verification to become an
-automated, permanent regression guard instead of a one-time check.
+**Inspect org** (read-only)
+- `list-objects` · `describe Account` · `dump-describe Account`
+- `sample-reference-records Account --ids <ids> | --where "<SOQL>" | --limit N` — real field-level shape of *working* records (populated-N-of-M, sample values vs `describe()` flags) + automation summary. Reach for it anytime. (ROADMAP #78; `sample_reference_records.py`)
+- `record-counts Account Contact [--all-objects]` — fast per-object counts via `/limits/recordCount`; approximate/cached, not a load-verification substitute. (ROADMAP #41)
 
-**The actual `docker-compose.yml` Postgres service is now built too**
-(a `postgres`/`app-postgres` profile alongside the default `mssql` one
-— see "Where things live" below and `docs/DOCKER.md`). Running it live
-surfaced one more genuine bug beyond everything the throwaway-container
-testing above already found: `replicate.py` wrote every Salesforce
-boolean field as a Python `0`/`1` integer, which SQL Server's `BIT` and
-SQLite's `INTEGER` both tolerate but Postgres's native `BOOLEAN` column
-rejects outright — fixed to write real Python `True`/`False`, which all
-three backends' drivers adapt correctly. **A full Docker+Snowfakery+full-methodology end-to-end pass against a live
-org has since been run and confirmed** (2026-07-14, same sample data recipe
-and org as the original SQL Server pass, `D360_PLAYGROUND`): Snowfakery
-mock data generation, four new Postgres-flavored transform scripts
-(`sql/transformations/050-080_*_postgres.sql`), Hard Rules 6/7/12, and real
-`bulkops` loads — Account 5/5, Contact 40/40, Opportunity 507/520 (13
-failures were a pre-existing key collision with the original SQL Server
-pass reusing the same org, not a defect), Task 27/27. See `ROADMAP.md` #69
-for the full account, including two more real bugs this pass found and
-fixed (a boolean-coercion bug in `snowfakery_data.py`, and a positional-arg
-bug in `bulkops.py`'s `upsert()` call — both backend-independent, not
-Postgres-specific).
+**Query**
+- `query "SELECT ... LIMIT 10" [--all] [--csv path] [--excel path]` — ad hoc SOQL; basic DLO/DMO lookups work here too. (ROADMAP #18)
 
-See `ROADMAP.md` #69 for the full, dated account of everything above,
-including a structural bug found and fixed along the way, where an
-earlier edit had accidentally stripped `SqlDialect`'s own
-`@abstractmethod` enforcement without breaking any test (every concrete
-dialect still fully implements its own methods independently, so it was
-invisible at runtime).
+**Data Cloud (D360)** (`data_cloud.py`; ROADMAP #18)
+- `data-cloud-query "SELECT ... FROM SomeDMO"` — complex Data Cloud SQL (separate tenant token).
+- `list-calculated-insights` · `query-calculated-insight <__cio>` · `data-cloud-status <type> [Name]` · `list-data-graphs` — all via core-org SOQL, no tenant token.
+- `data-cloud-profile <DMO> "[field=value]"` — Unified Profile lookup by required equality filter; `--fields/--limit/--offset/--orderby`.
 
-Matching slash-command skills exist for the read-only ones — `/list-objects`,
-`/describe`, `/dump-describe`, `/record-counts`, `/query`, `/profile`, `/analyze-load-order`,
-`/generate-mock-data`, `/generate-related-mock-data`, `/generate-mapping-doc`,
-`/check-mapping-balance`, `/auto-map`, `/generate-solution-doc`,
-`/bulkops-retry`, `/analyze-org-risk`, `/import-parquet`, `/replicate`,
-`/replicate-subset`,
-`/build-load`, `/validate-load`, `/status`, `/data-cloud-query`,
-`/data-cloud-status`, `/data-cloud-profile`, `/list-calculated-insights`,
-`/query-calculated-insight`, `/list-data-graphs`, `/recommend-batch-size`,
-`/suggest-batch-heuristics`, `/generate-migration-run-book`, `/add-migration-run-book-pass`, `/update-migration-run-book`,
-`/validate-external-id`, `/import-csv-directory`, `/check-required-mappings`,
-`/compare-reference-record`, `/sample-reference-records`, `/resolve-record-types`, `/generate-target-data-model`,
-`/generate-source-data-model`, `/add-bulk-load-sort-column`,
-`/check-load-table-duplicate-keys`, `/next-script-number`, `/set-mapping-script`,
-`/check-validators`, `/orchestrator-assess`, `/generate-run-book-flowchart`,
-`/triage-failures`, `/generate-adversarial-mock-data`, `/generate-pass-summary`,
-`/reconcile-load-counts`, `/assess-migration-readiness`, `/bootstrap-project`,
-`/generate-discovery-checklist`, `/gather-okf`, `/build-data-shape-profile`,
-`/show-data-shape`, `/generalize-data-shape`
-(`.claude/commands/*.md`). These are the project's "skills": pre-scoped,
-no-prompt capabilities for anyone who opens this repo in Claude Code, so
-asking for one of these doesn't require re-deriving how to do it from
-scratch each time. They're an efficiency layer, not a boundary — general
-reasoning/coding (Apex, LWC, architecture work, anything else) is still
-available even when there's no dedicated skill for it.
+**Replicate (org → mirror DB)**
+- `replicate Account [--where "..."] [--raw]`
+- `replicate-subset Account Contact Opportunity --where "..." --limit 50` — root subset + every named object constrained to rows whose in-scope parents this run just replicated. (ROADMAP #34; `subset_replication.py`)
+
+**Import files (→ mirror DB)**
+- `import-parquet file.parquet SourceAccounts [--append]` — Parquet → typed SQL table. (`parquet_import.py`; SQL-Server-only)
+- `import-csv-directory dir --ticket PROJ-123 [--rebuild Table ...] [--run-book path --run-book-tab Dev1]` — stages each CSV as all-`NVARCHAR` via a numbered, git-committed script under `sql/source_ingestion/`; cross-pass column-order drift hard-stops that file until `--rebuild`. (ROADMAP #46; `source_ingestion.py`)
+- `enable-source-ingestion-logging --schema dbo` · `disable-source-ingestion-logging --schema dbo` — opt-in `<schema>.SourceIngestionLog`.
+
+**Profile** (ROADMAP #47; `profiling.py`)
+- `profile-salesforce Account` (live aggregate SOQL) · `profile-sql-table Account` · `export-profile-excel f.xlsx` — skips already-profiled by default; `--reprofile` forces a refresh.
+
+**Load order / RecordTypes**
+- `analyze-load-order Account Contact Opportunity ...`
+- `resolve-record-types Account` — writes target RecordType Id/DeveloperName into `dbo.RecordTypeMap` for the transform to `JOIN` by `DeveloperName` (RecordType Resolution Rule #15). (ROADMAP #36)
+
+**Data model diagrams** (Mermaid SDMN-style; ROADMAP #57; `data_model_diagram.py`)
+- `generate-target-data-model Account Contact ... --output m.md [--mapping-path ...]` — relationships from live `describe()`, real.
+- `generate-source-data-model --subject-area "Name:T1,T2" --output-dir models/ [--mapping-path ...]` — staging tables; relationships are naming-convention guesses, labeled `(guessed)`.
+
+**Mock data** (never touches Salesforce)
+- `generate-mock-data Account --count 50` — Mockaroo (needs `MOCKAROO_API_KEY`); writes `<Object>_Mock`. (`mock_data.py`)
+- `generate-related-mock-data Account Contact --count Account=10 --count Contact=3` — Snowfakery, relationship-aware; `NAME=N-M` randomizes per-parent count; recipe to `_stage/`. (`snowfakery_data.py`)
+- `generate-adversarial-mock-data Account --count 50 --scenario <s>:<field>:<rows> ...` — corrupts rows on purpose to provoke known Bulk API failure classes (`duplicate_key`/`oversized_string`/`missing_required`/`invalid_picklist`/`bad_reference`), validated vs `describe()`. Writes `<Object>_Mock_Adversarial` with a `REF_` scenario column. (ROADMAP #62; `adversarial_mock_data.py`)
+
+**Mapping** (human-owned — Hard Rule 11; `mapping_doc.py`/`auto_mapper.py`)
+- `generate-mapping-doc Account mapping/Migration_Mapping.xlsx SourceAccounts` — one tab per object (reuse the same workbook path); one row per source field, blank Target block; auto-fills profiling %.
+- `set-mapping-script Account mapping/...xlsx [--dir source_ingestion]` — fills the sheet's Transform Script header (auto-resolved, GitHub-linked); run only *after* the transform exists.
+- `check-mapping-balance Account mapping/...xlsx sql/transformations/<NNN>_account_load.sql` — diffs Target block vs the transform's `INSERT` list both ways; flags invalid fields + Rule-14 duplicate targets.
+- `check-required-mappings Account mapping/...xlsx` — flags `Migrate=Yes` rows with no Target; suggests via `auto-map` matching (read-only). (ROADMAP #49)
+- `auto-map Account mapping/...xlsx SourceAccounts` — first-pass suggestions (name/synonym/fuzzy) gated by profiling data; never overwrites a human's Target; needs the source profiled. (ROADMAP #47/#48)
+
+**Solution doc**
+- `generate-solution-doc Solution.docx Account Contact ... --mapping-path ...` — Word design doc from load-order + mapping + profiling; `--company/--project/--prepared-by/--appendix/--template`. (`solution_doc.py`)
+
+**Load-table pre-flight** (Hard Rules 6/7; `load_table_prep.py`; either backend; both validate the column exists first)
+- `add-bulk-load-sort-column Account_Load AccountId [--schema dbo]` (Parent-Batch Sort Rule #6)
+- `check-load-table-duplicate-keys Account_Load Legacy_Id__c [--schema dbo]` (Migration Key Integrity Rule #7; exits nonzero on findings)
+
+**Load — WRITES TO SALESFORCE** (confirm the target org first — Live-Org Write Confirmation Rule #2; `bulkops.py`)
+- `bulkops Account upsert Account_Load --external-id Legacy_Id__c --email-deliverability system-email-only` — insert/upsert **require** `--email-deliverability no-access|system-email-only|all-email` (Email Deliverability Attestation Rule #9); `all-email` also needs `--confirm-external-email-risk`. Every sent column is pre-flight-checked against live `describe()`; `REF_`-prefixed columns are never sent (Rule 13; `--ref-prefix` overrides).
+- `bulkops Account delete Account_Purge --external-id Legacy_Id__c` — delete by external id (resolved to real Ids first).
+- `bulkops Account delete --where "<SOQL>" [--dry-run] [--hard-delete]` — purge by filter into `<Object>_Purge`; run `--dry-run` first; soft delete is default; `--hard-delete` is **irreversible** + needs the Bulk API Hard Delete perm. No delete-all default — write `"Id != null"` explicitly. Rule 2 applies. (ROADMAP #32/#84)
+- Flags: `--batch-size auto|none|<N>` (default `auto` dynamic recommendation; a pinned integer always wins — ROADMAP #15) · `--run-book <path> --run-book-tab <name>` (opt-in Load-phase sync — #16) · `--engine python|sfdmu` (sfdmu = SFDX-Data-Move-Utility, upsert/update only, needs `--external-id`; `sfdmu_bridge.py` + README).
+- `bulkops-retry Contact_Load` — copies only failed rows to `<table>_Retry`; does not call Salesforce (resubmit separately).
+- `triage-failures Contact_Load [--object Contact] [--mapping-path ...]` — groups failures by normalized error signature, maps known Bulk API codes to likely cause + next command; advisory. (ROADMAP #61; `failure_triage.py`)
+
+**Reset / reconcile / readiness**
+- `reset-dev-cycle --objects Account Contact [--purge-org-where "Obj:WHERE"] [--dry-run]` — drops this project's `_Mock`/`_Load`/`_Purge` tables + clears their profiling rows (mirror-DB-only, safe). `--purge-org-where` also deletes matching org test data via `bulkops delete` (Rule 2 applies — confirm the org). (ROADMAP #63; `dev_cycle.py`)
+- `reconcile-load-counts Account ... [--mapping-path ...] [--load-table Obj=Table]` — cross-checks source vs Load vs `bulkops` counts. (ROADMAP #64; `reconciliation.py`)
+- `assess-migration-readiness Account [--migration-key Obj=Field] [--mapping-path ...] [--load-table Obj=Table]` — one go/no-go view re-checking Rules 6/7/12, org-risk coverage, mapping balance, Email Deliverability, reconciliation. (ROADMAP #65; `readiness.py`)
+
+**Activity logging** (opt-in per schema; presence of the table is the on/off switch)
+- `enable-bulkops-logging --schema dbo` · `disable-bulkops-logging --schema dbo` — `<schema>.BulkOpsLog`; every `bulkops` call then logs itself (never logs `query` reads). `disable` drops history — confirm.
+
+**Org risk / orchestrator / batch size**
+- `analyze-org-risk Account Contact ... [--mapping-path ...] [--skip-child-shape-check]` — active validation rules/triggers/Flows/workflows/approvals via Tooling API, plus `child_record_risk.py`'s empirical auto-generated-child detection (managed-package automation the Tooling API can't see). Advisory. (`risk_analyzer.py`)
+- `orchestrator-assess Account [--log-id N] [--environment uat|prod]` — deterministic Tier 1–4 for a completed `bulkops` run (Phase 1 only, read-only, never gates `bulkops`). (ROADMAP #53; `docs/ORCHESTRATOR_DESIGN.md`; `orchestrator.py`)
+- `enable-orchestrator-logging --schema dbo` · `disable-orchestrator-logging --schema dbo` — `<schema>.OrchestratorRunEvent` shadow-mode log.
+- `recommend-batch-size Opportunity` · `suggest-batch-heuristics` — batch-size recommendation / candidate `reference/batch_size_heuristics.json` edits (never writes the file). (ROADMAP #15; `batch_advisor.py`)
+
+**Migration Run Book** (ROADMAP #16; `migration_run_book.py`; `--script-dir` on the generate/pass/update verbs points script resolution at an attempts workspace)
+- `generate-migration-run-book run_book.xlsx --tab Dev1 --objects Account Contact [--project/--source-env/--target-env/--ticket-url/--ticket-label]` — first/new tab from `docs/MIGRATION_RUN_BOOK_TEMPLATE.md`; `--objects` auto-fills the Load phase; refuses to overwrite an existing tab.
+- `add-migration-run-book-pass run_book.xlsx --from-tab Dev1 --to-tab UAT --target-env UAT_ALIAS` — new pass; copies recipe columns, blanks results; `--target-env` never carried forward.
+- `update-migration-run-book run_book.xlsx --tab Dev1` — pulls new `BulkOpsLog` (Load) + `SourceIngestionLog` (Pre-Migration) rows since the last watermark; idempotent; never overwrites human entries.
+- `generate-run-book-flowchart run_book.xlsx --tab Dev1 --output m.md` — Mermaid process flow from Stage/Object/Dependency/Status; edges only from "After: X" text. (ROADMAP #52)
+- `generate-pass-summary run_book.xlsx --tab Dev1 --output s.md [--load-table Obj=Table]` — plain-English client-facing pass summary; `--load-table` adds a `triage-failures` root cause. (ROADMAP #66; `pass_summary.py`)
+
+**Validate / diff**
+- `validate-external-id Account Legacy_Id__c` — confirms the field is externalId+unique live (Live Migration Key Validation Rule #12); exits nonzero on failure.
+- `compare-reference-record Account Account_Load <RecordId> --migration-key Legacy_Id__c [--key-column/--id-column/--error-column]` — diffs a live hand-created record vs its Load row by migration key. (ROADMAP #51; `reference_record.py`)
+
+**Read SQL directly** (read-only): `sqlcmd -S localhost -E -d SF_Migration -Q "..."` (`-E` = Windows auth; prefer a read-only login). On a SQLite project, use the `sqlite3` CLI against the `<schema>.db` under `SQL_SQLITE_DIR`.
+
+### SQL backend
+`SQL_BACKEND` in `.env` is `mssql` (default), `sqlite`, or `postgresql`, per
+project (`sql_client.py`/`sql_dialect.py`). SQLite uses `SQL_SQLITE_DIR` +
+`SQL_SQLITE_SCHEMAS` (one `<schema>.db` per schema, each `ATTACH`ed);
+PostgreSQL reuses `SQL_SERVER`/`SQL_DATABASE`/`SQL_UID`/`SQL_PWD` plus
+`SQL_PORT` (5432) and `SQL_POSTGRES_SSLMODE` (`prefer`). The load engine
+(`replicate`, `bulkops`, hard rules 6/7, `import-csv-directory`) works on all
+three; several data-architect tools (`profiling`, `auto_mapper`,
+`solution_doc`, `parquet_import`, `record_types`, `reference_record`) and the
+`sql/functions/` library are **SQL-Server-only for now** — port incrementally
+via `sql_dialect.py` when a real SQLite/Postgres project needs it. The full
+dated account of the Postgres port — every bug found and fixed, the live
+end-to-end verification, the `postgres:16` CI service — is in **ROADMAP #69**,
+not repeated here.
+
+### Slash-command skills
+Every read-only command above also has a matching `/verb` slash-command skill
+under `.claude/commands/*.md` (the harness lists them in-session). They're a
+pre-scoped efficiency layer, **not a boundary** — general reasoning/coding
+(Apex, LWC, architecture, anything else) is always available even with no
+dedicated skill. When you add a new command, add its skill wrapper too.
 
 ## Hard rules
 Each rule keeps its number for stable cross-referencing elsewhere in this
