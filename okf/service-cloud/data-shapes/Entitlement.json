@@ -1,0 +1,116 @@
+{
+  "object": "Entitlement",
+  "cloud": "service-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-08-02",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      },
+      {
+        "name": "AccountId",
+        "type": "reference",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "CreatedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "CreatedBy"
+      },
+      {
+        "field": "LastModifiedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "LastModifiedBy"
+      },
+      {
+        "field": "AccountId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Account"
+      },
+      {
+        "field": "ServiceContractId",
+        "references": [
+          "ServiceContract"
+        ],
+        "relationshipName": "ServiceContract"
+      },
+      {
+        "field": "ContractLineItemId",
+        "references": [
+          "ContractLineItem"
+        ],
+        "relationshipName": "ContractLineItem"
+      },
+      {
+        "field": "AssetId",
+        "references": [
+          "Asset"
+        ],
+        "relationshipName": "Asset"
+      },
+      {
+        "field": "SlaProcessId",
+        "references": [
+          "SlaProcess"
+        ],
+        "relationshipName": "SlaProcess"
+      },
+      {
+        "field": "BusinessHoursId",
+        "references": [
+          "BusinessHours"
+        ],
+        "relationshipName": "BusinessHours"
+      },
+      {
+        "field": "SvcApptBookingWindowsId",
+        "references": [
+          "OperatingHours"
+        ],
+        "relationshipName": "SvcApptBookingWindows"
+      },
+      {
+        "field": "AssetWarrantyId",
+        "references": [
+          "AssetWarranty"
+        ],
+        "relationshipName": "AssetWarranty"
+      },
+      {
+        "field": "LocationId",
+        "references": [
+          "Location"
+        ],
+        "relationshipName": "Location"
+      }
+    ],
+    "date_range_pairs": [
+      {
+        "start": "StartDate",
+        "end": "EndDate"
+      }
+    ]
+  },
+  "auto_generated_children": []
+}

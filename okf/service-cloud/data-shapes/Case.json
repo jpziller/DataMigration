@@ -1,0 +1,147 @@
+{
+  "object": "Case",
+  "cloud": "service-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-08-02",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "BusinessHoursId",
+        "type": "reference",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "ContactId",
+        "references": [
+          "Contact"
+        ],
+        "relationshipName": "Contact"
+      },
+      {
+        "field": "AccountId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Account"
+      },
+      {
+        "field": "AssetId",
+        "references": [
+          "Asset"
+        ],
+        "relationshipName": "Asset"
+      },
+      {
+        "field": "ProductId",
+        "references": [
+          "Product2"
+        ],
+        "relationshipName": "Product"
+      },
+      {
+        "field": "EntitlementId",
+        "references": [
+          "Entitlement"
+        ],
+        "relationshipName": "Entitlement"
+      },
+      {
+        "field": "FeedItemId",
+        "references": [
+          "FeedItem"
+        ],
+        "relationshipName": "FeedItem"
+      },
+      {
+        "field": "SourceId",
+        "references": [
+          "BusinessMilestone",
+          "EmailMessage",
+          "InsurancePolicy",
+          "LiveChatTranscript",
+          "MessagingSession",
+          "PersonLifeEvent",
+          "ResidentialLoanApplication",
+          "SOSSession",
+          "SocialPost",
+          "SvcCatalogRequest"
+        ],
+        "relationshipName": "Source"
+      },
+      {
+        "field": "BusinessHoursId",
+        "references": [
+          "BusinessHours"
+        ],
+        "relationshipName": "BusinessHours"
+      },
+      {
+        "field": "ParentId",
+        "references": [
+          "Case"
+        ],
+        "relationshipName": "Parent"
+      },
+      {
+        "field": "RecordTypeId",
+        "references": [
+          "RecordType"
+        ],
+        "relationshipName": "RecordType"
+      },
+      {
+        "field": "OwnerId",
+        "references": [
+          "Group",
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "CreatedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "CreatedBy"
+      },
+      {
+        "field": "LastModifiedById",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "LastModifiedBy"
+      },
+      {
+        "field": "AssetWarrantyId",
+        "references": [
+          "AssetWarranty"
+        ],
+        "relationshipName": "AssetWarranty"
+      },
+      {
+        "field": "ServiceContractId",
+        "references": [
+          "ServiceContract"
+        ],
+        "relationshipName": "ServiceContract"
+      },
+      {
+        "field": "inov8__PMT_Project__c",
+        "references": [
+          "inov8__PMT_Project__c"
+        ],
+        "relationshipName": "inov8__PMT_Project__r"
+      }
+    ],
+    "date_range_pairs": []
+  },
+  "auto_generated_children": []
+}

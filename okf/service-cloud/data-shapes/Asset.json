@@ -1,0 +1,100 @@
+{
+  "object": "Asset",
+  "cloud": "service-cloud",
+  "kind": "cloud-data-shape",
+  "generalized": "2026-08-02",
+  "note": "Cloud-level data shape, generalized from a live org profile with org-specific detail removed (org custom fields, this org's active automation counts, field population, and numeric auto-generation rates). Structure, auto-generated-child relationships, and date-range pairs are platform-standard and portable; automation and population are org config/data -- run analyze-org-risk and profile-salesforce against your own org.",
+  "structure": {
+    "custom_object": false,
+    "key_fields": [
+      {
+        "name": "Name",
+        "type": "string",
+        "required": true,
+        "createable": true,
+        "updateable": true,
+        "defaultedOnCreate": false,
+        "externalId": false
+      }
+    ],
+    "parent_lookups": [
+      {
+        "field": "ContactId",
+        "references": [
+          "Contact"
+        ],
+        "relationshipName": "Contact"
+      },
+      {
+        "field": "AccountId",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "Account"
+      },
+      {
+        "field": "ParentId",
+        "references": [
+          "Asset"
+        ],
+        "relationshipName": "Parent"
+      },
+      {
+        "field": "Product2Id",
+        "references": [
+          "Product2"
+        ],
+        "relationshipName": "Product2"
+      },
+      {
+        "field": "OwnerId",
+        "references": [
+          "User"
+        ],
+        "relationshipName": "Owner"
+      },
+      {
+        "field": "LocationId",
+        "references": [
+          "Location"
+        ],
+        "relationshipName": "Location"
+      },
+      {
+        "field": "AssetProvidedById",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "AssetProvidedBy"
+      },
+      {
+        "field": "AssetServicedById",
+        "references": [
+          "Account"
+        ],
+        "relationshipName": "AssetServicedBy"
+      },
+      {
+        "field": "SalesStoreId",
+        "references": [
+          "RetailStore",
+          "WebStore"
+        ],
+        "relationshipName": "SalesStore"
+      }
+    ],
+    "date_range_pairs": [
+      {
+        "start": "LifecycleStartDate",
+        "end": "LifecycleEndDate"
+      },
+      {
+        "start": "UptimeRecordStart",
+        "end": "UptimeRecordEnd"
+      }
+    ]
+  },
+  "auto_generated_children": [
+    "Asset"
+  ]
+}
