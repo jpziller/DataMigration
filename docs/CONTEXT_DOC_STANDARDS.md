@@ -80,6 +80,14 @@ executor must verify all of these before proposing a diff:
 5. **Behavior semantics are unchanged.** If a compression would alter what an
    agent does, it's too aggressive — stop.
 
+These invariants are also enforced **continuously in CI** by
+`tests/test_claude_md_conformance.py` — command completeness (#3), hard-rule
+numbering (#1), safety-rule presence (#2), and a word ceiling (the "keep it
+lean" trigger). A future edit that drops a command, renumbers/removes a rule,
+or lets the file balloon fails CI, not just a skill run. The word ceiling is a
+deliberate forcing function: when a genuinely load-bearing addition pushes past
+it, run `/optimize-claude-md` rather than quietly raising the ceiling.
+
 ## The process a run performs
 
 1. **Baseline** — measure `CLAUDE.md` (lines / words / est-tokens, and per
