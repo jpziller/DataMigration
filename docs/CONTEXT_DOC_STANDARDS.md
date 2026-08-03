@@ -110,6 +110,7 @@ Append one row per run so drift is visible over time.
 | Date | Trigger | Before (words / est-tokens) | After | Δ | Notes |
 |---|---|---|---|---|---|
 | 2026-08-01 | baseline (pre-skill) | 15,525 / ~20k | — | — | Canonical commands section is ~half the file (~800 lines); first trim target |
+| 2026-08-02 | first trim (Stage 2) | 15,551 / ~20k | 9,284 / ~12k | −40% | Canonical commands compressed (~798 → ~120 lines); rationale relocated to the cited ROADMAP #/module homes; all 59 commands + safety directives preserved. Hard rules and every other section untouched |
 
 *(est-tokens ≈ words × 1.3, a rough guide, not exact.)*
 
